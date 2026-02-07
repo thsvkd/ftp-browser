@@ -1,0 +1,179 @@
+import { create } from 'zustand'
+import type {
+  FtpConnectPayload,
+  FtpFileEntry,
+  FtpConnectionState,
+  ConnectionStatus
+} from '@shared/types/ftp'
+import type { IpcResult } from '@shared/types/ipc'
+
+interface FtpListData {
+  path: string
+  entries: FtpFileEntry[]
+}
+
+interface FtpStore {
+  // Connection state
+  connectionStatus: ConnectionStatus
+  host: string
+  port: number
+  error: string | null
+
+  // Directory state
+  currentPath: string
+  entries: FtpFileEntry[]
+  loading: boolean
+
+  // Path history
+  history: string[]
+  historyIndex: number
+
+  // Actions
+  connect: (config: FtpConnectPayload, initialPath?: string) => Promise<boolean>
+  disconnect: () => Promise<void>
+  navigateTo: (path: string) => Promise<void>
+  navigateUp: () => Promise<void>
+  goBack: () => Promise<void>
+  goForward: () => Promise<void>
+  refresh: () => Promise<void>
+  setConnectionState: (state: FtpConnectionState) => void
+}
+
+export const useFtpStore = create<FtpStore>((set, get) => ({
+  connectionStatus: 'disconnected',
+  host: '',
+  port: 21,
+  error: null,
+  currentPath: '/',
+  entries: [],
+  loading: false,
+  history: ['/'],
+  historyIndex: 0,
+
+  connect: async (config, initialPath = '/') => {
+    set({ error: null })
+    const result = await window.api.invoke<IpcResult<void>>('ftp:connect', config)
+    if (result.success) {
+      set({ host: config.host, port: config.port })
+      await get().navigateTo(initialPath)
+      // If initial path failed, fall back to root
+      if (get().error && initialPath !== '/') {
+        set({ error: null })
+        await get().navigateTo('/')
+      }
+      if (get().error) {
+        return false
+      }
+      return true
+    }
+    set({ error: result.error })
+    return false
+  },
+
+  disconnect: async () => {
+    await window.api.invoke('ftp:disconnect')
+    set({
+      connectionStatus: 'disconnected',
+      host: '',
+      port: 21,
+      currentPath: '/',
+      entries: [],
+      error: null,
+      history: ['/'],
+      historyIndex: 0
+    })
+  },
+
+  navigateTo: async (path) => {
+    set({ loading: true, error: null })
+    try {
+      const result = await window.api.invoke<IpcResult<FtpListData>>('ftp:list', path)
+      if (result.success) {
+        const { history, historyIndex } = get()
+        const newHistory = [...history.slice(0, historyIndex + 1), path]
+        set({
+          currentPath: path,
+          entries: result.data.entries,
+          loading: false,
+          history: newHistory,
+          historyIndex: newHistory.length - 1
+        })
+      } else {
+        set({ error: result.error, loading: false })
+      }
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : String(err),
+        loading: false
+      })
+    }
+  },
+
+  navigateUp: async () => {
+    const { currentPath } = get()
+    if (currentPath === '/') return
+    const parts = currentPath.split('/').filter(Boolean)
+    parts.pop()
+    const parentPath = '/' + parts.join('/')
+    await get().navigateTo(parentPath)
+  },
+
+  goBack: async () => {
+    const { history, historyIndex } = get()
+    if (historyIndex <= 0) return
+    const newIndex = historyIndex - 1
+    const path = history[newIndex]
+    set({ loading: true, error: null })
+    try {
+      const result = await window.api.invoke<IpcResult<FtpListData>>('ftp:list', path)
+      if (result.success) {
+        set({
+          currentPath: path,
+          entries: result.data.entries,
+          loading: false,
+          historyIndex: newIndex
+        })
+      } else {
+        set({ error: result.error, loading: false })
+      }
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err), loading: false })
+    }
+  },
+
+  goForward: async () => {
+    const { history, historyIndex } = get()
+    if (historyIndex >= history.length - 1) return
+    const newIndex = historyIndex + 1
+    const path = history[newIndex]
+    set({ loading: true, error: null })
+    try {
+      const result = await window.api.invoke<IpcResult<FtpListData>>('ftp:list', path)
+      if (result.success) {
+        set({
+          currentPath: path,
+          entries: result.data.entries,
+          loading: false,
+          historyIndex: newIndex
+        })
+      } else {
+        set({ error: result.error, loading: false })
+      }
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err), loading: false })
+    }
+  },
+
+  refresh: async () => {
+    const { currentPath } = get()
+    await get().navigateTo(currentPath)
+  },
+
+  setConnectionState: (state) => {
+    set({
+      connectionStatus: state.status,
+      host: state.host ?? get().host,
+      error: state.error ?? null
+    })
+  }
+}))
