@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { TransferJob, TransferProgress } from '@shared/types/transfer'
+import type { IpcResult } from '@shared/types/ipc'
 
 interface TransferStore {
   jobs: TransferJob[]
@@ -29,13 +30,16 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
   },
 
   enqueue: async (direction, localPath, remotePath, fileName, totalBytes) => {
-    await window.api.invoke('transfer:enqueue', {
+    const result = (await window.api.invoke('transfer:enqueue', {
       direction,
       localPath,
       remotePath,
       fileName,
       totalBytes
-    })
+    })) as IpcResult<string>
+    if (!result.success) {
+      throw new Error(result.error)
+    }
   },
 
   cancel: async (id) => {

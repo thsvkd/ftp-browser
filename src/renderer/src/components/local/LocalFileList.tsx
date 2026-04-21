@@ -1,4 +1,7 @@
+import { useMemo } from 'react'
 import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
+import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
+import { isRootPath } from '@renderer/lib/localPath'
 import { formatBytes, formatDate } from '@renderer/lib/utils'
 import type { LocalFileEntry } from '@shared/types/local'
 
@@ -14,16 +17,70 @@ export function LocalFileList(): React.JSX.Element {
   const navigateTo = useLocalFsStore((s) => s.navigateTo)
   const navigateUp = useLocalFsStore((s) => s.navigateUp)
 
-  const sorted = [...entries].sort((a, b) => {
-    if (a.type === 'directory' && b.type !== 'directory') return -1
-    if (a.type !== 'directory' && b.type === 'directory') return 1
-    return a.name.localeCompare(b.name)
-  })
+  const selectedNames = useLocalSelectionStore((s) => s.selectedNames)
+  const selectSingle = useLocalSelectionStore((s) => s.selectSingle)
+  const toggleSelect = useLocalSelectionStore((s) => s.toggleSelect)
+  const selectRange = useLocalSelectionStore((s) => s.selectRange)
+
+  const sorted = useMemo(
+    () =>
+      [...entries].sort((a, b) => {
+        if (a.type === 'directory' && b.type !== 'directory') return -1
+        if (a.type !== 'directory' && b.type === 'directory') return 1
+        return a.name.localeCompare(b.name)
+      }),
+    [entries]
+  )
+
+  const sortedNames = useMemo(() => sorted.map((e) => e.name), [sorted])
+
+  const handleClick = (e: React.MouseEvent, entry: LocalFileEntry): void => {
+    if (e.shiftKey) {
+      selectRange(entry.name, sortedNames)
+    } else if (e.ctrlKey || e.metaKey) {
+      toggleSelect(entry.name)
+    } else {
+      selectSingle(entry.name)
+    }
+  }
 
   const handleDoubleClick = (entry: LocalFileEntry): void => {
     if (entry.type === 'directory') {
       navigateTo(entry.path)
     }
+  }
+
+  const handleDragStart = (e: React.DragEvent, entry: LocalFileEntry): void => {
+    const sel = useLocalSelectionStore.getState().selectedNames
+    const allEntries = useLocalFsStore.getState().entries
+
+    let filesToDrag: Array<{ localPath: string; fileName: string; size: number }>
+    if (sel.has(entry.name)) {
+      filesToDrag = allEntries
+        .filter((en) => sel.has(en.name) && en.type === 'file')
+        .map((en) => ({
+          localPath: en.path,
+          fileName: en.name,
+          size: en.size
+        }))
+    } else {
+      if (entry.type !== 'file') return
+      filesToDrag = [
+        {
+          localPath: entry.path,
+          fileName: entry.name,
+          size: entry.size
+        }
+      ]
+    }
+
+    if (filesToDrag.length === 0) {
+      e.preventDefault()
+      return
+    }
+
+    e.dataTransfer.setData('application/x-local-files', JSON.stringify(filesToDrag))
+    e.dataTransfer.effectAllowed = 'copy'
   }
 
   return (
@@ -37,7 +94,7 @@ export function LocalFileList(): React.JSX.Element {
           </tr>
         </thead>
         <tbody>
-          {currentPath !== '/' && (
+          {!isRootPath(currentPath) && (
             <tr className="cursor-pointer hover:bg-blue-50" onDoubleClick={navigateUp}>
               <td className="px-3 py-1.5">
                 <span className="mr-2">📁</span>
@@ -50,8 +107,13 @@ export function LocalFileList(): React.JSX.Element {
           {sorted.map((entry) => (
             <tr
               key={entry.name}
-              className="cursor-pointer hover:bg-blue-50"
+              className={`cursor-pointer ${
+                selectedNames.has(entry.name) ? 'bg-blue-100' : 'hover:bg-blue-50'
+              }`}
+              draggable={entry.type === 'file'}
+              onClick={(e) => handleClick(e, entry)}
               onDoubleClick={() => handleDoubleClick(entry)}
+              onDragStart={(e) => handleDragStart(e, entry)}
             >
               <td className="px-3 py-1.5">
                 <span className="mr-2">{getFileIcon(entry)}</span>

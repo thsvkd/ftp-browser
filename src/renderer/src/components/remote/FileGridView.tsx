@@ -5,6 +5,7 @@ import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 import { ThumbnailImage } from '@renderer/components/thumbnail/ThumbnailImage'
 import { ImagePreviewModal } from '@renderer/components/thumbnail/ImagePreviewModal'
 import { FileContextMenu } from './FileContextMenu'
+import { FilePropertiesDialog } from './FilePropertiesDialog'
 import type { FtpFileEntry } from '@shared/types/ftp'
 
 const CELL_SIZE = 170
@@ -30,6 +31,7 @@ export function FileGridView(): React.JSX.Element {
   const [previewEntry, setPreviewEntry] = useState<FtpFileEntry | null>(null)
   const [contextEntry, setContextEntry] = useState<FtpFileEntry | null>(null)
   const [contextPos, setContextPos] = useState<{ x: number; y: number } | null>(null)
+  const [propertiesEntry, setPropertiesEntry] = useState<FtpFileEntry | null>(null)
 
   const parentRef = useRef<HTMLDivElement>(null)
 
@@ -92,7 +94,6 @@ export function FileGridView(): React.JSX.Element {
   }
 
   const handleDragStart = (e: React.DragEvent, entry: FtpFileEntry): void => {
-    e.preventDefault()
     const sel = useSelectionStore.getState().selectedNames
     const allEntries = useFtpStore.getState().entries
     const path = useFtpStore.getState().currentPath
@@ -116,8 +117,13 @@ export function FileGridView(): React.JSX.Element {
         }
       ]
     }
-    if (filesToDrag.length === 0) return
-    window.api.invoke('drag:start', { files: filesToDrag })
+    if (filesToDrag.length === 0) {
+      e.preventDefault()
+      return
+    }
+
+    e.dataTransfer.setData('application/x-remote-files', JSON.stringify(filesToDrag))
+    e.dataTransfer.effectAllowed = 'copy'
   }
 
   return (
@@ -225,7 +231,11 @@ export function FileGridView(): React.JSX.Element {
         entry={contextEntry}
         position={contextPos}
         onClose={() => setContextPos(null)}
+        onShowProperties={setPropertiesEntry}
       />
+      {propertiesEntry && (
+        <FilePropertiesDialog entry={propertiesEntry} onClose={() => setPropertiesEntry(null)} />
+      )}
 
       {previewEntry && (
         <ImagePreviewModal entry={previewEntry} onClose={() => setPreviewEntry(null)} />

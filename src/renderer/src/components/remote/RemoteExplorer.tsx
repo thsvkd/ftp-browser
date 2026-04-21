@@ -6,6 +6,7 @@ import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { RemoteBreadcrumb } from './RemoteBreadcrumb'
 import { FileListView } from './FileListView'
 import { FileGridView } from './FileGridView'
+import { toast } from 'sonner'
 import type { FtpConnectionState } from '@shared/types/ftp'
 
 export function RemoteExplorer(): React.JSX.Element {
@@ -14,6 +15,8 @@ export function RemoteExplorer(): React.JSX.Element {
   const loading = useFtpStore((s) => s.loading)
   const error = useFtpStore((s) => s.error)
   const setConnectionState = useFtpStore((s) => s.setConnectionState)
+  const goBack = useFtpStore((s) => s.goBack)
+  const goForward = useFtpStore((s) => s.goForward)
   const viewMode = useSettingsStore((s) => s.viewMode)
   const toggleViewMode = useSettingsStore((s) => s.toggleViewMode)
   const clearSelection = useSelectionStore((s) => s.clearSelection)
@@ -36,10 +39,27 @@ export function RemoteExplorer(): React.JSX.Element {
     return unsubscribe
   }, [setConnectionState])
 
+  const handleMouseUp = (e: React.MouseEvent): void => {
+    if (e.button === 3) {
+      e.preventDefault()
+      goBack()
+    } else if (e.button === 4) {
+      e.preventDefault()
+      goForward()
+    }
+  }
+
+  const isAcceptableDrag = (e: React.DragEvent): boolean => {
+    return (
+      e.dataTransfer.types.includes('application/x-local-files') ||
+      e.dataTransfer.types.includes('Files')
+    )
+  }
+
   const handleDragOver = (e: React.DragEvent): void => {
     e.preventDefault()
     e.stopPropagation()
-    if (e.dataTransfer.types.includes('Files')) {
+    if (isAcceptableDrag(e)) {
       e.dataTransfer.dropEffect = 'copy'
     }
   }
@@ -48,7 +68,7 @@ export function RemoteExplorer(): React.JSX.Element {
     e.preventDefault()
     e.stopPropagation()
     dragCounterRef.current++
-    if (e.dataTransfer.types.includes('Files')) {
+    if (isAcceptableDrag(e)) {
       setIsDragOver(true)
     }
   }
@@ -62,20 +82,43 @@ export function RemoteExplorer(): React.JSX.Element {
     }
   }
 
-  const handleDrop = (e: React.DragEvent): void => {
+  const handleDrop = async (e: React.DragEvent): Promise<void> => {
     e.preventDefault()
     e.stopPropagation()
     dragCounterRef.current = 0
     setIsDragOver(false)
 
-    const files = Array.from(e.dataTransfer.files)
     const path = useFtpStore.getState().currentPath
-    for (const file of files) {
-      const localPath = (file as File & { path: string }).path
-      if (!localPath) continue
-      const fileName = file.name
-      const remotePath = path === '/' ? `/${fileName}` : `${path}/${fileName}`
-      enqueue('upload', localPath, remotePath, fileName, file.size)
+
+    try {
+      // Intra-app drag from local panel
+      const localFilesData = e.dataTransfer.getData('application/x-local-files')
+      if (localFilesData) {
+        const localFiles = JSON.parse(localFilesData) as Array<{
+          localPath: string
+          fileName: string
+          size: number
+        }>
+        for (const file of localFiles) {
+          const remotePath = path === '/' ? `/${file.fileName}` : `${path}/${file.fileName}`
+          await enqueue('upload', file.localPath, remotePath, file.fileName, file.size)
+        }
+        return
+      }
+
+      // Native file drop (from OS file explorer)
+      const files = Array.from(e.dataTransfer.files)
+      for (const file of files) {
+        const localPath = (file as File & { path: string }).path
+        if (!localPath) continue
+        const fileName = file.name
+        const remotePath = path === '/' ? `/${fileName}` : `${path}/${fileName}`
+        await enqueue('upload', localPath, remotePath, fileName, file.size)
+      }
+    } catch (err) {
+      toast.error('Failed to enqueue upload', {
+        description: err instanceof Error ? err.message : String(err)
+      })
     }
   }
 
@@ -99,7 +142,8 @@ export function RemoteExplorer(): React.JSX.Element {
 
   return (
     <div
-      className={`flex h-full flex-col ${isDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
+      className={`relative flex h-full flex-col ${isDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
+      onMouseUp={handleMouseUp}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}

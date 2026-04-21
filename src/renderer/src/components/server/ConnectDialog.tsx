@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import type { FtpServer, RecentPath } from '@shared/types/ftp'
 import type { IpcResult } from '@shared/types/ipc'
@@ -24,25 +24,7 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
 
   const connect = useFtpStore((s) => s.connect)
 
-  useEffect(() => {
-    if (!open) return
-    // Fetch recent servers
-    window.api
-      .invoke<IpcResult<FtpServer[]>>('ftp:getRecentServers')
-      .then((result) => {
-        if (result.success && result.data.length > 0) {
-          setRecentServers(result.data)
-          // Auto-select most recent server
-          const first = result.data[0]
-          selectServer(first)
-        }
-      })
-      .catch(() => {})
-  }, [open])
-
-  if (!open) return null
-
-  const selectServer = (server: FtpServer): void => {
+  const selectServer = useCallback((server: FtpServer): void => {
     setHost(server.host)
     setPort(String(server.port))
     setUser(server.username)
@@ -60,8 +42,29 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
           setRecentPaths(result.data)
         }
       })
-      .catch(() => {})
-  }
+      .catch((err: unknown) => {
+        console.warn('[ConnectDialog] Failed to load recent paths:', err)
+      })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    // Fetch recent servers
+    window.api
+      .invoke<IpcResult<FtpServer[]>>('ftp:getRecentServers')
+      .then((result) => {
+        if (result.success && result.data.length > 0) {
+          setRecentServers(result.data)
+          // Auto-select most recent server
+          selectServer(result.data[0])
+        }
+      })
+      .catch((err: unknown) => {
+        console.warn('[ConnectDialog] Failed to load recent servers:', err)
+      })
+  }, [open, selectServer])
+
+  if (!open) return null
 
   const handleDeleteServer = async (e: React.MouseEvent, serverId: number): Promise<void> => {
     e.stopPropagation()
@@ -120,7 +123,11 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
     if (!dateStr) return ''
     try {
       const d = new Date(dateStr)
-      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      return (
+        d.toLocaleDateString() +
+        ' ' +
+        d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      )
     } catch {
       return dateStr
     }
@@ -128,10 +135,7 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div
-        className="w-[520px] rounded-lg bg-white p-6 shadow-xl"
-        onKeyDown={handleKeyDown}
-      >
+      <div className="w-[520px] rounded-lg bg-white p-6 shadow-xl" onKeyDown={handleKeyDown}>
         <h2 className="mb-4 text-lg font-semibold">FTP Server Connection</h2>
 
         {/* Recent servers */}
@@ -151,9 +155,7 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
                     <span className="font-medium">
                       {server.host}:{server.port}
                     </span>
-                    <span className="ml-2 text-gray-400">
-                      {server.username || 'anonymous'}
-                    </span>
+                    <span className="ml-2 text-gray-400">{server.username || 'anonymous'}</span>
                     {server.secure && (
                       <span className="ml-1.5 rounded bg-green-100 px-1 text-xs text-green-700">
                         TLS
@@ -169,8 +171,18 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
                       onClick={(e) => handleDeleteServer(e, server.id!)}
                       title="Remove from history"
                     >
-                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      <svg
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M6 18L18 6M6 6l12 12"
+                        />
                       </svg>
                     </button>
                   </div>
@@ -183,9 +195,7 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
         {/* Recent paths for selected server */}
         {recentPaths.length > 0 && (
           <div className="mb-4">
-            <label className="mb-1.5 block text-xs font-medium text-gray-500">
-              Recent Paths
-            </label>
+            <label className="mb-1.5 block text-xs font-medium text-gray-500">Recent Paths</label>
             <div className="max-h-24 overflow-y-auto rounded-md border border-gray-200">
               {recentPaths.map((rp) => (
                 <div
@@ -259,9 +269,7 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
             Use FTPS (TLS)
           </label>
 
-          {error && (
-            <p className="rounded bg-red-50 p-2 text-sm text-red-600">{error}</p>
-          )}
+          {error && <p className="rounded bg-red-50 p-2 text-sm text-red-600">{error}</p>}
         </div>
 
         <div className="mt-5 flex justify-end gap-2">

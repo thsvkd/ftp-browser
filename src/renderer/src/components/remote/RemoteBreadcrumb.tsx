@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { toast } from 'sonner'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 
 export function RemoteBreadcrumb(): React.JSX.Element {
@@ -30,10 +31,15 @@ export function RemoteBreadcrumb(): React.JSX.Element {
     setTimeout(() => inputRef.current?.select(), 0)
   }
 
-  const handleEditSubmit = (): void => {
+  const handleEditSubmit = async (): Promise<void> => {
     setEditing(false)
     const path = inputValue.trim() || '/'
-    navigateTo(path.startsWith('/') ? path : '/' + path)
+    const normalizedPath = path.startsWith('/') ? path : '/' + path
+    await navigateTo(normalizedPath)
+    const error = useFtpStore.getState().error
+    if (error) {
+      toast.error(`Failed to navigate to "${normalizedPath}"`, { description: error })
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
@@ -44,16 +50,10 @@ export function RemoteBreadcrumb(): React.JSX.Element {
   if (editing) {
     return (
       <div className="flex items-center border-b border-gray-200 bg-gray-50 px-1.5 py-1.5">
-        <button
-          disabled
-          className="rounded p-0.5 text-gray-300"
-        >
+        <button disabled className="rounded p-0.5 text-gray-300">
           <ChevronLeft size={14} />
         </button>
-        <button
-          disabled
-          className="mr-1 rounded p-0.5 text-gray-300"
-        >
+        <button disabled className="mr-1 rounded p-0.5 text-gray-300">
           <ChevronRight size={14} />
         </button>
         <input
@@ -72,7 +72,7 @@ export function RemoteBreadcrumb(): React.JSX.Element {
 
   return (
     <div
-      className="flex items-center gap-0.5 border-b border-gray-200 bg-gray-50 px-1.5 py-1.5 text-sm"
+      className="flex items-center gap-0.5 overflow-x-auto border-b border-gray-200 bg-gray-50 px-1.5 py-1.5 text-sm"
       onDoubleClick={handleEditStart}
     >
       <button
@@ -93,12 +93,12 @@ export function RemoteBreadcrumb(): React.JSX.Element {
       </button>
       <button
         onClick={() => navigateTo('/')}
-        className="rounded px-1.5 py-0.5 text-gray-600 hover:bg-gray-200 hover:text-gray-900"
+        className="shrink-0 rounded px-1.5 py-0.5 text-gray-600 hover:bg-gray-200 hover:text-gray-900"
       >
         /
       </button>
       {parts.map((part, i) => (
-        <span key={i} className="flex items-center">
+        <span key={i} className="flex shrink-0 items-center">
           <span className="text-gray-400">/</span>
           <button
             onClick={() => handleClick(i)}

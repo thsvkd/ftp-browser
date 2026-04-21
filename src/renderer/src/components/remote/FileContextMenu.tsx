@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
-import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import type { FtpFileEntry } from '@shared/types/ftp'
 import type { IpcResult } from '@shared/types/ipc'
 
@@ -15,19 +14,20 @@ interface FileContextMenuProps {
   entry: FtpFileEntry | null
   position: Position | null
   onClose: () => void
+  onShowProperties?: (entry: FtpFileEntry) => void
 }
 
 export function FileContextMenu({
   entry,
   position,
-  onClose
+  onClose,
+  onShowProperties
 }: FileContextMenuProps): React.JSX.Element | null {
   const currentPath = useFtpStore((s) => s.currentPath)
   const entries = useFtpStore((s) => s.entries)
   const refresh = useFtpStore((s) => s.refresh)
   const enqueue = useTransferStore((s) => s.enqueue)
   const selectedNames = useSelectionStore((s) => s.selectedNames)
-  const localPath = useLocalFsStore((s) => s.currentPath)
   const [renaming, setRenaming] = useState(false)
   const [newName, setNewName] = useState('')
 
@@ -114,11 +114,6 @@ export function FileContextMenu({
     handleClose()
   }
 
-  const handleUpload = async (): Promise<void> => {
-    if (!localPath) return
-    handleClose()
-  }
-
   return (
     <div
       className="fixed z-50 min-w-[160px] rounded-md border border-gray-200 bg-white py-1 shadow-lg"
@@ -148,7 +143,9 @@ export function FileContextMenu({
                   className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
                   onClick={handleDownload}
                 >
-                  {isMulti ? `Download (${selectedEntries.filter((e) => e.type === 'file').length})` : 'Download'}
+                  {isMulti
+                    ? `Download (${selectedEntries.filter((e) => e.type === 'file').length})`
+                    : 'Download'}
                 </button>
               )}
               {!isMulti && (
@@ -174,12 +171,20 @@ export function FileContextMenu({
           >
             New Folder
           </button>
-          <button
-            className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
-            onClick={handleUpload}
-          >
-            Upload Here
-          </button>
+          {!isMulti && entry && onShowProperties && (
+            <>
+              <div className="my-1 border-t border-gray-100" />
+              <button
+                className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
+                onClick={() => {
+                  onShowProperties(entry)
+                  handleClose()
+                }}
+              >
+                Properties
+              </button>
+            </>
+          )}
         </>
       )}
     </div>

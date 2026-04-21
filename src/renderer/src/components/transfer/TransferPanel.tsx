@@ -70,15 +70,11 @@ export function TransferPanel(): React.JSX.Element {
         <div className="max-h-40 overflow-auto border-t border-gray-100">
           {jobs.map((job) => {
             const percent =
-              job.totalBytes > 0
-                ? Math.round((job.transferredBytes / job.totalBytes) * 100)
-                : 0
+              job.totalBytes > 0 ? Math.round((job.transferredBytes / job.totalBytes) * 100) : 0
 
             return (
               <div key={job.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-                <span className="text-gray-400">
-                  {job.direction === 'upload' ? '↑' : '↓'}
-                </span>
+                <span className="text-gray-400">{job.direction === 'upload' ? '↑' : '↓'}</span>
                 <span className="min-w-0 flex-1 truncate" title={job.fileName}>
                   {job.fileName}
                 </span>

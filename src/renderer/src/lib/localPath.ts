@@ -60,3 +60,20 @@ export function getRootPath(p: string): string {
   }
   return '/'
 }
+
+/** 디렉토리 경로와 파일명을 결합 */
+export function joinLocalPath(dir: string, name: string): string {
+  if (isWindowsPath(dir)) {
+    const sep = '\\'
+    return dir.endsWith(sep) ? dir + name : dir + sep + name
+  }
+  return dir.endsWith('/') ? dir + name : dir + '/' + name
+}
+
+/** 현재 경로가 루트인지 확인 */
+export function isRootPath(p: string): boolean {
+  if (isWindowsPath(p)) {
+    return p.length <= 3 // "C:\" or "C:"
+  }
+  return p === '/'
+}

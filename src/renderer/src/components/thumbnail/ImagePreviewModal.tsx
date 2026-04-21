@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
@@ -10,6 +10,12 @@ interface ImagePreviewModalProps {
   onClose: () => void
 }
 
+interface FetchResult {
+  key: string
+  url: string | null
+  error: string | null
+}
+
 export function ImagePreviewModal({ entry, onClose }: ImagePreviewModalProps): React.JSX.Element {
   const host = useFtpStore((s) => s.host)
   const port = useFtpStore((s) => s.port)
@@ -18,10 +24,12 @@ export function ImagePreviewModal({ entry, onClose }: ImagePreviewModalProps): R
   const cacheKey = generateCacheKeyRenderer(host, port, remotePath, entry.size, entry.modifiedAt)
   const thumbnailData = useThumbnailStore((s) => s.thumbnails[cacheKey])
 
-  const [fullImageUrl, setFullImageUrl] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const abortedRef = useRef(false)
+  const requestKey = `${remotePath}|${entry.size}|${entry.modifiedAt}`
+  const [result, setResult] = useState<FetchResult | null>(null)
+  // loading은 상태를 파생: 최신 요청 키와 결과 키가 다르면 로딩 중
+  const loading = result?.key !== requestKey
+  const fullImageUrl = !loading ? (result?.url ?? null) : null
+  const error = !loading ? (result?.error ?? null) : null
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
@@ -31,11 +39,8 @@ export function ImagePreviewModal({ entry, onClose }: ImagePreviewModalProps): R
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
 
-  // 모달이 열리면 바로 원본 이미지 다운로드 시작
   useEffect(() => {
-    abortedRef.current = false
-    setLoading(true)
-    setError(null)
+    let aborted = false
 
     window.api
       .invoke<IpcResult<string>>('ftp:downloadPreview', {
@@ -43,26 +48,27 @@ export function ImagePreviewModal({ entry, onClose }: ImagePreviewModalProps): R
         fileSize: entry.size,
         modifiedAt: entry.modifiedAt
       })
-      .then((result) => {
-        if (abortedRef.current) return
-        if (result.success) {
-          setFullImageUrl(result.data)
+      .then((res) => {
+        if (aborted) return
+        if (res.success) {
+          setResult({ key: requestKey, url: res.data, error: null })
         } else {
-          setError(result.error)
+          setResult({ key: requestKey, url: null, error: res.error })
         }
       })
       .catch((err) => {
-        if (abortedRef.current) return
-        setError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => {
-        if (!abortedRef.current) setLoading(false)
+        if (aborted) return
+        setResult({
+          key: requestKey,
+          url: null,
+          error: err instanceof Error ? err.message : String(err)
+        })
       })
 
     return () => {
-      abortedRef.current = true
+      aborted = true
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [requestKey, remotePath, entry.size, entry.modifiedAt])
 
   const imageUrl = fullImageUrl || thumbnailData?.dataUrl
 

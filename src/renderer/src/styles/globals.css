@@ -46,6 +46,12 @@
   }
 }
 
+@layer base {
+  [draggable='true'] {
+    -webkit-user-drag: element;
+  }
+}
+
 @layer utilities {
   .border-border {
     border-color: hsl(var(--border));

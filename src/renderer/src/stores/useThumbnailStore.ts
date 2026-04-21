@@ -35,7 +35,9 @@ export const useThumbnailStore = create<ThumbnailStore>((set, get) => ({
 
   clearError: (cacheKey) => {
     set((state) => {
-      const { [cacheKey]: _, ...rest } = state.errors
+      if (!(cacheKey in state.errors)) return state
+      const rest = { ...state.errors }
+      delete rest[cacheKey]
       return { errors: rest }
     })
   },

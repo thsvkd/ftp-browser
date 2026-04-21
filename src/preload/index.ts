@@ -20,6 +20,7 @@ const INVOKE_CHANNELS = [
   'local:getHome',
   'local:selectDirectory',
   'local:selectSaveDirectory',
+  'local:copyFiles',
   // Transfer
   'transfer:enqueue',
   'transfer:cancel',
