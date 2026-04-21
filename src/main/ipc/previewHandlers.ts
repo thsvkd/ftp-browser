@@ -5,6 +5,7 @@ import Database from 'better-sqlite3'
 import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { PreviewCacheManager } from '../preview/PreviewCacheManager'
 import { generateCacheKey } from '../utils/cacheKey'
+import { ipcError } from '../utils/errorClassifier'
 import { MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
 import type { IpcResult } from '@shared/types/ipc'
 
@@ -92,7 +93,7 @@ export function registerPreviewHandlers(
           }
         }
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) }
+        return ipcError(err)
       }
     }
   )

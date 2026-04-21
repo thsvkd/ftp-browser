@@ -1,7 +1,11 @@
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
+import { classifyError, isRetryableError } from '../utils/errorClassifier'
 import type { TransferJob, TransferDirection, TransferProgress } from '@shared/types/transfer'
+
+const MAX_RETRIES = 3
+const RETRY_DELAY_MS = 2000
 
 export class TransferQueue extends EventEmitter {
   private queue: TransferJob[] = []
@@ -85,8 +89,20 @@ export class TransferQueue extends EventEmitter {
       next.status = 'completed'
       next.completedAt = new Date().toISOString()
     } catch (err) {
+      const retryCount = next.retryCount ?? 0
+      if (isRetryableError(err) && retryCount < MAX_RETRIES) {
+        next.retryCount = retryCount + 1
+        next.status = 'pending'
+        next.transferredBytes = 0
+        next.error = `Retry ${next.retryCount}/${MAX_RETRIES}: ${classifyError(err).message}`
+        this.activeJob = null
+        this.emit('queue:updated', this.getAll())
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
+        this.processNext()
+        return
+      }
       next.status = 'failed'
-      next.error = err instanceof Error ? err.message : String(err)
+      next.error = classifyError(err).message
     }
 
     this.activeJob = null

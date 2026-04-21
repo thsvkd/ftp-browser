@@ -2,6 +2,8 @@ import { ipcMain, nativeImage, app } from 'electron'
 import { join } from 'path'
 import { mkdirSync, existsSync, rmSync } from 'fs'
 import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
+import { ipcError } from '../utils/errorClassifier'
+import { ErrorCode } from '@shared/types/ipc'
 import type { IpcResult } from '@shared/types/ipc'
 
 interface DragFile {
@@ -30,7 +32,11 @@ export function registerDragHandlers(manager: FtpConnectionManager): void {
     async (event, payload: DragStartPayload): Promise<IpcResult<void>> => {
       try {
         if (!manager.isConnected()) {
-          return { success: false, error: 'Not connected to FTP server' }
+          return {
+            success: false,
+            error: 'Not connected to FTP server.',
+            code: ErrorCode.FTP_NOT_CONNECTED
+          }
         }
 
         cleanTempDir()
@@ -63,7 +69,7 @@ export function registerDragHandlers(manager: FtpConnectionManager): void {
 
         return { success: true, data: undefined }
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) }
+        return ipcError(err)
       }
     }
   )

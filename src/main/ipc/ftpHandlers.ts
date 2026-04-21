@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
 import { getDatabase } from '../db/database'
+import { ipcError } from '../utils/errorClassifier'
 import type {
   FtpConnectPayload,
   FtpConnectionState,
@@ -49,14 +50,15 @@ export function registerFtpHandlers(win: BrowserWindow): FtpHandlersResult {
               payload.password,
               payload.secure ? 1 : 0
             )
-          } catch {
+          } catch (dbErr) {
             // Non-critical: don't fail the connection if DB save fails
+            console.warn('[ftpHandlers] Failed to persist server info:', dbErr)
           }
           return { success: true, data: undefined }
         }
         return { success: false, error: result.error ?? 'Connection failed' }
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) }
+        return ipcError(err)
       }
     }
   )
@@ -83,7 +85,8 @@ export function registerFtpHandlers(win: BrowserWindow): FtpHandlersResult {
           secure: row.secure === 1
         }
       }
-    } catch {
+    } catch (err) {
+      console.warn('[ftpHandlers] Failed to load last server:', err)
       return { success: true, data: null }
     }
   })
@@ -115,7 +118,8 @@ export function registerFtpHandlers(win: BrowserWindow): FtpHandlersResult {
         lastConnected: r.last_connected
       }))
       return { success: true, data: servers }
-    } catch {
+    } catch (err) {
+      console.warn('[ftpHandlers] Failed to load recent servers:', err)
       return { success: true, data: [] }
     }
   })
@@ -136,7 +140,7 @@ export function registerFtpHandlers(win: BrowserWindow): FtpHandlersResult {
       db.prepare('DELETE FROM servers WHERE id = ?').run(serverId)
       return { success: true, data: undefined }
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) }
+      return ipcError(err)
     }
   })
 
@@ -154,7 +158,8 @@ export function registerFtpHandlers(win: BrowserWindow): FtpHandlersResult {
           success: true,
           data: rows.map((r) => ({ path: r.path, lastVisited: r.last_visited }))
         }
-      } catch {
+      } catch (err) {
+        console.warn('[ftpHandlers] Failed to load recent paths:', err)
         return { success: true, data: [] }
       }
     }
@@ -165,7 +170,7 @@ export function registerFtpHandlers(win: BrowserWindow): FtpHandlersResult {
       await manager.disconnect()
       return { success: true, data: undefined }
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) }
+      return ipcError(err)
     }
   })
 
@@ -197,14 +202,15 @@ export function registerFtpHandlers(win: BrowserWindow): FtpHandlersResult {
                  ORDER BY last_visited DESC LIMIT 20
                )`
             ).run(host, port, host, port)
-          } catch {
-            // Non-critical
+          } catch (dbErr) {
+            // Non-critical: listing still succeeds even if recent-path save fails
+            console.warn('[ftpHandlers] Failed to save recent path:', dbErr)
           }
         }
 
         return { success: true, data: result }
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) }
+        return ipcError(err)
       }
     }
   )
@@ -230,7 +236,7 @@ export function registerFtpHandlers(win: BrowserWindow): FtpHandlersResult {
         }
         return { success: true, data: undefined }
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) }
+        return ipcError(err)
       }
     }
   )
@@ -242,7 +248,7 @@ export function registerFtpHandlers(win: BrowserWindow): FtpHandlersResult {
         await fileOps.rename(oldPath, newPath)
         return { success: true, data: undefined }
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) }
+        return ipcError(err)
       }
     }
   )
@@ -252,7 +258,7 @@ export function registerFtpHandlers(win: BrowserWindow): FtpHandlersResult {
       await fileOps.mkdir(remotePath)
       return { success: true, data: undefined }
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) }
+      return ipcError(err)
     }
   })
 

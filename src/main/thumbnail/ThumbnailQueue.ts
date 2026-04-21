@@ -4,6 +4,7 @@ import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { ThumbnailGenerator } from './ThumbnailGenerator'
 import { CacheManager } from './CacheManager'
 import { generateCacheKey } from '../utils/cacheKey'
+import { classifyError } from '../utils/errorClassifier'
 import { MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
 
 const DOWNLOAD_TIMEOUT_MS = 30_000
@@ -209,7 +210,7 @@ export class ThumbnailQueue {
       }
       client = null
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err)
+      const { message: errMsg } = classifyError(err)
       console.error(`[Thumbnail] Error processing ${item.remotePath}:`, errMsg)
 
       if (!this.aborted) {
@@ -235,11 +236,16 @@ export class ThumbnailQueue {
       }
     })
 
+    let timer: ReturnType<typeof setTimeout> | undefined
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Download timeout')), DOWNLOAD_TIMEOUT_MS)
+      timer = setTimeout(() => reject(new Error('Download timeout')), DOWNLOAD_TIMEOUT_MS)
     })
 
-    await Promise.race([client.downloadTo(writable, remotePath), timeoutPromise])
-    return Buffer.concat(chunks)
+    try {
+      await Promise.race([client.downloadTo(writable, remotePath), timeoutPromise])
+      return Buffer.concat(chunks)
+    } finally {
+      clearTimeout(timer)
+    }
   }
 }

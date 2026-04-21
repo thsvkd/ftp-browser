@@ -11,6 +11,7 @@ export interface TransferJob {
   transferredBytes: number
   status: TransferStatus
   error?: string
+  retryCount?: number
   startedAt?: string
   completedAt?: string
 }

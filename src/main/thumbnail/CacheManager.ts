@@ -46,17 +46,25 @@ export class CacheManager {
     this.cacheDir = path.join(app.getPath('userData'), 'thumbnails')
     fs.mkdirSync(this.cacheDir, { recursive: true })
 
-    this.stmtLookup = db.prepare('SELECT id, cache_key, thumbnail_path, width, height, byte_size FROM thumbnails WHERE cache_key = ?')
+    this.stmtLookup = db.prepare(
+      'SELECT id, cache_key, thumbnail_path, width, height, byte_size FROM thumbnails WHERE cache_key = ?'
+    )
     this.stmtInsert = db.prepare(`
       INSERT OR REPLACE INTO thumbnails
         (cache_key, host, port, remote_path, file_size, modified_at, thumbnail_path, width, height, original_format, byte_size)
       VALUES
         (@cacheKey, @host, @port, @remotePath, @fileSize, @modifiedAt, @thumbnailPath, @width, @height, @originalFormat, @byteSize)
     `)
-    this.stmtUpdateAccess = db.prepare("UPDATE thumbnails SET last_accessed_at = datetime('now') WHERE cache_key = ?")
-    this.stmtEvictQuery = db.prepare('SELECT id, thumbnail_path, byte_size FROM thumbnails ORDER BY last_accessed_at ASC LIMIT ?')
+    this.stmtUpdateAccess = db.prepare(
+      "UPDATE thumbnails SET last_accessed_at = datetime('now') WHERE cache_key = ?"
+    )
+    this.stmtEvictQuery = db.prepare(
+      'SELECT id, thumbnail_path, byte_size FROM thumbnails ORDER BY last_accessed_at ASC LIMIT ?'
+    )
     this.stmtDeleteById = db.prepare('DELETE FROM thumbnails WHERE id = ?')
-    this.stmtTotalSize = db.prepare('SELECT COALESCE(SUM(byte_size), 0) as total, COUNT(*) as count FROM thumbnails')
+    this.stmtTotalSize = db.prepare(
+      'SELECT COALESCE(SUM(byte_size), 0) as total, COUNT(*) as count FROM thumbnails'
+    )
     this.stmtClearAll = db.prepare('DELETE FROM thumbnails')
   }
 

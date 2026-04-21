@@ -4,6 +4,7 @@ import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { ThumbnailGenerator } from '../thumbnail/ThumbnailGenerator'
 import { CacheManager } from '../thumbnail/CacheManager'
 import { ThumbnailQueue, ThumbnailRequest, ThumbnailResult } from '../thumbnail/ThumbnailQueue'
+import { ipcError } from '../utils/errorClassifier'
 import type { IpcResult } from '@shared/types/ipc'
 
 export function registerThumbnailHandlers(
@@ -26,17 +27,14 @@ export function registerThumbnailHandlers(
     }
   )
 
-  ipcMain.handle(
-    'thumbnail:request',
-    (_event, req: ThumbnailRequest): IpcResult<string> => {
-      try {
-        const cacheKey = queue.request(req)
-        return { success: true, data: cacheKey }
-      } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) }
-      }
+  ipcMain.handle('thumbnail:request', (_event, req: ThumbnailRequest): IpcResult<string> => {
+    try {
+      const cacheKey = queue.request(req)
+      return { success: true, data: cacheKey }
+    } catch (err) {
+      return ipcError(err)
     }
-  )
+  })
 
   ipcMain.handle(
     'thumbnail:requestBatch',
@@ -45,7 +43,7 @@ export function registerThumbnailHandlers(
         const keys = requests.map((req) => queue.request(req))
         return { success: true, data: keys }
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) }
+        return ipcError(err)
       }
     }
   )

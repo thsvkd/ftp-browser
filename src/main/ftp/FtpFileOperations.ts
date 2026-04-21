@@ -10,7 +10,11 @@ type ProgressCallback = (info: ProgressInfo) => void
 export class FtpFileOperations {
   constructor(private manager: FtpConnectionManager) {}
 
-  async upload(localPath: string, remotePath: string, onProgress?: ProgressCallback): Promise<void> {
+  async upload(
+    localPath: string,
+    remotePath: string,
+    onProgress?: ProgressCallback
+  ): Promise<void> {
     const client = this.manager.getClient()
     if (onProgress) {
       client.trackProgress((info) => {
