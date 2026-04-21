@@ -4,6 +4,9 @@ out
 .DS_Store
 .eslintcache
 *.log*
+*.tsbuildinfo
 
-.claude
+.omc/
+.claude/
 _test_electron.mjs
+NUL
