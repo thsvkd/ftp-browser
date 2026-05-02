@@ -172,6 +172,18 @@ describe('FtpConnectionManager', () => {
   })
 
   describe('list', () => {
+    beforeEach(async () => {
+      // list는 runOnMainClient를 거치므로 connected 상태가 전제.
+      vi.mocked(Client.prototype.access).mockResolvedValue({} as unknown as FTPResponse)
+      await manager.connect({
+        host: 'host',
+        port: 21,
+        user: 'u',
+        password: 'p',
+        secure: false
+      })
+    })
+
     it('should return formatted file entries', async () => {
       vi.mocked(Client.prototype.list).mockResolvedValue([
         {
@@ -256,6 +268,69 @@ describe('FtpConnectionManager', () => {
     it('should return the internal client', () => {
       const client = manager.getClient()
       expect(client).toBeDefined()
+    })
+  })
+
+  describe('runOnMainClient', () => {
+    beforeEach(async () => {
+      // mutex 검증은 connected 상태를 전제로 한다.
+      vi.mocked(Client.prototype.access).mockResolvedValue({} as unknown as FTPResponse)
+      await manager.connect({
+        host: 'host',
+        port: 21,
+        user: 'u',
+        password: 'p',
+        secure: false
+      })
+    })
+
+    it('should reject when not connected', async () => {
+      await manager.disconnect()
+      await expect(manager.runOnMainClient(async () => 1)).rejects.toThrow('Not connected')
+    })
+
+    it('should serialize concurrent tasks on the main client', async () => {
+      // basic-ftp Client는 동시 task를 허용하지 않으므로 mutex가 직렬 실행을 보장해야 한다.
+      const order: string[] = []
+      let inFlight = 0
+      let maxInFlight = 0
+
+      const task = (label: string, ms: number) => async (): Promise<string> => {
+        inFlight++
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        order.push(`${label}:start`)
+        await new Promise((r) => setTimeout(r, ms))
+        order.push(`${label}:end`)
+        inFlight--
+        return label
+      }
+
+      const results = await Promise.all([
+        manager.runOnMainClient(task('A', 30)),
+        manager.runOnMainClient(task('B', 10)),
+        manager.runOnMainClient(task('C', 5))
+      ])
+
+      expect(results).toEqual(['A', 'B', 'C'])
+      expect(maxInFlight).toBe(1)
+      expect(order).toEqual(['A:start', 'A:end', 'B:start', 'B:end', 'C:start', 'C:end'])
+    })
+
+    it('should let subsequent tasks run even after a previous task rejects', async () => {
+      const failing = manager.runOnMainClient(async () => {
+        throw new Error('boom')
+      })
+      await expect(failing).rejects.toThrow('boom')
+
+      // 다음 task는 이전 실패에 영향을 받지 않고 정상 실행되어야 한다.
+      const ok = await manager.runOnMainClient(async () => 42)
+      expect(ok).toBe(42)
+    })
+
+    it('should pass the current internal client to the task', async () => {
+      const internal = manager.getClient()
+      const received = await manager.runOnMainClient(async (c) => c)
+      expect(received).toBe(internal)
     })
   })
 })

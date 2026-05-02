@@ -24,6 +24,13 @@ export class FtpConnectionManager extends EventEmitter {
   private _host = ''
   private _port = 0
   private _config: FtpConnectPayload | null = null
+  /**
+   * basic-ftp Client는 한 번에 하나의 task만 실행 가능. 메인 클라이언트를 공유하는
+   * 모든 경로(list, transfer, thumbnail/preview fallback 등)를 이 promise chain으로
+   * 직렬화하여 "Client is closed because user launched task while another one is still
+   * running" 에러를 방지한다.
+   */
+  private mainClientLock: Promise<unknown> = Promise.resolve()
 
   constructor() {
     super()
@@ -34,9 +41,11 @@ export class FtpConnectionManager extends EventEmitter {
     try {
       this.emitStatus('connecting', config.host)
 
-      // Re-create client to ensure clean state
+      // Re-create client to ensure clean state. 큐에 남아있던 task들은 새 client에서
+      // 동작하지만, close된 이전 client에서 진행 중이던 task는 자연스럽게 reject된다.
       this.client.close()
       this.client = createConfiguredClient()
+      this.mainClientLock = Promise.resolve()
 
       await this.client.access({
         host: config.host,
@@ -62,8 +71,31 @@ export class FtpConnectionManager extends EventEmitter {
     }
   }
 
+  /**
+   * 메인 클라이언트의 task를 직렬 실행. 절대로 task 안에서 Promise.race로 timeout을
+   * 설정하지 말 것. (timeout이 win하더라도 underlying basic-ftp task는 계속 진행되어
+   * 다음 task와 충돌한다.) basic-ftp Client 생성자에 설정된 timeout(30s)이 stuck
+   * 상황을 처리한다.
+   *
+   * disconnect/connect 사이에 들어온 task는 stale client에 도달하지 않도록 두 시점에
+   * 모두 connection 상태를 검증한다 (큐잉 시점 + then-time).
+   * 또한 task 안에서 `this.client`를 then-time에 읽으므로, 재연결 시 새 client가
+   * 큐잉되어 있던 task에게 swap된다.
+   */
+  async runOnMainClient<T>(task: (client: Client) => Promise<T>): Promise<T> {
+    if (!this._connected) {
+      return Promise.reject(new Error('Not connected'))
+    }
+    const next = this.mainClientLock.then(() => {
+      if (!this._connected) throw new Error('Not connected')
+      return task(this.client)
+    })
+    this.mainClientLock = next.catch(() => undefined)
+    return next
+  }
+
   async list(remotePath: string): Promise<FtpListResult> {
-    const fileInfos: FileInfo[] = await this.client.list(remotePath)
+    const fileInfos: FileInfo[] = await this.runOnMainClient((client) => client.list(remotePath))
 
     const entries: FtpFileEntry[] = fileInfos.map((fi) => ({
       name: fi.name,

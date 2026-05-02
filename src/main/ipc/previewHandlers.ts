@@ -2,12 +2,25 @@ import { ipcMain } from 'electron'
 import { Writable } from 'stream'
 import path from 'path'
 import Database from 'better-sqlite3'
+import { Client } from 'basic-ftp'
 import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { PreviewCacheManager } from '../preview/PreviewCacheManager'
 import { generateCacheKey } from '../utils/cacheKey'
 import { ipcError } from '../utils/errorClassifier'
 import { MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
 import type { IpcResult } from '@shared/types/ipc'
+
+async function downloadToBuffer(client: Client, remotePath: string): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  const writable = new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      chunks.push(chunk)
+      callback()
+    }
+  })
+  await client.downloadTo(writable, remotePath)
+  return Buffer.concat(chunks)
+}
 
 const MIME_MAP: Record<string, string> = {
   '.jpg': 'image/jpeg',
@@ -60,38 +73,33 @@ export function registerPreviewHandlers(
           return { success: true, data: dataUrl }
         }
 
-        // FTP에서 다운로드 (보조 클라이언트 시도 → 실패 시 메인 클라이언트)
-        let client = ftpManager.getClient()
-        let isSecondary = false
+        // FTP에서 다운로드 (보조 클라이언트 시도 → 실패 시 메인 클라이언트로 직렬화 fallback)
+        let secondaryClient: Client | null = null
         try {
-          client = await ftpManager.createSecondaryClient()
-          isSecondary = true
+          secondaryClient = await ftpManager.createSecondaryClient()
         } catch {
           // 보조 클라이언트 생성 실패 → 메인 클라이언트 사용
         }
 
-        try {
-          const chunks: Buffer[] = []
-          const writable = new Writable({
-            write(chunk: Buffer, _encoding, callback) {
-              chunks.push(chunk)
-              callback()
-            }
-          })
-
-          await client.downloadTo(writable, req.remotePath)
-          const buffer = Buffer.concat(chunks)
-
-          // 캐시에 저장
-          cacheManager.store(cacheKey, mime, buffer)
-
-          const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`
-          return { success: true, data: dataUrl }
-        } finally {
-          if (isSecondary) {
-            client.close()
+        let buffer: Buffer
+        if (secondaryClient) {
+          try {
+            buffer = await downloadToBuffer(secondaryClient, req.remotePath)
+          } finally {
+            secondaryClient.close()
           }
+        } else {
+          // runOnMainClient를 통해 list/transfer/delete 등과 직렬화하여 충돌 방지
+          buffer = await ftpManager.runOnMainClient((client) =>
+            downloadToBuffer(client, req.remotePath)
+          )
         }
+
+        // 캐시에 저장
+        cacheManager.store(cacheKey, mime, buffer)
+
+        const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`
+        return { success: true, data: dataUrl }
       } catch (err) {
         return ipcError(err)
       }

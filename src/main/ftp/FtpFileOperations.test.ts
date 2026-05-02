@@ -27,7 +27,8 @@ function createMockManager(): { manager: FtpConnectionManager; client: MockClien
 
   return {
     manager: {
-      getClient: vi.fn(() => mockClient)
+      getClient: vi.fn(() => mockClient),
+      runOnMainClient: vi.fn(<T>(task: (c: MockClient) => Promise<T>) => task(mockClient))
     } as unknown as FtpConnectionManager,
     client: mockClient
   }

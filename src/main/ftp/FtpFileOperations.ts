@@ -15,17 +15,18 @@ export class FtpFileOperations {
     remotePath: string,
     onProgress?: ProgressCallback
   ): Promise<void> {
-    const client = this.manager.getClient()
-    if (onProgress) {
-      client.trackProgress((info) => {
-        onProgress({ bytes: info.bytes, bytesOverall: info.bytesOverall })
-      })
-    }
-    try {
-      await client.uploadFrom(localPath, remotePath)
-    } finally {
-      client.trackProgress()
-    }
+    await this.manager.runOnMainClient(async (client) => {
+      if (onProgress) {
+        client.trackProgress((info) => {
+          onProgress({ bytes: info.bytes, bytesOverall: info.bytesOverall })
+        })
+      }
+      try {
+        await client.uploadFrom(localPath, remotePath)
+      } finally {
+        client.trackProgress()
+      }
+    })
   }
 
   async download(
@@ -33,35 +34,38 @@ export class FtpFileOperations {
     localPath: string,
     onProgress?: ProgressCallback
   ): Promise<void> {
-    const client = this.manager.getClient()
-    if (onProgress) {
-      client.trackProgress((info) => {
-        onProgress({ bytes: info.bytes, bytesOverall: info.bytesOverall })
-      })
-    }
-    try {
-      await client.downloadTo(localPath, remotePath)
-    } finally {
-      client.trackProgress()
-    }
+    await this.manager.runOnMainClient(async (client) => {
+      if (onProgress) {
+        client.trackProgress((info) => {
+          onProgress({ bytes: info.bytes, bytesOverall: info.bytesOverall })
+        })
+      }
+      try {
+        await client.downloadTo(localPath, remotePath)
+      } finally {
+        client.trackProgress()
+      }
+    })
   }
 
   async deleteFile(remotePath: string): Promise<void> {
-    await this.manager.getClient().remove(remotePath)
+    await this.manager.runOnMainClient((client) => client.remove(remotePath))
   }
 
   async deleteDirectory(remotePath: string): Promise<void> {
-    await this.manager.getClient().removeDir(remotePath)
+    await this.manager.runOnMainClient((client) => client.removeDir(remotePath))
   }
 
   async rename(oldPath: string, newPath: string): Promise<void> {
-    await this.manager.getClient().rename(oldPath, newPath)
+    await this.manager.runOnMainClient((client) => client.rename(oldPath, newPath))
   }
 
   async mkdir(remotePath: string): Promise<void> {
-    await this.manager.getClient().ensureDir(remotePath)
-    // ensureDir changes cwd, so go back to parent
-    const parent = remotePath.substring(0, remotePath.lastIndexOf('/')) || '/'
-    await this.manager.getClient().cd(parent)
+    await this.manager.runOnMainClient(async (client) => {
+      await client.ensureDir(remotePath)
+      // ensureDir changes cwd, so go back to parent
+      const parent = remotePath.substring(0, remotePath.lastIndexOf('/')) || '/'
+      await client.cd(parent)
+    })
   }
 }
