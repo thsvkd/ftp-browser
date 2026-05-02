@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { FtpFileOperations } from './FtpFileOperations'
-import type { FtpConnectionManager } from './FtpConnectionManager'
+import type { FtpConnectionManager, FtpMutationEvent } from './FtpConnectionManager'
 
 interface MockClient {
   uploadFrom: ReturnType<typeof vi.fn>
@@ -13,7 +13,11 @@ interface MockClient {
   trackProgress: ReturnType<typeof vi.fn>
 }
 
-function createMockManager(): { manager: FtpConnectionManager; client: MockClient } {
+function createMockManager(): {
+  manager: FtpConnectionManager
+  client: MockClient
+  emit: ReturnType<typeof vi.fn>
+} {
   const mockClient: MockClient = {
     uploadFrom: vi.fn().mockResolvedValue(undefined),
     downloadTo: vi.fn().mockResolvedValue(undefined),
@@ -25,23 +29,28 @@ function createMockManager(): { manager: FtpConnectionManager; client: MockClien
     trackProgress: vi.fn()
   }
 
+  const emit = vi.fn()
   return {
     manager: {
       getClient: vi.fn(() => mockClient),
-      runOnMainClient: vi.fn(<T>(task: (c: MockClient) => Promise<T>) => task(mockClient))
+      runOnMainClient: vi.fn(<T>(task: (c: MockClient) => Promise<T>) => task(mockClient)),
+      emit
     } as unknown as FtpConnectionManager,
-    client: mockClient
+    client: mockClient,
+    emit
   }
 }
 
 describe('FtpFileOperations', () => {
   let ops: FtpFileOperations
   let mockClient: ReturnType<typeof createMockManager>['client']
+  let emit: ReturnType<typeof createMockManager>['emit']
 
   beforeEach(() => {
     vi.clearAllMocks()
     const mock = createMockManager()
     mockClient = mock.client
+    emit = mock.emit
     ops = new FtpFileOperations(mock.manager)
   })
 
@@ -123,6 +132,65 @@ describe('FtpFileOperations', () => {
 
       expect(mockClient.ensureDir).toHaveBeenCalledWith('/newdir')
       expect(mockClient.cd).toHaveBeenCalledWith('/')
+    })
+  })
+
+  describe('mutation events', () => {
+    function lastMutation(): FtpMutationEvent | undefined {
+      const calls = emit.mock.calls.filter((c) => c[0] === 'mutation')
+      return calls.length ? (calls[calls.length - 1][1] as FtpMutationEvent) : undefined
+    }
+
+    it('emits "upload" mutation after a successful upload', async () => {
+      await ops.upload('/local/a.txt', '/remote/a.txt')
+      expect(lastMutation()).toEqual({ kind: 'upload', remotePath: '/remote/a.txt' })
+    })
+
+    it('does NOT emit a mutation when upload fails', async () => {
+      mockClient.uploadFrom.mockRejectedValueOnce(new Error('boom'))
+      await expect(ops.upload('/local/a.txt', '/remote/a.txt')).rejects.toThrow('boom')
+      expect(lastMutation()).toBeUndefined()
+    })
+
+    it('does NOT emit a mutation when deleteDirectory fails', async () => {
+      mockClient.removeDir.mockRejectedValueOnce(new Error('perm denied'))
+      await expect(ops.deleteDirectory('/remote/dir')).rejects.toThrow('perm denied')
+      expect(lastMutation()).toBeUndefined()
+    })
+
+    it('does NOT emit a mutation when rename fails', async () => {
+      mockClient.rename.mockRejectedValueOnce(new Error('not found'))
+      await expect(ops.rename('/old', '/new')).rejects.toThrow('not found')
+      expect(lastMutation()).toBeUndefined()
+    })
+
+    it('does NOT emit a mutation for download (read-only)', async () => {
+      await ops.download('/remote/a.txt', '/local/a.txt')
+      expect(lastMutation()).toBeUndefined()
+    })
+
+    it('emits "delete" mutation after deleteFile', async () => {
+      await ops.deleteFile('/remote/a.txt')
+      expect(lastMutation()).toEqual({ kind: 'delete', remotePath: '/remote/a.txt' })
+    })
+
+    it('emits "delete" mutation after deleteDirectory', async () => {
+      await ops.deleteDirectory('/remote/dir')
+      expect(lastMutation()).toEqual({ kind: 'delete', remotePath: '/remote/dir' })
+    })
+
+    it('emits "rename" mutation with both paths', async () => {
+      await ops.rename('/remote/old.txt', '/remote/new.txt')
+      expect(lastMutation()).toEqual({
+        kind: 'rename',
+        remotePath: '/remote/old.txt',
+        newPath: '/remote/new.txt'
+      })
+    })
+
+    it('emits "mkdir" mutation after mkdir', async () => {
+      await ops.mkdir('/remote/parent/newdir')
+      expect(lastMutation()).toEqual({ kind: 'mkdir', remotePath: '/remote/parent/newdir' })
     })
   })
 })

@@ -9,6 +9,16 @@ import type {
   FtpConnectionState
 } from '@shared/types/ftp'
 
+/**
+ * 원격 측 상태를 변경한 작업의 알림. 폴더 미리보기 등 캐시 무효화 hook이 구독한다.
+ * `download`처럼 read-only 작업은 emit하지 않는다.
+ */
+export interface FtpMutationEvent {
+  kind: 'delete' | 'rename' | 'mkdir' | 'upload'
+  remotePath: string
+  newPath?: string
+}
+
 const CLIENT_TIMEOUT_MS = 30_000
 
 function createConfiguredClient(): Client {

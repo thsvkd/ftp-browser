@@ -34,3 +34,17 @@ CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS folder_previews (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    host                     TEXT NOT NULL,
+    port                     INTEGER NOT NULL,
+    folder_path              TEXT NOT NULL,
+    first_image_name         TEXT,
+    first_image_size         INTEGER,
+    first_image_modified_at  TEXT,
+    cached_at                TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(host, port, folder_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_folder_previews_host_port ON folder_previews(host, port);

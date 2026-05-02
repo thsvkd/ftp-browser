@@ -8,6 +8,7 @@ import { registerTransferHandlers } from './ipc/transferHandlers'
 import { registerThumbnailHandlers } from './ipc/thumbnailHandlers'
 import { registerPreviewHandlers } from './ipc/previewHandlers'
 import { registerDragHandlers } from './ipc/dragHandlers'
+import { registerGalleryHandlers } from './ipc/galleryHandlers'
 
 const isDev = !app.isPackaged
 
@@ -73,6 +74,7 @@ app.whenReady().then(() => {
   registerThumbnailHandlers(win, db, manager)
   registerPreviewHandlers(db, manager)
   registerDragHandlers(manager)
+  registerGalleryHandlers(win, db, manager)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -27,6 +27,7 @@ export class FtpFileOperations {
         client.trackProgress()
       }
     })
+    this.manager.emit('mutation', { kind: 'upload', remotePath })
   }
 
   async download(
@@ -50,14 +51,17 @@ export class FtpFileOperations {
 
   async deleteFile(remotePath: string): Promise<void> {
     await this.manager.runOnMainClient((client) => client.remove(remotePath))
+    this.manager.emit('mutation', { kind: 'delete', remotePath })
   }
 
   async deleteDirectory(remotePath: string): Promise<void> {
     await this.manager.runOnMainClient((client) => client.removeDir(remotePath))
+    this.manager.emit('mutation', { kind: 'delete', remotePath })
   }
 
   async rename(oldPath: string, newPath: string): Promise<void> {
     await this.manager.runOnMainClient((client) => client.rename(oldPath, newPath))
+    this.manager.emit('mutation', { kind: 'rename', remotePath: oldPath, newPath })
   }
 
   async mkdir(remotePath: string): Promise<void> {
@@ -67,5 +71,6 @@ export class FtpFileOperations {
       const parent = remotePath.substring(0, remotePath.lastIndexOf('/')) || '/'
       await client.cd(parent)
     })
+    this.manager.emit('mutation', { kind: 'mkdir', remotePath })
   }
 }
