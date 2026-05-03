@@ -165,8 +165,19 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
   },
 
   refresh: async () => {
-    const { currentPath } = get()
-    await get().navigateTo(currentPath)
+    // Silent refresh — same path 재로딩 시 loading 플래그를 켜지 않음.
+    // 그리드/리스트 컴포넌트가 unmount되지 않아 화면 깜빡임이 사라진다.
+    const path = get().currentPath
+    try {
+      const result = await window.api.invoke<IpcResult<FtpListData>>('ftp:list', path)
+      if (result.success) {
+        set({ entries: result.data.entries, error: null })
+      } else {
+        set({ error: result.error })
+      }
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) })
+    }
   },
 
   setConnectionState: (state) => {

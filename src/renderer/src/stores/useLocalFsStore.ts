@@ -116,13 +116,14 @@ export const useLocalFsStore = create<LocalFsStore>((set, get) => ({
   },
 
   refresh: async () => {
+    // Silent refresh — loading 플래그를 켜지 않아 컴포넌트가 unmount되지 않음.
     const path = get().currentPath
-    set({ loading: true, error: null })
+    set({ error: null })
     const outcome = await fetchListing(path)
     if (!outcome.ok) {
-      set({ error: outcome.error, loading: false })
+      set({ error: outcome.error })
       return
     }
-    set({ entries: outcome.entries, loading: false })
+    set({ entries: outcome.entries })
   }
 }))
