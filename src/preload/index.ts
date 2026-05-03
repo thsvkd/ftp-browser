@@ -35,7 +35,10 @@ const INVOKE_CHANNELS = [
   'cache:getStats',
   'cache:clear',
   // Drag
-  'drag:start'
+  'drag:start',
+  // Local thumbnails
+  'localThumbnail:request',
+  'localThumbnail:clear'
 ] as const
 
 const EVENT_CHANNELS = [
@@ -43,7 +46,9 @@ const EVENT_CHANNELS = [
   'transfer:updated',
   'transfer:progress',
   'thumbnail:ready',
-  'thumbnail:error'
+  'thumbnail:error',
+  'localThumbnail:ready',
+  'localThumbnail:error'
 ] as const
 
 type InvokeChannel = (typeof INVOKE_CHANNELS)[number]

@@ -29,6 +29,8 @@ type InvokeChannel =
   | 'cache:getStats'
   | 'cache:clear'
   | 'drag:start'
+  | 'localThumbnail:request'
+  | 'localThumbnail:clear'
 
 type EventChannel =
   | 'ftp:connectionStatus'
@@ -36,6 +38,8 @@ type EventChannel =
   | 'transfer:progress'
   | 'thumbnail:ready'
   | 'thumbnail:error'
+  | 'localThumbnail:ready'
+  | 'localThumbnail:error'
 
 interface FtpBrowserAPI {
   invoke: <T>(channel: InvokeChannel, ...args: unknown[]) => Promise<T>

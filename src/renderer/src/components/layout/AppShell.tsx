@@ -7,11 +7,13 @@ import { LocalExplorer } from '@renderer/components/local/LocalExplorer'
 import { TransferPanel } from '@renderer/components/transfer/TransferPanel'
 import { ConnectDialog } from '@renderer/components/server/ConnectDialog'
 import { useThumbnailListener } from '@renderer/hooks/useThumbnailListener'
+import { useLocalThumbnailListener } from '@renderer/hooks/useLocalThumbnailListener'
 
 export function AppShell(): React.JSX.Element {
   const [connectOpen, setConnectOpen] = useState(false)
 
   useThumbnailListener()
+  useLocalThumbnailListener()
 
   return (
     <div className="flex h-full flex-col">
