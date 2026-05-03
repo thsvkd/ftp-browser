@@ -17,6 +17,7 @@ export function RemoteExplorer(): React.JSX.Element {
   const setConnectionState = useFtpStore((s) => s.setConnectionState)
   const goBack = useFtpStore((s) => s.goBack)
   const goForward = useFtpStore((s) => s.goForward)
+  const refresh = useFtpStore((s) => s.refresh)
   const viewMode = useSettingsStore((s) => s.viewMode)
   const toggleViewMode = useSettingsStore((s) => s.toggleViewMode)
   const clearSelection = useSelectionStore((s) => s.clearSelection)
@@ -46,6 +47,43 @@ export function RemoteExplorer(): React.JSX.Element {
     } else if (e.button === 4) {
       e.preventDefault()
       goForward()
+    }
+  }
+
+  const handleKeyDown = async (e: React.KeyboardEvent): Promise<void> => {
+    if (e.key !== 'Delete') return
+    if (
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement ||
+      (e.target instanceof HTMLElement && e.target.isContentEditable)
+    ) {
+      return
+    }
+    e.preventDefault()
+    e.stopPropagation()
+
+    const sel = useSelectionStore.getState().selectedNames
+    if (sel.size === 0) return
+    const allEntries = useFtpStore.getState().entries
+    const targets = allEntries.filter((en) => sel.has(en.name))
+    if (targets.length === 0) return
+
+    const msg =
+      targets.length === 1 ? `Delete "${targets[0].name}"?` : `Delete ${targets.length} items?`
+    if (!window.confirm(msg)) return
+
+    const path = useFtpStore.getState().currentPath
+    try {
+      for (const t of targets) {
+        const remotePath = path === '/' ? `/${t.name}` : `${path}/${t.name}`
+        await window.api.invoke('ftp:delete', remotePath, t.type === 'directory')
+      }
+    } catch (err) {
+      toast.error('Failed to delete', {
+        description: err instanceof Error ? err.message : String(err)
+      })
+    } finally {
+      refresh()
     }
   }
 
@@ -142,8 +180,10 @@ export function RemoteExplorer(): React.JSX.Element {
 
   return (
     <div
-      className={`relative flex h-full flex-col ${isDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
+      tabIndex={0}
+      className={`relative flex h-full flex-col focus:outline-none ${isDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
       onMouseUp={handleMouseUp}
+      onKeyDown={handleKeyDown}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}

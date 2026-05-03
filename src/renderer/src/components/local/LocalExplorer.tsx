@@ -42,6 +42,48 @@ export function LocalExplorer(): React.JSX.Element {
     }
   }
 
+  const handleKeyDown = async (e: React.KeyboardEvent): Promise<void> => {
+    if (e.key !== 'Delete') return
+    if (
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement ||
+      (e.target instanceof HTMLElement && e.target.isContentEditable)
+    ) {
+      return
+    }
+    e.preventDefault()
+    e.stopPropagation()
+
+    const sel = useLocalSelectionStore.getState().selectedNames
+    if (sel.size === 0) return
+    const allEntries = useLocalFsStore.getState().entries
+    const targets = allEntries.filter((en) => sel.has(en.name))
+    if (targets.length === 0) return
+
+    const msg =
+      targets.length === 1 ? `Delete "${targets[0].name}"?` : `Delete ${targets.length} items?`
+    if (!window.confirm(msg)) return
+
+    try {
+      for (const t of targets) {
+        const result = await window.api.invoke<{ success: boolean; error?: string }>(
+          'local:delete',
+          t.path,
+          t.type === 'directory'
+        )
+        if (!result.success) {
+          throw new Error(result.error ?? 'Unknown error')
+        }
+      }
+    } catch (err) {
+      toast.error('Failed to delete', {
+        description: err instanceof Error ? err.message : String(err)
+      })
+    } finally {
+      refresh()
+    }
+  }
+
   const isAcceptableDrag = (e: React.DragEvent): boolean => {
     return (
       e.dataTransfer.types.includes('application/x-remote-files') ||
@@ -118,8 +160,10 @@ export function LocalExplorer(): React.JSX.Element {
 
   return (
     <div
-      className={`relative flex h-full flex-col ${isDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
+      tabIndex={0}
+      className={`relative flex h-full flex-col focus:outline-none ${isDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
       onMouseUp={handleMouseUp}
+      onKeyDown={handleKeyDown}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
