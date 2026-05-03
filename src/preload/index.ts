@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
 const INVOKE_CHANNELS = [
@@ -69,7 +69,9 @@ const api = {
     return () => {
       ipcRenderer.removeListener(channel, handler)
     }
-  }
+  },
+  // Electron 32+ removed File.path; resolve absolute path via webUtils.
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file)
 }
 
 if (process.contextIsolated) {

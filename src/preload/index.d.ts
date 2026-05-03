@@ -39,6 +39,7 @@ type EventChannel =
 interface FtpBrowserAPI {
   invoke: <T>(channel: InvokeChannel, ...args: unknown[]) => Promise<T>
   on: (channel: EventChannel, callback: (...args: unknown[]) => void) => () => void
+  getPathForFile: (file: File) => string
 }
 
 declare global {

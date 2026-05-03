@@ -98,10 +98,11 @@ export function LocalExplorer(): React.JSX.Element {
         return
       }
 
-      // Native file drops (from remote panel native drag or OS file explorer)
+      // Native file drops (from remote panel native drag or OS file explorer).
+      // Electron 32+ removed File.path; resolve via webUtils-backed bridge.
       const files = Array.from(e.dataTransfer.files)
       if (files.length > 0) {
-        const filePaths = files.map((f) => (f as File & { path: string }).path).filter(Boolean)
+        const filePaths = files.map((f) => window.api.getPathForFile(f)).filter(Boolean)
         if (filePaths.length > 0) {
           const localDir = useLocalFsStore.getState().currentPath
           await window.api.invoke('local:copyFiles', filePaths, localDir)

@@ -106,10 +106,10 @@ export function RemoteExplorer(): React.JSX.Element {
         return
       }
 
-      // Native file drop (from OS file explorer)
+      // Native file drop (from OS file explorer). Electron 32+ requires webUtils.
       const files = Array.from(e.dataTransfer.files)
       for (const file of files) {
-        const localPath = (file as File & { path: string }).path
+        const localPath = window.api.getPathForFile(file)
         if (!localPath) continue
         const fileName = file.name
         const remotePath = path === '/' ? `/${fileName}` : `${path}/${fileName}`
