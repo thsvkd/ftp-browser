@@ -29,6 +29,9 @@ type InvokeChannel =
   | 'cache:getStats'
   | 'cache:clear'
   | 'drag:start'
+  | 'gallery:remoteFolderPreview'
+  | 'gallery:localFolderPreview'
+  | 'gallery:cancelAll'
   | 'localThumbnail:request'
   | 'localThumbnail:clear'
 

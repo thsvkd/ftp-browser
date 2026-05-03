@@ -1,19 +1,18 @@
 import { create } from 'zustand'
 
-type ViewMode = 'list' | 'grid'
+export type ViewMode = 'list' | 'grid' | 'gallery'
 
 interface SettingsStore {
-  viewMode: ViewMode
-  setViewMode: (mode: ViewMode) => void
-  toggleViewMode: () => void
+  remoteViewMode: ViewMode
+  localViewMode: ViewMode
+  setRemoteViewMode: (mode: ViewMode) => void
+  setLocalViewMode: (mode: ViewMode) => void
 }
 
-export const useSettingsStore = create<SettingsStore>((set, get) => ({
-  viewMode: 'list',
+export const useSettingsStore = create<SettingsStore>((set) => ({
+  remoteViewMode: 'list',
+  localViewMode: 'list',
 
-  setViewMode: (mode) => set({ viewMode: mode }),
-
-  toggleViewMode: () => {
-    set({ viewMode: get().viewMode === 'list' ? 'grid' : 'list' })
-  }
+  setRemoteViewMode: (mode) => set({ remoteViewMode: mode }),
+  setLocalViewMode: (mode) => set({ localViewMode: mode })
 }))

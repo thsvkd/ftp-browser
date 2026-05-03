@@ -1,43 +1,35 @@
-import { useState, useRef, useCallback, useMemo } from 'react'
+import { useRef, useCallback, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
-import { useSelectionStore } from '@renderer/stores/useSelectionStore'
-import { ThumbnailImage } from '@renderer/components/thumbnail/ThumbnailImage'
-import { RemoteFolderThumbnail } from '@renderer/components/thumbnail/RemoteFolderThumbnail'
-import { ImagePreviewModal } from '@renderer/components/thumbnail/ImagePreviewModal'
-import { FileContextMenu } from './FileContextMenu'
-import { FilePropertiesDialog } from './FilePropertiesDialog'
-import type { FtpFileEntry } from '@shared/types/ftp'
+import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
+import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
+import { LocalThumbnailImage } from '@renderer/components/thumbnail/LocalThumbnailImage'
+import { LocalFolderThumbnail } from '@renderer/components/thumbnail/LocalFolderThumbnail'
+import { isRootPath } from '@renderer/lib/localPath'
+import type { LocalFileEntry } from '@shared/types/local'
 
 const CELL_SIZE = 170
 const ITEM_SIZE = 150
 
-function getFileIcon(entry: FtpFileEntry): string {
+function getFileIcon(entry: LocalFileEntry): string {
   if (entry.type === 'directory') return '\u{1F4C1}'
-  if (entry.type === 'symbolic-link') return '\u{1F517}'
   return '\u{1F4C4}'
 }
 
-interface FileGridViewProps {
+interface LocalFileGridViewProps {
   /** When true, show folders + image files only and use folder previews */
   gallery?: boolean
 }
 
-export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.Element {
-  const entries = useFtpStore((s) => s.entries)
-  const currentPath = useFtpStore((s) => s.currentPath)
-  const navigateTo = useFtpStore((s) => s.navigateTo)
-  const navigateUp = useFtpStore((s) => s.navigateUp)
+export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): React.JSX.Element {
+  const entries = useLocalFsStore((s) => s.entries)
+  const currentPath = useLocalFsStore((s) => s.currentPath)
+  const navigateTo = useLocalFsStore((s) => s.navigateTo)
+  const navigateUp = useLocalFsStore((s) => s.navigateUp)
 
-  const selectedNames = useSelectionStore((s) => s.selectedNames)
-  const selectSingle = useSelectionStore((s) => s.selectSingle)
-  const toggleSelect = useSelectionStore((s) => s.toggleSelect)
-  const selectRange = useSelectionStore((s) => s.selectRange)
-
-  const [previewEntry, setPreviewEntry] = useState<FtpFileEntry | null>(null)
-  const [contextEntry, setContextEntry] = useState<FtpFileEntry | null>(null)
-  const [contextPos, setContextPos] = useState<{ x: number; y: number } | null>(null)
-  const [propertiesEntry, setPropertiesEntry] = useState<FtpFileEntry | null>(null)
+  const selectedNames = useLocalSelectionStore((s) => s.selectedNames)
+  const selectSingle = useLocalSelectionStore((s) => s.selectSingle)
+  const toggleSelect = useLocalSelectionStore((s) => s.toggleSelect)
+  const selectRange = useLocalSelectionStore((s) => s.selectRange)
 
   const parentRef = useRef<HTMLDivElement>(null)
 
@@ -52,8 +44,8 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
 
   const sortedNames = useMemo(() => sorted.map((e) => e.name), [sorted])
 
-  const hasParentRow = currentPath !== '/'
-  const items: Array<FtpFileEntry | 'parent'> = hasParentRow ? ['parent', ...sorted] : sorted
+  const hasParentRow = !isRootPath(currentPath)
+  const items: Array<LocalFileEntry | 'parent'> = hasParentRow ? ['parent', ...sorted] : sorted
 
   const getColumnCount = useCallback((): number => {
     if (!parentRef.current) return 4
@@ -70,7 +62,7 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
     overscan: 2
   })
 
-  const handleClick = (e: React.MouseEvent, entry: FtpFileEntry): void => {
+  const handleClick = (e: React.MouseEvent, entry: LocalFileEntry): void => {
     if (e.shiftKey) {
       selectRange(entry.name, sortedNames)
     } else if (e.ctrlKey || e.metaKey) {
@@ -80,63 +72,36 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
     }
   }
 
-  const handleDoubleClick = (entry: FtpFileEntry): void => {
+  const handleDoubleClick = (entry: LocalFileEntry): void => {
     if (entry.type === 'directory') {
-      const newPath = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`
-      navigateTo(newPath)
-    } else if (entry.isImage) {
-      setPreviewEntry(entry)
+      navigateTo(entry.path)
     }
   }
 
-  const handleContextMenu = (e: React.MouseEvent, entry: FtpFileEntry | null): void => {
-    e.preventDefault()
-    if (entry && !selectedNames.has(entry.name)) {
-      selectSingle(entry.name)
-    }
-    setContextEntry(entry)
-    setContextPos({ x: e.clientX, y: e.clientY })
-  }
+  const handleDragStart = (e: React.DragEvent, entry: LocalFileEntry): void => {
+    const sel = useLocalSelectionStore.getState().selectedNames
+    const allEntries = useLocalFsStore.getState().entries
 
-  const handleDragStart = (e: React.DragEvent, entry: FtpFileEntry): void => {
-    const sel = useSelectionStore.getState().selectedNames
-    const allEntries = useFtpStore.getState().entries
-    const path = useFtpStore.getState().currentPath
-
-    let filesToDrag: Array<{ remotePath: string; fileName: string; size: number }>
+    let filesToDrag: Array<{ localPath: string; fileName: string; size: number }>
     if (sel.has(entry.name)) {
       filesToDrag = allEntries
         .filter((en) => sel.has(en.name) && en.type === 'file')
-        .map((en) => ({
-          remotePath: path === '/' ? `/${en.name}` : `${path}/${en.name}`,
-          fileName: en.name,
-          size: en.size
-        }))
+        .map((en) => ({ localPath: en.path, fileName: en.name, size: en.size }))
     } else {
       if (entry.type !== 'file') return
-      filesToDrag = [
-        {
-          remotePath: path === '/' ? `/${entry.name}` : `${path}/${entry.name}`,
-          fileName: entry.name,
-          size: entry.size
-        }
-      ]
+      filesToDrag = [{ localPath: entry.path, fileName: entry.name, size: entry.size }]
     }
     if (filesToDrag.length === 0) {
       e.preventDefault()
       return
     }
 
-    e.dataTransfer.setData('application/x-remote-files', JSON.stringify(filesToDrag))
+    e.dataTransfer.setData('application/x-local-files', JSON.stringify(filesToDrag))
     e.dataTransfer.effectAllowed = 'copy'
   }
 
   return (
-    <div
-      ref={parentRef}
-      className="flex-1 overflow-auto"
-      onContextMenu={(e) => handleContextMenu(e, null)}
-    >
+    <div ref={parentRef} className="flex-1 overflow-auto">
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,
@@ -182,12 +147,6 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
 
                 const entry = item
                 const isSelected = selectedNames.has(entry.name)
-                const folderPath =
-                  entry.type === 'directory'
-                    ? currentPath === '/'
-                      ? `/${entry.name}`
-                      : `${currentPath}/${entry.name}`
-                    : ''
 
                 return (
                   <div
@@ -200,16 +159,18 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
                     onClick={(e) => handleClick(e, entry)}
                     onDoubleClick={() => handleDoubleClick(entry)}
                     onDragStart={(e) => handleDragStart(e, entry)}
-                    onContextMenu={(e) => {
-                      e.stopPropagation()
-                      handleContextMenu(e, entry)
-                    }}
                   >
                     <div className="flex min-h-0 flex-1 items-center justify-center">
                       {entry.isImage ? (
-                        <ThumbnailImage entry={entry} size={ITEM_SIZE} />
+                        <LocalThumbnailImage
+                          localPath={entry.path}
+                          fileSize={entry.size}
+                          modifiedAt={entry.modifiedAt}
+                          alt={entry.name}
+                          size={ITEM_SIZE}
+                        />
                       ) : entry.type === 'directory' && gallery ? (
-                        <RemoteFolderThumbnail folderPath={folderPath} size={ITEM_SIZE} />
+                        <LocalFolderThumbnail folderPath={entry.path} size={ITEM_SIZE} />
                       ) : (
                         <div className="flex items-center justify-center text-3xl">
                           {getFileIcon(entry)}
@@ -234,20 +195,6 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
         <div className="flex items-center justify-center py-8 text-sm text-gray-400">
           Empty directory
         </div>
-      )}
-
-      <FileContextMenu
-        entry={contextEntry}
-        position={contextPos}
-        onClose={() => setContextPos(null)}
-        onShowProperties={setPropertiesEntry}
-      />
-      {propertiesEntry && (
-        <FilePropertiesDialog entry={propertiesEntry} onClose={() => setPropertiesEntry(null)} />
-      )}
-
-      {previewEntry && (
-        <ImagePreviewModal entry={previewEntry} onClose={() => setPreviewEntry(null)} />
       )}
     </div>
   )

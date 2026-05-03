@@ -2,10 +2,14 @@ import { useEffect, useState, useRef } from 'react'
 import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { joinLocalPath } from '@renderer/lib/localPath'
 import { toast } from 'sonner'
 import { LocalBreadcrumb } from './LocalBreadcrumb'
 import { LocalFileList } from './LocalFileList'
+import { LocalFileGridView } from './LocalFileGridView'
+import { ViewModeToggle } from '@renderer/components/common/ViewModeToggle'
 
 export function LocalExplorer(): React.JSX.Element {
   const init = useLocalFsStore((s) => s.init)
@@ -17,6 +21,9 @@ export function LocalExplorer(): React.JSX.Element {
   const refresh = useLocalFsStore((s) => s.refresh)
   const clearSelection = useLocalSelectionStore((s) => s.clearSelection)
   const enqueue = useTransferStore((s) => s.enqueue)
+  const viewMode = useSettingsStore((s) => s.localViewMode)
+  const setViewMode = useSettingsStore((s) => s.setLocalViewMode)
+  const clearLocalFolderPreviews = useGalleryStore((s) => s.clearLocal)
 
   const [isDragOver, setIsDragOver] = useState(false)
   const dragCounterRef = useRef(0)
@@ -27,10 +34,11 @@ export function LocalExplorer(): React.JSX.Element {
     }
   }, [currentPath, init])
 
-  // Clear selection on directory change
+  // Clear selection + folder preview cache on directory change
   useEffect(() => {
     clearSelection()
-  }, [currentPath, clearSelection])
+    clearLocalFolderPreviews()
+  }, [currentPath, clearSelection, clearLocalFolderPreviews])
 
   const handleMouseUp = (e: React.MouseEvent): void => {
     if (e.button === 3) {
@@ -169,8 +177,9 @@ export function LocalExplorer(): React.JSX.Element {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="flex items-center border-b border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium text-gray-500">
-        LOCAL
+      <div className="flex items-center justify-between border-b border-gray-200 bg-gray-100 px-3 py-1">
+        <span className="text-xs font-medium text-gray-500">LOCAL</span>
+        <ViewModeToggle mode={viewMode} onChange={setViewMode} />
       </div>
       {currentPath && <LocalBreadcrumb />}
       {error && <div className="bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
@@ -185,8 +194,10 @@ export function LocalExplorer(): React.JSX.Element {
         <div className="flex flex-1 items-center justify-center">
           <div className="text-sm text-gray-400">Loading...</div>
         </div>
-      ) : (
+      ) : viewMode === 'list' ? (
         <LocalFileList />
+      ) : (
+        <LocalFileGridView gallery={viewMode === 'gallery'} />
       )}
     </div>
   )

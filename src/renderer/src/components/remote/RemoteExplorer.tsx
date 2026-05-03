@@ -3,9 +3,11 @@ import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
+import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { RemoteBreadcrumb } from './RemoteBreadcrumb'
 import { FileListView } from './FileListView'
 import { FileGridView } from './FileGridView'
+import { ViewModeToggle } from '@renderer/components/common/ViewModeToggle'
 import { toast } from 'sonner'
 import type { FtpConnectionState } from '@shared/types/ftp'
 
@@ -18,19 +20,22 @@ export function RemoteExplorer(): React.JSX.Element {
   const goBack = useFtpStore((s) => s.goBack)
   const goForward = useFtpStore((s) => s.goForward)
   const refresh = useFtpStore((s) => s.refresh)
-  const viewMode = useSettingsStore((s) => s.viewMode)
-  const toggleViewMode = useSettingsStore((s) => s.toggleViewMode)
+  const viewMode = useSettingsStore((s) => s.remoteViewMode)
+  const setViewMode = useSettingsStore((s) => s.setRemoteViewMode)
   const clearSelection = useSelectionStore((s) => s.clearSelection)
   const enqueue = useTransferStore((s) => s.enqueue)
+  const clearRemoteFolderPreviews = useGalleryStore((s) => s.clearRemote)
 
   const [isDragOver, setIsDragOver] = useState(false)
   const dragCounterRef = useRef(0)
 
-  // 디렉토리 변경 시 선택 해제 + 대기 중인 썸네일 요청 취소
+  // 디렉토리 변경 시 선택 해제 + 대기 중인 썸네일/폴더 preview 요청 취소 + 캐시 무효화
   useEffect(() => {
     clearSelection()
     window.api.invoke('thumbnail:cancelAll')
-  }, [currentPath, clearSelection])
+    window.api.invoke('gallery:cancelAll')
+    clearRemoteFolderPreviews()
+  }, [currentPath, clearSelection, clearRemoteFolderPreviews])
 
   useEffect(() => {
     const unsubscribe = window.api.on('ftp:connectionStatus', (...args: unknown[]) => {
@@ -191,13 +196,7 @@ export function RemoteExplorer(): React.JSX.Element {
     >
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-100 px-3 py-1">
         <span className="text-xs font-medium text-gray-500">REMOTE</span>
-        <button
-          onClick={toggleViewMode}
-          className="rounded px-1.5 py-0.5 text-xs text-gray-500 hover:bg-gray-200"
-          title={viewMode === 'list' ? 'Switch to grid view' : 'Switch to list view'}
-        >
-          {viewMode === 'list' ? '\u2630' : '\u2637'}
-        </button>
+        <ViewModeToggle mode={viewMode} onChange={setViewMode} />
       </div>
       <RemoteBreadcrumb />
       {error && <div className="bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
@@ -212,10 +211,10 @@ export function RemoteExplorer(): React.JSX.Element {
         <div className="flex flex-1 items-center justify-center">
           <div className="text-sm text-gray-400">Loading...</div>
         </div>
-      ) : viewMode === 'grid' ? (
-        <FileGridView />
-      ) : (
+      ) : viewMode === 'list' ? (
         <FileListView />
+      ) : (
+        <FileGridView gallery={viewMode === 'gallery'} />
       )}
     </div>
   )

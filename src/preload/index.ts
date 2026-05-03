@@ -36,7 +36,10 @@ const INVOKE_CHANNELS = [
   'cache:clear',
   // Drag
   'drag:start',
-  // Local thumbnails
+  // Gallery / local thumbnails
+  'gallery:remoteFolderPreview',
+  'gallery:localFolderPreview',
+  'gallery:cancelAll',
   'localThumbnail:request',
   'localThumbnail:clear'
 ] as const

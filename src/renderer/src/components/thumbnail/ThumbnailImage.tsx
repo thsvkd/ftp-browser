@@ -7,14 +7,9 @@ import type { FtpFileEntry } from '@shared/types/ftp'
 interface ThumbnailImageProps {
   entry: FtpFileEntry
   size?: number
-  onClick?: () => void
 }
 
-export function ThumbnailImage({
-  entry,
-  size = 150,
-  onClick
-}: ThumbnailImageProps): React.JSX.Element {
+export function ThumbnailImage({ entry, size = 150 }: ThumbnailImageProps): React.JSX.Element {
   const host = useFtpStore((s) => s.host)
   const port = useFtpStore((s) => s.port)
   const currentPath = useFtpStore((s) => s.currentPath)
@@ -65,9 +60,8 @@ export function ThumbnailImage({
     return (
       <div
         ref={ref}
-        className="flex items-center justify-center cursor-pointer"
+        className="flex items-center justify-center"
         style={{ width: size, maxHeight: size }}
-        onClick={onClick}
       >
         <img
           src={thumbnailData.dataUrl}
