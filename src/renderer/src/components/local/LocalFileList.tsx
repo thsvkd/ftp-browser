@@ -124,7 +124,11 @@ export function LocalFileList(): React.JSX.Element {
               <td className="px-3 py-1.5 text-right text-gray-500">
                 {entry.type === 'file' ? formatBytes(entry.size) : '--'}
               </td>
-              <td className="px-3 py-1.5 text-gray-500">{formatDate(entry.modifiedAt)}</td>
+              <td className="w-44 max-w-[11rem] px-3 py-1.5 text-gray-500">
+                <span className="block truncate" title={formatDate(entry.modifiedAt)}>
+                  {formatDate(entry.modifiedAt)}
+                </span>
+              </td>
             </tr>
           ))}
           {sorted.length === 0 && (
