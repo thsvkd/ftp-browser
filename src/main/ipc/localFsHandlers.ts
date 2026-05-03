@@ -69,5 +69,17 @@ export function registerLocalFsHandlers(win: BrowserWindow): LocalFileSystem {
     }
   )
 
+  ipcMain.handle(
+    'local:delete',
+    async (_event, targetPath: string, isDirectory: boolean): Promise<IpcResult<void>> => {
+      try {
+        await localFs.delete(targetPath, isDirectory)
+        return { success: true, data: undefined }
+      } catch (err) {
+        return ipcError(err)
+      }
+    }
+  )
+
   return localFs
 }

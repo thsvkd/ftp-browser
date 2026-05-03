@@ -45,4 +45,12 @@ export class LocalFileSystem {
       return false
     }
   }
+
+  async delete(targetPath: string, isDirectory: boolean): Promise<void> {
+    if (isDirectory) {
+      await fs.rm(targetPath, { recursive: true, force: false })
+    } else {
+      await fs.unlink(targetPath)
+    }
+  }
 }

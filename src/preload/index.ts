@@ -21,6 +21,7 @@ const INVOKE_CHANNELS = [
   'local:selectDirectory',
   'local:selectSaveDirectory',
   'local:copyFiles',
+  'local:delete',
   // Transfer
   'transfer:enqueue',
   'transfer:cancel',

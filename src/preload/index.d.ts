@@ -18,6 +18,7 @@ type InvokeChannel =
   | 'local:selectDirectory'
   | 'local:selectSaveDirectory'
   | 'local:copyFiles'
+  | 'local:delete'
   | 'transfer:enqueue'
   | 'transfer:cancel'
   | 'transfer:clearCompleted'
