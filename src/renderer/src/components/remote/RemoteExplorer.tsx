@@ -177,6 +177,11 @@ export function RemoteExplorer(): React.JSX.Element {
         const dir = slash > 0 ? remotePath.slice(0, slash) : '/'
         if (dir !== path && dir !== '/') dirs.add(dir)
       }
+      // Best-effort directory creation. ftp:mkdir issues idempotent MKD per level
+      // and treats "already exists" as success, so a reported failure here is a
+      // hard error (socket/timeout). Real permission/quota failures that come back
+      // as an FTP negative reply are not caught here — they surface as failed file
+      // transfers in the transfer queue below.
       for (const dir of dirs) {
         const result = await window.api.invoke<IpcResult<void>>('ftp:mkdir', dir)
         if (!result.success) {

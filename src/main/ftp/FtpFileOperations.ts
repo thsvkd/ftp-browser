@@ -1,3 +1,4 @@
+import type { Client } from 'basic-ftp'
 import { FtpConnectionManager } from './FtpConnectionManager'
 
 export interface ProgressInfo {
@@ -6,6 +7,29 @@ export interface ProgressInfo {
 }
 
 type ProgressCallback = (info: ProgressInfo) => void
+
+/**
+ * Create a remote directory tree by issuing an absolute `MKD` for each path level.
+ *
+ * basic-ftp's built-in `ensureDir` enters every level with `CWD`, but some FTP
+ * servers (notably Android-based ones) reject `CWD` into directories whose names
+ * contain spaces or characters like `(` / `@` — even when the directory exists and
+ * absolute-path `STOR` works fine (`550 CWD to the invalid path`). Issuing only
+ * `MKD` with the full path avoids that broken `CWD` step entirely.
+ *
+ * `MKD` on an existing directory returns a negative reply, which `sendIgnoringError`
+ * accepts as the idempotent success case (FileZilla and other clients do the same).
+ * A directory that genuinely cannot be created is not silently lost: it surfaces
+ * later as a clear `STOR` failure in the transfer queue.
+ */
+export async function ensureRemoteDir(client: Client, remotePath: string): Promise<void> {
+  const segments = remotePath.split('/').filter(Boolean)
+  let current = ''
+  for (const segment of segments) {
+    current += `/${segment}`
+    await client.sendIgnoringError(`MKD ${current}`)
+  }
+}
 
 export class FtpFileOperations {
   constructor(private manager: FtpConnectionManager) {}
@@ -65,12 +89,7 @@ export class FtpFileOperations {
   }
 
   async mkdir(remotePath: string): Promise<void> {
-    await this.manager.runOnMainClient(async (client) => {
-      await client.ensureDir(remotePath)
-      // ensureDir changes cwd, so go back to parent
-      const parent = remotePath.substring(0, remotePath.lastIndexOf('/')) || '/'
-      await client.cd(parent)
-    })
+    await this.manager.runOnMainClient((client) => ensureRemoteDir(client, remotePath))
     this.manager.emit('mutation', { kind: 'mkdir', remotePath })
   }
 }

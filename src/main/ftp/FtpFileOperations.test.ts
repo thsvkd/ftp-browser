@@ -8,8 +8,7 @@ interface MockClient {
   remove: ReturnType<typeof vi.fn>
   removeDir: ReturnType<typeof vi.fn>
   rename: ReturnType<typeof vi.fn>
-  ensureDir: ReturnType<typeof vi.fn>
-  cd: ReturnType<typeof vi.fn>
+  sendIgnoringError: ReturnType<typeof vi.fn>
   trackProgress: ReturnType<typeof vi.fn>
 }
 
@@ -24,8 +23,7 @@ function createMockManager(): {
     remove: vi.fn().mockResolvedValue(undefined),
     removeDir: vi.fn().mockResolvedValue(undefined),
     rename: vi.fn().mockResolvedValue(undefined),
-    ensureDir: vi.fn().mockResolvedValue(undefined),
-    cd: vi.fn().mockResolvedValue(undefined),
+    sendIgnoringError: vi.fn().mockResolvedValue({ code: 257, message: '257 OK' }),
     trackProgress: vi.fn()
   }
 
@@ -120,18 +118,44 @@ describe('FtpFileOperations', () => {
   })
 
   describe('mkdir', () => {
-    it('should call ensureDir and cd back to parent', async () => {
+    it('issues an absolute MKD for each path level without any CWD', async () => {
       await ops.mkdir('/remote/parent/newdir')
 
-      expect(mockClient.ensureDir).toHaveBeenCalledWith('/remote/parent/newdir')
-      expect(mockClient.cd).toHaveBeenCalledWith('/remote/parent')
+      expect(mockClient.sendIgnoringError.mock.calls.map((c) => c[0])).toEqual([
+        'MKD /remote',
+        'MKD /remote/parent',
+        'MKD /remote/parent/newdir'
+      ])
     })
 
-    it('should cd to root if path has no parent separator', async () => {
+    it('handles a single top-level directory', async () => {
       await ops.mkdir('/newdir')
 
-      expect(mockClient.ensureDir).toHaveBeenCalledWith('/newdir')
-      expect(mockClient.cd).toHaveBeenCalledWith('/')
+      expect(mockClient.sendIgnoringError.mock.calls.map((c) => c[0])).toEqual(['MKD /newdir'])
+    })
+
+    it('preserves spaces and special characters in directory names', async () => {
+      await ops.mkdir('/device/DCIM/3GS (@3GSSSS)')
+
+      expect(mockClient.sendIgnoringError).toHaveBeenLastCalledWith('MKD /device/DCIM/3GS (@3GSSSS)')
+    })
+
+    it('resolves when MKD reports the directory already exists (the original bug)', async () => {
+      // sendIgnoringError accepts FTP negative replies, so an existing dir is the
+      // idempotent success case — no throw, unlike basic-ftp ensureDir's CWD step.
+      mockClient.sendIgnoringError.mockResolvedValue({ code: 550, message: '550 Already exists' })
+
+      await expect(ops.mkdir('/remote/parent/newdir')).resolves.toBeUndefined()
+      expect(mockClient.sendIgnoringError).toHaveBeenCalledTimes(3)
+    })
+
+    it('propagates a socket/timeout error and does NOT emit a mutation', async () => {
+      mockClient.sendIgnoringError.mockRejectedValueOnce(new Error('ECONNRESET'))
+
+      await expect(ops.mkdir('/remote/parent/newdir')).rejects.toThrow('ECONNRESET')
+
+      const mutations = emit.mock.calls.filter((c) => c[0] === 'mutation')
+      expect(mutations).toHaveLength(0)
     })
   })
 
