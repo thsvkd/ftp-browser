@@ -57,11 +57,14 @@ export class RemoteFolderPreviewCache {
     ) {
       return null
     }
+    // Legacy rows cached before item_count existed have a NULL count. Treat them
+    // as a cache miss so the folder is re-listed and the count is backfilled.
+    if (row.item_count === null) return undefined
     return {
       name: row.first_image_name,
       size: row.first_image_size,
       modifiedAt: row.first_image_modified_at,
-      itemCount: row.item_count ?? 0
+      itemCount: row.item_count
     }
   }
 
