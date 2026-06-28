@@ -3,6 +3,7 @@ import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
+import { FolderCountBadge } from './FolderCountBadge'
 import type { IpcResult } from '@shared/types/ipc'
 import type { RemoteFolderPreview } from '@shared/types/gallery'
 
@@ -141,17 +142,18 @@ function RemoteFolderPreviewImage({
         >
           {FOLDER_ICON}
         </span>
+        <FolderCountBadge count={preview.itemCount} />
       </div>
     )
   }
 
   // Loading state — show folder icon while inner thumbnail is downloading
   return (
-    <div
-      className="flex h-full w-full items-center justify-center leading-none"
-      style={{ fontSize: Math.round(size * 0.6) }}
-    >
-      {FOLDER_ICON}
+    <div className="relative flex h-full w-full items-center justify-center">
+      <span className="leading-none" style={{ fontSize: Math.round(size * 0.6) }}>
+        {FOLDER_ICON}
+      </span>
+      <FolderCountBadge count={preview.itemCount} />
     </div>
   )
 }

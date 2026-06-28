@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS folder_previews (
     first_image_name         TEXT,
     first_image_size         INTEGER,
     first_image_modified_at  TEXT,
+    item_count               INTEGER,
     cached_at                TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(host, port, folder_path)
 );

@@ -20,6 +20,12 @@ export interface RemoteFolderPreview {
   name: string
   size: number
   modifiedAt: string
+  /**
+   * Number of entries in the folder, excluding the "." and ".." references.
+   * A preview only exists for folders that contain a displayable image, so the
+   * count badge is shown only for those "thumbnail-capable" folders.
+   */
+  itemCount: number
 }
 
 export interface LocalFolderPreviewRequest {
@@ -31,4 +37,10 @@ export interface LocalFolderPreview {
   path: string
   size: number
   modifiedAt: string
+  /**
+   * Number of entries in the folder, excluding the "." and ".." references.
+   * A preview only exists for folders that contain a displayable image, so the
+   * count badge is shown only for those "thumbnail-capable" folders.
+   */
+  itemCount: number
 }

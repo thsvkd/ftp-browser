@@ -166,13 +166,17 @@ async function findFirstImage(
   remotePath: string
 ): Promise<RemoteFolderPreview | null> {
   const fileInfos = await client.list(remotePath)
-  for (const fi of fileInfos) {
+  // Exclude the "." / ".." self/parent references from the item count.
+  const entries = fileInfos.filter((fi) => fi.name !== '.' && fi.name !== '..')
+  const itemCount = entries.length
+  for (const fi of entries) {
     if (fi.isDirectory || fi.isSymbolicLink) continue
     if (!isImageFile(fi.name)) continue
     return {
       name: fi.name,
       size: fi.size,
-      modifiedAt: fi.modifiedAt?.toISOString() ?? ''
+      modifiedAt: fi.modifiedAt?.toISOString() ?? '',
+      itemCount
     }
   }
   return null

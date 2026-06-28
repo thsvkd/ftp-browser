@@ -26,7 +26,10 @@ async function findFirstImageLocal(folderPath: string): Promise<LocalFolderPrevi
   } catch {
     return null
   }
-  for (const dirent of dirents) {
+  // readdir already omits "." / "..", so this is the item count for the folder.
+  const entries = dirents.filter((d) => d.name !== '.' && d.name !== '..')
+  const itemCount = entries.length
+  for (const dirent of entries) {
     if (dirent.name.startsWith('.')) continue
     if (!dirent.isFile()) continue
     if (!isImageFile(dirent.name)) continue
@@ -37,7 +40,8 @@ async function findFirstImageLocal(folderPath: string): Promise<LocalFolderPrevi
         name: dirent.name,
         path: fullPath,
         size: stat.size,
-        modifiedAt: stat.mtime.toISOString()
+        modifiedAt: stat.mtime.toISOString(),
+        itemCount
       }
     } catch {
       continue

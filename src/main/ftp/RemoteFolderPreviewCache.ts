@@ -5,6 +5,7 @@ interface FolderPreviewRow {
   first_image_name: string | null
   first_image_size: number | null
   first_image_modified_at: string | null
+  item_count: number | null
 }
 
 /**
@@ -24,18 +25,19 @@ export class RemoteFolderPreviewCache {
 
   constructor(db: Database.Database) {
     this.stmtLookup = db.prepare(
-      `SELECT first_image_name, first_image_size, first_image_modified_at
+      `SELECT first_image_name, first_image_size, first_image_modified_at, item_count
        FROM folder_previews
        WHERE host = ? AND port = ? AND folder_path = ?`
     )
     this.stmtUpsert = db.prepare(
       `INSERT INTO folder_previews
-        (host, port, folder_path, first_image_name, first_image_size, first_image_modified_at, cached_at)
-       VALUES (@host, @port, @folderPath, @name, @size, @modifiedAt, datetime('now'))
+        (host, port, folder_path, first_image_name, first_image_size, first_image_modified_at, item_count, cached_at)
+       VALUES (@host, @port, @folderPath, @name, @size, @modifiedAt, @itemCount, datetime('now'))
        ON CONFLICT(host, port, folder_path) DO UPDATE SET
         first_image_name = excluded.first_image_name,
         first_image_size = excluded.first_image_size,
         first_image_modified_at = excluded.first_image_modified_at,
+        item_count = excluded.item_count,
         cached_at = excluded.cached_at`
     )
     this.stmtDelete = db.prepare(
@@ -58,7 +60,8 @@ export class RemoteFolderPreviewCache {
     return {
       name: row.first_image_name,
       size: row.first_image_size,
-      modifiedAt: row.first_image_modified_at
+      modifiedAt: row.first_image_modified_at,
+      itemCount: row.item_count ?? 0
     }
   }
 
@@ -69,7 +72,8 @@ export class RemoteFolderPreviewCache {
       folderPath,
       name: preview?.name ?? null,
       size: preview?.size ?? null,
-      modifiedAt: preview?.modifiedAt ?? null
+      modifiedAt: preview?.modifiedAt ?? null,
+      itemCount: preview?.itemCount ?? null
     })
   }
 

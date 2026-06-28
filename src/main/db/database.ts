@@ -81,6 +81,7 @@ export function initDatabase(): Database.Database {
         first_image_name TEXT,
         first_image_size INTEGER,
         first_image_modified_at TEXT,
+        item_count INTEGER,
         cached_at TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(host, port, folder_path)
       );
@@ -130,6 +131,7 @@ export function initDatabase(): Database.Database {
       first_image_name TEXT,
       first_image_size INTEGER,
       first_image_modified_at TEXT,
+      item_count INTEGER,
       cached_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(host, port, folder_path)
     )`)
@@ -138,6 +140,16 @@ export function initDatabase(): Database.Database {
     )
   } catch {
     // already exists
+  }
+  // Add item_count to folder_previews tables created before this column existed.
+  // "duplicate column name" is expected (column already present); anything else
+  // is a real problem and must not be swallowed silently.
+  try {
+    db.exec('ALTER TABLE folder_previews ADD COLUMN item_count INTEGER')
+  } catch (err) {
+    if (!String(err).includes('duplicate column name')) {
+      console.warn('[database] Failed to add folder_previews.item_count column:', err)
+    }
   }
 
   return db
