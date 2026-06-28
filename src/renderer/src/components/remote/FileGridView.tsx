@@ -10,12 +10,21 @@ import {
 import { ThumbnailImage } from '@renderer/components/thumbnail/ThumbnailImage'
 import { RemoteFolderThumbnail } from '@renderer/components/thumbnail/RemoteFolderThumbnail'
 import { ImagePreviewModal } from '@renderer/components/thumbnail/ImagePreviewModal'
+import { useMarqueeSelection, type MarqueeRect } from '@renderer/hooks/useMarqueeSelection'
+import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
+import { itemIndicesInRect } from '@renderer/lib/gridGeometry'
 import { filterHidden } from '@renderer/lib/utils'
 import { FileContextMenu } from './FileContextMenu'
 import { FilePropertiesDialog } from './FilePropertiesDialog'
 import type { FtpFileEntry } from '@shared/types/ftp'
 
 const GRID_ITEM_SIZE = 150
+// Spacing between cells. Roomy enough that drags reliably start a marquee
+// selection on empty space instead of grabbing an item for drag-and-drop.
+const GRID_GAP = 14
+const GRID_PADDING_X = 8
+// Module-scoped so positions survive the remount that navigation triggers.
+const SCROLL_POSITIONS = new Map<string, number>()
 
 function getFileIcon(entry: FtpFileEntry): string {
   if (entry.type === 'directory') return '\u{1F4C1}'
@@ -31,6 +40,8 @@ interface FileGridViewProps {
 export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.Element {
   const entries = useFtpStore((s) => s.entries)
   const currentPath = useFtpStore((s) => s.currentPath)
+  const host = useFtpStore((s) => s.host)
+  const port = useFtpStore((s) => s.port)
   const navigateTo = useFtpStore((s) => s.navigateTo)
   const navigateUp = useFtpStore((s) => s.navigateUp)
 
@@ -38,6 +49,7 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
   const selectSingle = useSelectionStore((s) => s.selectSingle)
   const toggleSelect = useSelectionStore((s) => s.toggleSelect)
   const selectRange = useSelectionStore((s) => s.selectRange)
+  const selectAll = useSelectionStore((s) => s.selectAll)
 
   const showHidden = useSettingsStore((s) => s.showHidden)
   const galleryThumbSize = useSettingsStore((s) => s.galleryThumbSize)
@@ -70,7 +82,8 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
 
   const getColumnCount = useCallback((): number => {
     if (!parentRef.current) return 4
-    return Math.max(1, Math.floor(parentRef.current.clientWidth / cellSize))
+    const available = parentRef.current.clientWidth - 2 * GRID_PADDING_X
+    return Math.max(1, Math.floor((available + GRID_GAP) / (cellSize + GRID_GAP)))
   }, [cellSize])
 
   const columnCount = parentRef.current ? getColumnCount() : 4
@@ -79,9 +92,33 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => cellSize,
+    estimateSize: () => cellSize + GRID_GAP,
     overscan: 2
   })
+
+  // Marquee (rubber-band) selection over empty space in the grid.
+  const namesInRect = useCallback(
+    (rect: MarqueeRect): string[] =>
+      itemIndicesInRect(
+        rect,
+        sorted.length,
+        columnCount,
+        cellSize,
+        GRID_GAP,
+        GRID_PADDING_X,
+        hasParentRow ? 1 : 0
+      ).map((i) => sorted[i].name),
+    [sorted, columnCount, cellSize, hasParentRow]
+  )
+
+  const { marquee, onMouseDown: onMarqueeMouseDown } = useMarqueeSelection({
+    scrollRef: parentRef,
+    namesInRect,
+    setSelection: selectAll,
+    getSelection: () => useSelectionStore.getState().selectedNames
+  })
+
+  useScrollRestoration(parentRef, `${host}:${port}:${currentPath}`, SCROLL_POSITIONS)
 
   // Re-measure rows when the zoom level (cell size) or column layout changes.
   // useLayoutEffect so the reflow happens before paint (no flicker on zoom).
@@ -167,8 +204,9 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
   return (
     <div
       ref={parentRef}
-      className="flex-1 overflow-auto"
+      className="flex-1 select-none overflow-auto"
       onContextMenu={(e) => handleContextMenu(e, null)}
+      onMouseDown={onMarqueeMouseDown}
     >
       <div
         style={{
@@ -177,6 +215,17 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
           position: 'relative'
         }}
       >
+        {marquee && (
+          <div
+            className="pointer-events-none absolute z-10 rounded-sm border border-blue-400 bg-blue-400/15"
+            style={{
+              left: marquee.left,
+              top: marquee.top,
+              width: marquee.width,
+              height: marquee.height
+            }}
+          />
+        )}
         {virtualizer.getVirtualItems().map((virtualRow) => {
           const startIdx = virtualRow.index * columnCount
           const rowItems = items.slice(startIdx, startIdx + columnCount)
@@ -190,15 +239,19 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
                 left: 0,
                 width: '100%',
                 height: `${virtualRow.size}px`,
-                transform: `translateY(${virtualRow.start}px)`
+                transform: `translateY(${virtualRow.start}px)`,
+                gap: GRID_GAP,
+                paddingLeft: GRID_PADDING_X,
+                paddingRight: GRID_PADDING_X
               }}
-              className="flex gap-1 px-2"
+              className="flex items-start"
             >
               {rowItems.map((item, colIdx) => {
                 if (item === 'parent') {
                   return (
                     <div
                       key="parent"
+                      data-grid-cell
                       className="flex cursor-pointer flex-col items-center overflow-hidden rounded p-2 hover:bg-blue-50"
                       style={{ width: cellSize, height: cellSize }}
                       onDoubleClick={navigateUp}
@@ -228,6 +281,7 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
                 return (
                   <div
                     key={`${virtualRow.index}-${colIdx}`}
+                    data-grid-cell
                     className={`flex cursor-pointer flex-col items-center overflow-hidden rounded p-2 ${
                       isSelected ? 'bg-blue-100' : 'hover:bg-blue-50'
                     }`}

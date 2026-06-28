@@ -1,10 +1,14 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
 import { isRootPath } from '@renderer/lib/localPath'
 import { formatBytes, formatDate, filterHidden } from '@renderer/lib/utils'
 import type { LocalFileEntry } from '@shared/types/local'
+
+// Module-scoped so positions survive the remount that navigation triggers.
+const SCROLL_POSITIONS = new Map<string, number>()
 
 function getFileIcon(entry: LocalFileEntry): string {
   if (entry.type === 'directory') return '📁'
@@ -24,6 +28,8 @@ export function LocalFileList(): React.JSX.Element {
   const selectRange = useLocalSelectionStore((s) => s.selectRange)
 
   const showHidden = useSettingsStore((s) => s.showHidden)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  useScrollRestoration(scrollRef, currentPath, SCROLL_POSITIONS)
 
   const sorted = useMemo(
     () =>
@@ -87,7 +93,7 @@ export function LocalFileList(): React.JSX.Element {
   }
 
   return (
-    <div className="flex-1 overflow-auto">
+    <div ref={scrollRef} className="flex-1 overflow-auto">
       <table className="w-full text-left text-sm">
         <thead className="sticky top-0 bg-gray-100 text-xs text-gray-500">
           <tr>

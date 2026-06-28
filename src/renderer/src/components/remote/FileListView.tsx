@@ -1,11 +1,15 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
 import { FileContextMenu } from './FileContextMenu'
 import { FilePropertiesDialog } from './FilePropertiesDialog'
 import { formatBytes, formatDate, filterHidden } from '@renderer/lib/utils'
 import type { FtpFileEntry } from '@shared/types/ftp'
+
+// Module-scoped so positions survive the remount that navigation triggers.
+const SCROLL_POSITIONS = new Map<string, number>()
 
 function getFileIcon(entry: FtpFileEntry): string {
   if (entry.type === 'directory') return '📁'
@@ -30,6 +34,10 @@ export function FileListView(): React.JSX.Element {
   const [propertiesEntry, setPropertiesEntry] = useState<FtpFileEntry | null>(null)
 
   const showHidden = useSettingsStore((s) => s.showHidden)
+  const host = useFtpStore((s) => s.host)
+  const port = useFtpStore((s) => s.port)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  useScrollRestoration(scrollRef, `${host}:${port}:${currentPath}`, SCROLL_POSITIONS)
 
   const sorted = useMemo(
     () =>
@@ -103,7 +111,11 @@ export function FileListView(): React.JSX.Element {
   }
 
   return (
-    <div className="flex-1 overflow-auto" onContextMenu={(e) => handleContextMenu(e, null)}>
+    <div
+      ref={scrollRef}
+      className="flex-1 overflow-auto"
+      onContextMenu={(e) => handleContextMenu(e, null)}
+    >
       <table className="w-full text-left text-sm">
         <thead className="sticky top-0 bg-gray-100 text-xs text-gray-500">
           <tr>

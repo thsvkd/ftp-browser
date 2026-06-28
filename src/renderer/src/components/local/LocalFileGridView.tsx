@@ -9,11 +9,20 @@ import {
 } from '@renderer/stores/useSettingsStore'
 import { LocalThumbnailImage } from '@renderer/components/thumbnail/LocalThumbnailImage'
 import { LocalFolderThumbnail } from '@renderer/components/thumbnail/LocalFolderThumbnail'
+import { useMarqueeSelection, type MarqueeRect } from '@renderer/hooks/useMarqueeSelection'
+import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
+import { itemIndicesInRect } from '@renderer/lib/gridGeometry'
 import { isRootPath } from '@renderer/lib/localPath'
 import { filterHidden } from '@renderer/lib/utils'
 import type { LocalFileEntry } from '@shared/types/local'
 
 const GRID_ITEM_SIZE = 150
+// Spacing between cells. Roomy enough that drags reliably start a marquee
+// selection on empty space instead of grabbing an item for drag-and-drop.
+const GRID_GAP = 14
+const GRID_PADDING_X = 8
+// Module-scoped so positions survive the remount that navigation triggers.
+const SCROLL_POSITIONS = new Map<string, number>()
 
 function getFileIcon(entry: LocalFileEntry): string {
   if (entry.type === 'directory') return '\u{1F4C1}'
@@ -35,6 +44,7 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
   const selectSingle = useLocalSelectionStore((s) => s.selectSingle)
   const toggleSelect = useLocalSelectionStore((s) => s.toggleSelect)
   const selectRange = useLocalSelectionStore((s) => s.selectRange)
+  const selectAll = useLocalSelectionStore((s) => s.selectAll)
 
   const showHidden = useSettingsStore((s) => s.showHidden)
   const galleryThumbSize = useSettingsStore((s) => s.galleryThumbSize)
@@ -62,7 +72,8 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
 
   const getColumnCount = useCallback((): number => {
     if (!parentRef.current) return 4
-    return Math.max(1, Math.floor(parentRef.current.clientWidth / cellSize))
+    const available = parentRef.current.clientWidth - 2 * GRID_PADDING_X
+    return Math.max(1, Math.floor((available + GRID_GAP) / (cellSize + GRID_GAP)))
   }, [cellSize])
 
   const columnCount = parentRef.current ? getColumnCount() : 4
@@ -71,9 +82,33 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => cellSize,
+    estimateSize: () => cellSize + GRID_GAP,
     overscan: 2
   })
+
+  // Marquee (rubber-band) selection over empty space in the grid.
+  const namesInRect = useCallback(
+    (rect: MarqueeRect): string[] =>
+      itemIndicesInRect(
+        rect,
+        sorted.length,
+        columnCount,
+        cellSize,
+        GRID_GAP,
+        GRID_PADDING_X,
+        hasParentRow ? 1 : 0
+      ).map((i) => sorted[i].name),
+    [sorted, columnCount, cellSize, hasParentRow]
+  )
+
+  const { marquee, onMouseDown: onMarqueeMouseDown } = useMarqueeSelection({
+    scrollRef: parentRef,
+    namesInRect,
+    setSelection: selectAll,
+    getSelection: () => useLocalSelectionStore.getState().selectedNames
+  })
+
+  useScrollRestoration(parentRef, currentPath, SCROLL_POSITIONS)
 
   // Re-measure rows when the zoom level (cell size) or column layout changes.
   // useLayoutEffect so the reflow happens before paint (no flicker on zoom).
@@ -134,7 +169,11 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
   }
 
   return (
-    <div ref={parentRef} className="flex-1 overflow-auto">
+    <div
+      ref={parentRef}
+      className="flex-1 select-none overflow-auto"
+      onMouseDown={onMarqueeMouseDown}
+    >
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,
@@ -142,6 +181,17 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
           position: 'relative'
         }}
       >
+        {marquee && (
+          <div
+            className="pointer-events-none absolute z-10 rounded-sm border border-blue-400 bg-blue-400/15"
+            style={{
+              left: marquee.left,
+              top: marquee.top,
+              width: marquee.width,
+              height: marquee.height
+            }}
+          />
+        )}
         {virtualizer.getVirtualItems().map((virtualRow) => {
           const startIdx = virtualRow.index * columnCount
           const rowItems = items.slice(startIdx, startIdx + columnCount)
@@ -155,15 +205,19 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
                 left: 0,
                 width: '100%',
                 height: `${virtualRow.size}px`,
-                transform: `translateY(${virtualRow.start}px)`
+                transform: `translateY(${virtualRow.start}px)`,
+                gap: GRID_GAP,
+                paddingLeft: GRID_PADDING_X,
+                paddingRight: GRID_PADDING_X
               }}
-              className="flex gap-1 px-2"
+              className="flex items-start"
             >
               {rowItems.map((item, colIdx) => {
                 if (item === 'parent') {
                   return (
                     <div
                       key="parent"
+                      data-grid-cell
                       className="flex cursor-pointer flex-col items-center overflow-hidden rounded p-2 hover:bg-blue-50"
                       style={{ width: cellSize, height: cellSize }}
                       onDoubleClick={navigateUp}
@@ -187,6 +241,7 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
                 return (
                   <div
                     key={`${virtualRow.index}-${colIdx}`}
+                    data-grid-cell
                     className={`flex cursor-pointer flex-col items-center overflow-hidden rounded p-2 ${
                       isSelected ? 'bg-blue-100' : 'hover:bg-blue-50'
                     }`}
