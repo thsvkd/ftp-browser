@@ -1,10 +1,10 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import { stat, mkdir } from 'fs/promises'
-import { basename, join, dirname } from 'path'
+import { basename, join, dirname, sep } from 'path'
 import { LocalFileSystem } from '../local/LocalFileSystem'
 import { OperationManager } from '../operation/OperationManager'
 import { ipcError } from '../utils/errorClassifier'
-import type { LocalListResult } from '@shared/types/local'
+import type { LocalListResult, UploadFileEntry } from '@shared/types/local'
 import type { DeleteTarget } from '@shared/types/operation'
 import type { IpcResult } from '@shared/types/ipc'
 
@@ -63,6 +63,36 @@ export function registerLocalFsHandlers(
       return ipcError(err)
     }
   })
+
+  // Expand dropped files/folders into a flat list of files to upload, with
+  // POSIX relative paths that preserve folder structure (folders recurse).
+  ipcMain.handle(
+    'local:expandForUpload',
+    async (_event, paths: string[]): Promise<IpcResult<UploadFileEntry[]>> => {
+      try {
+        const out: UploadFileEntry[] = []
+        for (const p of paths) {
+          const st = await stat(p)
+          const name = basename(p)
+          if (st.isDirectory()) {
+            const inner = await localFs.collectFiles(p)
+            for (const f of inner) {
+              out.push({
+                localPath: f.abs,
+                relativePath: `${name}/${f.rel.split(sep).join('/')}`,
+                size: f.size
+              })
+            }
+          } else {
+            out.push({ localPath: p, relativePath: name, size: st.size })
+          }
+        }
+        return { success: true, data: out }
+      } catch (err) {
+        return ipcError(err)
+      }
+    }
+  )
 
   ipcMain.handle(
     'local:copyFiles',

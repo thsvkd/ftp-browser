@@ -11,6 +11,7 @@ import { ViewModeToggle } from '@renderer/components/common/ViewModeToggle'
 import { toast } from 'sonner'
 import type { FtpConnectionState } from '@shared/types/ftp'
 import type { DeleteTarget } from '@shared/types/operation'
+import type { UploadFileEntry } from '@shared/types/local'
 import type { IpcResult } from '@shared/types/ipc'
 
 export function RemoteExplorer(): React.JSX.Element {
@@ -142,29 +143,52 @@ export function RemoteExplorer(): React.JSX.Element {
     const path = useFtpStore.getState().currentPath
 
     try {
-      // Intra-app drag from local panel
+      // Collect dropped local paths from either an intra-app drag or a native OS drop.
+      let localPaths: string[]
       const localFilesData = e.dataTransfer.getData('application/x-local-files')
       if (localFilesData) {
-        const localFiles = JSON.parse(localFilesData) as Array<{
-          localPath: string
-          fileName: string
-          size: number
-        }>
-        for (const file of localFiles) {
-          const remotePath = path === '/' ? `/${file.fileName}` : `${path}/${file.fileName}`
-          await enqueue('upload', file.localPath, remotePath, file.fileName, file.size)
-        }
+        const localFiles = JSON.parse(localFilesData) as Array<{ localPath: string }>
+        localPaths = localFiles.map((f) => f.localPath)
+      } else {
+        // Native file/folder drop (from OS file explorer). Electron 32+ requires webUtils.
+        localPaths = Array.from(e.dataTransfer.files)
+          .map((f) => window.api.getPathForFile(f))
+          .filter((p): p is string => Boolean(p))
+      }
+      if (localPaths.length === 0) return
+
+      // Expand dropped folders into their files, preserving folder structure.
+      const expanded = await window.api.invoke<IpcResult<UploadFileEntry[]>>(
+        'local:expandForUpload',
+        localPaths
+      )
+      if (!expanded.success) {
+        toast.error('Failed to read dropped items', { description: expanded.error })
         return
       }
+      const entries = expanded.data
+      const toRemote = (rel: string): string => (path === '/' ? `/${rel}` : `${path}/${rel}`)
 
-      // Native file drop (from OS file explorer). Electron 32+ requires webUtils.
-      const files = Array.from(e.dataTransfer.files)
-      for (const file of files) {
-        const localPath = window.api.getPathForFile(file)
-        if (!localPath) continue
-        const fileName = file.name
-        const remotePath = path === '/' ? `/${fileName}` : `${path}/${fileName}`
-        await enqueue('upload', localPath, remotePath, fileName, file.size)
+      // Ensure remote subdirectories exist before uploading files into them.
+      const dirs = new Set<string>()
+      for (const entry of entries) {
+        const remotePath = toRemote(entry.relativePath)
+        const slash = remotePath.lastIndexOf('/')
+        const dir = slash > 0 ? remotePath.slice(0, slash) : '/'
+        if (dir !== path && dir !== '/') dirs.add(dir)
+      }
+      for (const dir of dirs) {
+        const result = await window.api.invoke<IpcResult<void>>('ftp:mkdir', dir)
+        if (!result.success) {
+          console.warn('[RemoteExplorer] Failed to create remote directory:', dir, result.error)
+        }
+      }
+
+      // Enqueue each file for upload.
+      for (const entry of entries) {
+        const remotePath = toRemote(entry.relativePath)
+        const fileName = entry.relativePath.slice(entry.relativePath.lastIndexOf('/') + 1)
+        await enqueue('upload', entry.localPath, remotePath, fileName, entry.size)
       }
     } catch (err) {
       toast.error('Failed to enqueue upload', {

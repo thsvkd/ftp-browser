@@ -17,6 +17,7 @@ type InvokeChannel =
   | 'local:getHome'
   | 'local:selectDirectory'
   | 'local:selectSaveDirectory'
+  | 'local:expandForUpload'
   | 'local:copyFiles'
   | 'local:deleteBatch'
   | 'transfer:enqueue'
