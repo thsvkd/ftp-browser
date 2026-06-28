@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
+import { OperationManager } from '../operation/OperationManager'
 import { getDatabase } from '../db/database'
 import { ipcError } from '../utils/errorClassifier'
 import type {
@@ -10,14 +11,24 @@ import type {
   FtpServer,
   RecentPath
 } from '@shared/types/ftp'
+import type { DeleteTarget } from '@shared/types/operation'
 import type { IpcResult } from '@shared/types/ipc'
+
+/** Basename of a POSIX remote path (FTP paths always use forward slashes). */
+function remoteBasename(remotePath: string): string {
+  const parts = remotePath.split('/').filter(Boolean)
+  return parts.length > 0 ? parts[parts.length - 1] : remotePath
+}
 
 export interface FtpHandlersResult {
   manager: FtpConnectionManager
   fileOps: FtpFileOperations
 }
 
-export function registerFtpHandlers(win: BrowserWindow): FtpHandlersResult {
+export function registerFtpHandlers(
+  win: BrowserWindow,
+  operationManager: OperationManager
+): FtpHandlersResult {
   const manager = new FtpConnectionManager()
   const fileOps = new FtpFileOperations(manager)
 
@@ -226,16 +237,33 @@ export function registerFtpHandlers(win: BrowserWindow): FtpHandlersResult {
   })
 
   ipcMain.handle(
-    'ftp:delete',
-    async (_event, remotePath: string, isDirectory: boolean): Promise<IpcResult<void>> => {
+    'ftp:deleteBatch',
+    async (_event, targets: DeleteTarget[]): Promise<IpcResult<void>> => {
+      const label =
+        targets.length === 1
+          ? `Deleting ${remoteBasename(targets[0].path)}`
+          : `Deleting ${targets.length} items`
+      const job = operationManager.create('delete', label, 'files', targets.length)
+
       try {
-        if (isDirectory) {
-          await fileOps.deleteDirectory(remotePath)
-        } else {
-          await fileOps.deleteFile(remotePath)
+        for (let i = 0; i < targets.length; i++) {
+          if (operationManager.isCancelled(job.id)) {
+            operationManager.markCancelled(job.id)
+            return { success: true, data: undefined }
+          }
+          const target = targets[i]
+          operationManager.progress(job.id, i, remoteBasename(target.path))
+          if (target.isDirectory) {
+            await fileOps.deleteDirectory(target.path)
+          } else {
+            await fileOps.deleteFile(target.path)
+          }
+          operationManager.progress(job.id, i + 1, remoteBasename(target.path))
         }
+        operationManager.complete(job.id)
         return { success: true, data: undefined }
       } catch (err) {
+        operationManager.fail(job.id, err instanceof Error ? err.message : String(err))
         return ipcError(err)
       }
     }

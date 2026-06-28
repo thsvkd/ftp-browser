@@ -9,15 +9,13 @@ interface LocalThumbnailImageProps {
   fileSize: number
   modifiedAt: string
   alt: string
-  size?: number
 }
 
 export function LocalThumbnailImage({
   localPath,
   fileSize,
   modifiedAt,
-  alt,
-  size = 150
+  alt
 }: LocalThumbnailImageProps): React.JSX.Element {
   const cacheKey = buildLocalThumbnailKey(localPath, fileSize, modifiedAt)
   const thumbnailData = useLocalThumbnailStore((s) => s.thumbnails[cacheKey])
@@ -58,15 +56,11 @@ export function LocalThumbnailImage({
 
   if (thumbnailData) {
     return (
-      <div
-        ref={ref}
-        className="flex items-center justify-center"
-        style={{ width: size, maxHeight: size }}
-      >
+      <div ref={ref} className="flex h-full w-full items-center justify-center">
         <img
           src={thumbnailData.dataUrl}
           alt={alt}
-          className="max-h-full max-w-full rounded object-contain"
+          className="h-full w-full rounded object-contain"
           loading="lazy"
         />
       </div>
@@ -77,8 +71,7 @@ export function LocalThumbnailImage({
     return (
       <div
         ref={ref}
-        className="flex cursor-pointer items-center justify-center rounded bg-gray-100 text-xs text-gray-400 hover:bg-gray-200"
-        style={{ width: size, maxHeight: size }}
+        className="flex h-full w-full cursor-pointer items-center justify-center rounded bg-gray-100 text-xs text-gray-400 hover:bg-gray-200"
         onClick={() => {
           clearError(cacheKey)
           requestedRef.current = false
@@ -94,8 +87,7 @@ export function LocalThumbnailImage({
   return (
     <div
       ref={ref}
-      className="flex items-center justify-center rounded bg-gray-100 text-2xl text-gray-300"
-      style={{ width: size, height: size, maxHeight: '100%' }}
+      className="flex h-full w-full items-center justify-center rounded bg-gray-100 text-2xl text-gray-300"
     />
   )
 }

@@ -6,6 +6,8 @@ import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { joinLocalPath } from '@renderer/lib/localPath'
 import { toast } from 'sonner'
+import type { DeleteTarget } from '@shared/types/operation'
+import type { IpcResult } from '@shared/types/ipc'
 import { LocalBreadcrumb } from './LocalBreadcrumb'
 import { LocalFileList } from './LocalFileList'
 import { LocalFileGridView } from './LocalFileGridView'
@@ -68,26 +70,26 @@ export function LocalExplorer(): React.JSX.Element {
     const targets = allEntries.filter((en) => sel.has(en.name))
     if (targets.length === 0) return
 
+    const confirmBeforeDelete = useSettingsStore.getState().confirmBeforeDelete
     const msg =
       targets.length === 1 ? `Delete "${targets[0].name}"?` : `Delete ${targets.length} items?`
-    if (!window.confirm(msg)) return
+    if (confirmBeforeDelete && !window.confirm(msg)) return
 
+    const deleteTargets: DeleteTarget[] = targets.map((t) => ({
+      path: t.path,
+      isDirectory: t.type === 'directory'
+    }))
     try {
-      for (const t of targets) {
-        const result = await window.api.invoke<{ success: boolean; error?: string }>(
-          'local:delete',
-          t.path,
-          t.type === 'directory'
-        )
-        if (!result.success) {
-          throw new Error(result.error ?? 'Unknown error')
-        }
+      const result = await window.api.invoke<IpcResult<void>>('local:deleteBatch', deleteTargets)
+      if (!result.success) {
+        toast.error('Failed to delete', { description: result.error })
       }
     } catch (err) {
       toast.error('Failed to delete', {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
+      clearSelection()
       refresh()
     }
   }

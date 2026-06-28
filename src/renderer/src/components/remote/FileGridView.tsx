@@ -1,16 +1,21 @@
-import { useState, useRef, useCallback, useMemo } from 'react'
+import { useState, useRef, useCallback, useMemo, useEffect, useLayoutEffect } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
+import {
+  useSettingsStore,
+  GALLERY_CELL_PADDING,
+  GALLERY_THUMB_STEP
+} from '@renderer/stores/useSettingsStore'
 import { ThumbnailImage } from '@renderer/components/thumbnail/ThumbnailImage'
 import { RemoteFolderThumbnail } from '@renderer/components/thumbnail/RemoteFolderThumbnail'
 import { ImagePreviewModal } from '@renderer/components/thumbnail/ImagePreviewModal'
+import { filterHidden } from '@renderer/lib/utils'
 import { FileContextMenu } from './FileContextMenu'
 import { FilePropertiesDialog } from './FilePropertiesDialog'
 import type { FtpFileEntry } from '@shared/types/ftp'
 
-const CELL_SIZE = 170
-const ITEM_SIZE = 150
+const GRID_ITEM_SIZE = 150
 
 function getFileIcon(entry: FtpFileEntry): string {
   if (entry.type === 'directory') return '\u{1F4C1}'
@@ -34,6 +39,14 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
   const toggleSelect = useSelectionStore((s) => s.toggleSelect)
   const selectRange = useSelectionStore((s) => s.selectRange)
 
+  const showHidden = useSettingsStore((s) => s.showHidden)
+  const galleryThumbSize = useSettingsStore((s) => s.galleryThumbSize)
+  const adjustGalleryThumbSize = useSettingsStore((s) => s.adjustGalleryThumbSize)
+
+  // Gallery mode is zoomable; grid mode keeps a fixed thumbnail size.
+  const itemSize = gallery ? galleryThumbSize : GRID_ITEM_SIZE
+  const cellSize = itemSize + GALLERY_CELL_PADDING
+
   const [previewEntry, setPreviewEntry] = useState<FtpFileEntry | null>(null)
   const [contextEntry, setContextEntry] = useState<FtpFileEntry | null>(null)
   const [contextPos, setContextPos] = useState<{ x: number; y: number } | null>(null)
@@ -42,13 +55,13 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
   const parentRef = useRef<HTMLDivElement>(null)
 
   const sorted = useMemo(() => {
-    const filtered = gallery ? entries.filter((e) => e.type === 'directory' || e.isImage) : entries
-    return [...filtered].sort((a, b) => {
+    const base = gallery ? entries.filter((e) => e.type === 'directory' || e.isImage) : entries
+    return filterHidden(base, showHidden).sort((a, b) => {
       if (a.type === 'directory' && b.type !== 'directory') return -1
       if (a.type !== 'directory' && b.type === 'directory') return 1
       return a.name.localeCompare(b.name)
     })
-  }, [entries, gallery])
+  }, [entries, gallery, showHidden])
 
   const sortedNames = useMemo(() => sorted.map((e) => e.name), [sorted])
 
@@ -57,8 +70,8 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
 
   const getColumnCount = useCallback((): number => {
     if (!parentRef.current) return 4
-    return Math.max(1, Math.floor(parentRef.current.clientWidth / CELL_SIZE))
-  }, [])
+    return Math.max(1, Math.floor(parentRef.current.clientWidth / cellSize))
+  }, [cellSize])
 
   const columnCount = parentRef.current ? getColumnCount() : 4
   const rowCount = Math.ceil(items.length / columnCount)
@@ -66,9 +79,29 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => CELL_SIZE,
+    estimateSize: () => cellSize,
     overscan: 2
   })
+
+  // Re-measure rows when the zoom level (cell size) or column layout changes.
+  // useLayoutEffect so the reflow happens before paint (no flicker on zoom).
+  useLayoutEffect(() => {
+    virtualizer.measure()
+  }, [cellSize, columnCount, virtualizer])
+
+  // Ctrl+wheel zooms gallery thumbnails. Native non-passive listener so we can
+  // preventDefault (otherwise Electron zooms the whole page).
+  useEffect(() => {
+    const el = parentRef.current
+    if (!el || !gallery) return
+    const onWheel = (e: WheelEvent): void => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      adjustGalleryThumbSize(e.deltaY < 0 ? GALLERY_THUMB_STEP : -GALLERY_THUMB_STEP)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [gallery, adjustGalleryThumbSize])
 
   const handleClick = (e: React.MouseEvent, entry: FtpFileEntry): void => {
     if (e.shiftKey) {
@@ -167,10 +200,13 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
                     <div
                       key="parent"
                       className="flex cursor-pointer flex-col items-center overflow-hidden rounded p-2 hover:bg-blue-50"
-                      style={{ width: CELL_SIZE, height: CELL_SIZE }}
+                      style={{ width: cellSize, height: cellSize }}
                       onDoubleClick={navigateUp}
                     >
-                      <div className="flex min-h-0 flex-1 items-center justify-center text-3xl">
+                      <div
+                        className="flex min-h-0 w-full flex-1 items-center justify-center leading-none"
+                        style={{ fontSize: Math.round(itemSize * 0.55) }}
+                      >
                         {'\u{1F4C1}'}
                       </div>
                       <span className="mt-1 max-w-full flex-shrink-0 truncate text-xs text-gray-500">
@@ -195,7 +231,7 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
                     className={`flex cursor-pointer flex-col items-center overflow-hidden rounded p-2 ${
                       isSelected ? 'bg-blue-100' : 'hover:bg-blue-50'
                     }`}
-                    style={{ width: CELL_SIZE, height: CELL_SIZE }}
+                    style={{ width: cellSize, height: cellSize }}
                     draggable={entry.type === 'file'}
                     onClick={(e) => handleClick(e, entry)}
                     onDoubleClick={() => handleDoubleClick(entry)}
@@ -205,13 +241,16 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
                       handleContextMenu(e, entry)
                     }}
                   >
-                    <div className="flex min-h-0 flex-1 items-center justify-center">
+                    <div className="flex min-h-0 w-full flex-1 items-center justify-center">
                       {entry.isImage ? (
-                        <ThumbnailImage entry={entry} size={ITEM_SIZE} />
+                        <ThumbnailImage entry={entry} />
                       ) : entry.type === 'directory' && gallery ? (
-                        <RemoteFolderThumbnail folderPath={folderPath} size={ITEM_SIZE} />
+                        <RemoteFolderThumbnail folderPath={folderPath} size={itemSize} />
                       ) : (
-                        <div className="flex items-center justify-center text-3xl">
+                        <div
+                          className="flex items-center justify-center leading-none"
+                          style={{ fontSize: Math.round(itemSize * 0.5) }}
+                        >
                           {getFileIcon(entry)}
                         </div>
                       )}

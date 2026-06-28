@@ -1,14 +1,19 @@
-import { useRef, useCallback, useMemo } from 'react'
+import { useRef, useCallback, useMemo, useEffect, useLayoutEffect } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
+import {
+  useSettingsStore,
+  GALLERY_CELL_PADDING,
+  GALLERY_THUMB_STEP
+} from '@renderer/stores/useSettingsStore'
 import { LocalThumbnailImage } from '@renderer/components/thumbnail/LocalThumbnailImage'
 import { LocalFolderThumbnail } from '@renderer/components/thumbnail/LocalFolderThumbnail'
 import { isRootPath } from '@renderer/lib/localPath'
+import { filterHidden } from '@renderer/lib/utils'
 import type { LocalFileEntry } from '@shared/types/local'
 
-const CELL_SIZE = 170
-const ITEM_SIZE = 150
+const GRID_ITEM_SIZE = 150
 
 function getFileIcon(entry: LocalFileEntry): string {
   if (entry.type === 'directory') return '\u{1F4C1}'
@@ -31,16 +36,24 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
   const toggleSelect = useLocalSelectionStore((s) => s.toggleSelect)
   const selectRange = useLocalSelectionStore((s) => s.selectRange)
 
+  const showHidden = useSettingsStore((s) => s.showHidden)
+  const galleryThumbSize = useSettingsStore((s) => s.galleryThumbSize)
+  const adjustGalleryThumbSize = useSettingsStore((s) => s.adjustGalleryThumbSize)
+
+  // Gallery mode is zoomable; grid mode keeps a fixed thumbnail size.
+  const itemSize = gallery ? galleryThumbSize : GRID_ITEM_SIZE
+  const cellSize = itemSize + GALLERY_CELL_PADDING
+
   const parentRef = useRef<HTMLDivElement>(null)
 
   const sorted = useMemo(() => {
-    const filtered = gallery ? entries.filter((e) => e.type === 'directory' || e.isImage) : entries
-    return [...filtered].sort((a, b) => {
+    const base = gallery ? entries.filter((e) => e.type === 'directory' || e.isImage) : entries
+    return filterHidden(base, showHidden).sort((a, b) => {
       if (a.type === 'directory' && b.type !== 'directory') return -1
       if (a.type !== 'directory' && b.type === 'directory') return 1
       return a.name.localeCompare(b.name)
     })
-  }, [entries, gallery])
+  }, [entries, gallery, showHidden])
 
   const sortedNames = useMemo(() => sorted.map((e) => e.name), [sorted])
 
@@ -49,8 +62,8 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
 
   const getColumnCount = useCallback((): number => {
     if (!parentRef.current) return 4
-    return Math.max(1, Math.floor(parentRef.current.clientWidth / CELL_SIZE))
-  }, [])
+    return Math.max(1, Math.floor(parentRef.current.clientWidth / cellSize))
+  }, [cellSize])
 
   const columnCount = parentRef.current ? getColumnCount() : 4
   const rowCount = Math.ceil(items.length / columnCount)
@@ -58,9 +71,29 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => CELL_SIZE,
+    estimateSize: () => cellSize,
     overscan: 2
   })
+
+  // Re-measure rows when the zoom level (cell size) or column layout changes.
+  // useLayoutEffect so the reflow happens before paint (no flicker on zoom).
+  useLayoutEffect(() => {
+    virtualizer.measure()
+  }, [cellSize, columnCount, virtualizer])
+
+  // Ctrl+wheel zooms gallery thumbnails. Native non-passive listener so we can
+  // preventDefault (otherwise Electron zooms the whole page).
+  useEffect(() => {
+    const el = parentRef.current
+    if (!el || !gallery) return
+    const onWheel = (e: WheelEvent): void => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      adjustGalleryThumbSize(e.deltaY < 0 ? GALLERY_THUMB_STEP : -GALLERY_THUMB_STEP)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [gallery, adjustGalleryThumbSize])
 
   const handleClick = (e: React.MouseEvent, entry: LocalFileEntry): void => {
     if (e.shiftKey) {
@@ -132,10 +165,13 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
                     <div
                       key="parent"
                       className="flex cursor-pointer flex-col items-center overflow-hidden rounded p-2 hover:bg-blue-50"
-                      style={{ width: CELL_SIZE, height: CELL_SIZE }}
+                      style={{ width: cellSize, height: cellSize }}
                       onDoubleClick={navigateUp}
                     >
-                      <div className="flex min-h-0 flex-1 items-center justify-center text-3xl">
+                      <div
+                        className="flex min-h-0 w-full flex-1 items-center justify-center leading-none"
+                        style={{ fontSize: Math.round(itemSize * 0.55) }}
+                      >
                         {'\u{1F4C1}'}
                       </div>
                       <span className="mt-1 max-w-full flex-shrink-0 truncate text-xs text-gray-500">
@@ -154,25 +190,27 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
                     className={`flex cursor-pointer flex-col items-center overflow-hidden rounded p-2 ${
                       isSelected ? 'bg-blue-100' : 'hover:bg-blue-50'
                     }`}
-                    style={{ width: CELL_SIZE, height: CELL_SIZE }}
+                    style={{ width: cellSize, height: cellSize }}
                     draggable={entry.type === 'file'}
                     onClick={(e) => handleClick(e, entry)}
                     onDoubleClick={() => handleDoubleClick(entry)}
                     onDragStart={(e) => handleDragStart(e, entry)}
                   >
-                    <div className="flex min-h-0 flex-1 items-center justify-center">
+                    <div className="flex min-h-0 w-full flex-1 items-center justify-center">
                       {entry.isImage ? (
                         <LocalThumbnailImage
                           localPath={entry.path}
                           fileSize={entry.size}
                           modifiedAt={entry.modifiedAt}
                           alt={entry.name}
-                          size={ITEM_SIZE}
                         />
                       ) : entry.type === 'directory' && gallery ? (
-                        <LocalFolderThumbnail folderPath={entry.path} size={ITEM_SIZE} />
+                        <LocalFolderThumbnail folderPath={entry.path} size={itemSize} />
                       ) : (
-                        <div className="flex items-center justify-center text-3xl">
+                        <div
+                          className="flex items-center justify-center leading-none"
+                          style={{ fontSize: Math.round(itemSize * 0.5) }}
+                        >
                           {getFileIcon(entry)}
                         </div>
                       )}

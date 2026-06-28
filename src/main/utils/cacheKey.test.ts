@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { generateCacheKey } from './cacheKey'
+import { THUMBNAIL_SIZE } from '@shared/constants'
 
 describe('generateCacheKey', () => {
-  it('should generate a key from host, port, path, size, and modifiedAt', () => {
+  it('should generate a key from host, port, path, size, modifiedAt, and thumbnail size', () => {
     const key = generateCacheKey('ftp.example.com', 21, '/images/photo.jpg', 1024, '2024-01-01')
-    expect(key).toBe('ftp.example.com:21:/images/photo.jpg:1024:2024-01-01')
+    expect(key).toBe(`ftp.example.com:21:/images/photo.jpg:1024:2024-01-01:${THUMBNAIL_SIZE}`)
   })
 
   it('should produce different keys for different hosts', () => {
@@ -39,7 +40,7 @@ describe('generateCacheKey', () => {
       100,
       '2024-01-01'
     )
-    expect(key).toBe('host.com:21:/path with spaces/한글파일.jpg:100:2024-01-01')
+    expect(key).toBe(`host.com:21:/path with spaces/한글파일.jpg:100:2024-01-01:${THUMBNAIL_SIZE}`)
   })
 
   it('should handle zero file size', () => {

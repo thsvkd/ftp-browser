@@ -10,6 +10,8 @@ import { FileGridView } from './FileGridView'
 import { ViewModeToggle } from '@renderer/components/common/ViewModeToggle'
 import { toast } from 'sonner'
 import type { FtpConnectionState } from '@shared/types/ftp'
+import type { DeleteTarget } from '@shared/types/operation'
+import type { IpcResult } from '@shared/types/ipc'
 
 export function RemoteExplorer(): React.JSX.Element {
   const connectionStatus = useFtpStore((s) => s.connectionStatus)
@@ -73,21 +75,27 @@ export function RemoteExplorer(): React.JSX.Element {
     const targets = allEntries.filter((en) => sel.has(en.name))
     if (targets.length === 0) return
 
+    const confirmBeforeDelete = useSettingsStore.getState().confirmBeforeDelete
     const msg =
       targets.length === 1 ? `Delete "${targets[0].name}"?` : `Delete ${targets.length} items?`
-    if (!window.confirm(msg)) return
+    if (confirmBeforeDelete && !window.confirm(msg)) return
 
     const path = useFtpStore.getState().currentPath
+    const deleteTargets: DeleteTarget[] = targets.map((t) => ({
+      path: path === '/' ? `/${t.name}` : `${path}/${t.name}`,
+      isDirectory: t.type === 'directory'
+    }))
     try {
-      for (const t of targets) {
-        const remotePath = path === '/' ? `/${t.name}` : `${path}/${t.name}`
-        await window.api.invoke('ftp:delete', remotePath, t.type === 'directory')
+      const result = await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', deleteTargets)
+      if (!result.success) {
+        toast.error('Failed to delete', { description: result.error })
       }
     } catch (err) {
       toast.error('Failed to delete', {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
+      clearSelection()
       refresh()
     }
   }

@@ -69,11 +69,7 @@ export function RemoteFolderThumbnail({
   const preview = previewState && previewState.status === 'resolved' ? previewState.preview : null
 
   return (
-    <div
-      ref={ref}
-      className="flex items-center justify-center"
-      style={{ width: size, maxHeight: size }}
-    >
+    <div ref={ref} className="flex h-full w-full items-center justify-center">
       {preview ? (
         <RemoteFolderPreviewImage
           folderPath={folderPath}
@@ -83,7 +79,12 @@ export function RemoteFolderThumbnail({
           size={size}
         />
       ) : (
-        <div className="flex h-full w-full items-center justify-center text-3xl">{FOLDER_ICON}</div>
+        <div
+          className="flex h-full w-full items-center justify-center leading-none"
+          style={{ fontSize: Math.round(size * 0.6) }}
+        >
+          {FOLDER_ICON}
+        </div>
       )}
     </div>
   )
@@ -131,7 +132,7 @@ function RemoteFolderPreviewImage({
         <img
           src={thumbnailData.dataUrl}
           alt={`${folderPath} preview`}
-          className="max-h-full max-w-full rounded object-contain"
+          className="h-full w-full rounded object-contain"
           loading="lazy"
         />
         <span
@@ -147,8 +148,8 @@ function RemoteFolderPreviewImage({
   // Loading state — show folder icon while inner thumbnail is downloading
   return (
     <div
-      className="flex h-full w-full items-center justify-center text-3xl"
-      style={{ minHeight: size / 2 }}
+      className="flex h-full w-full items-center justify-center leading-none"
+      style={{ fontSize: Math.round(size * 0.6) }}
     >
       {FOLDER_ICON}
     </div>

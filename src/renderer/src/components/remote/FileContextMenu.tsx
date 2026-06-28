@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
+import { toast } from 'sonner'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import type { FtpFileEntry } from '@shared/types/ftp'
+import type { DeleteTarget } from '@shared/types/operation'
 import type { IpcResult } from '@shared/types/ipc'
 
 interface Position {
@@ -28,6 +31,7 @@ export function FileContextMenu({
   const refresh = useFtpStore((s) => s.refresh)
   const enqueue = useTransferStore((s) => s.enqueue)
   const selectedNames = useSelectionStore((s) => s.selectedNames)
+  const clearSelection = useSelectionStore((s) => s.clearSelection)
   const [renaming, setRenaming] = useState(false)
   const [newName, setNewName] = useState('')
 
@@ -74,15 +78,20 @@ export function FileContextMenu({
 
   const handleDelete = async (): Promise<void> => {
     if (selectedEntries.length === 0) return
+    const confirmBeforeDelete = useSettingsStore.getState().confirmBeforeDelete
     const msg = isMulti
       ? `Delete ${selectedEntries.length} items?`
       : `Delete "${selectedEntries[0].name}"?`
-    const confirmed = window.confirm(msg)
-    if (!confirmed) return
-    for (const e of selectedEntries) {
-      const remotePath = buildRemotePath(e.name)
-      await window.api.invoke('ftp:delete', remotePath, e.type === 'directory')
+    if (confirmBeforeDelete && !window.confirm(msg)) return
+    const deleteTargets: DeleteTarget[] = selectedEntries.map((e) => ({
+      path: buildRemotePath(e.name),
+      isDirectory: e.type === 'directory'
+    }))
+    const result = await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', deleteTargets)
+    if (!result.success) {
+      toast.error('Failed to delete', { description: result.error })
     }
+    clearSelection()
     refresh()
     handleClose()
   }

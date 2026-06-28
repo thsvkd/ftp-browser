@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Database, Trash2 } from 'lucide-react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
-import { formatBytes } from '@renderer/lib/utils'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { formatBytes, filterHidden } from '@renderer/lib/utils'
 import type { IpcResult } from '@shared/types/ipc'
 
 interface CacheStats {
@@ -13,12 +14,15 @@ export function StatusBar(): React.JSX.Element {
   const connectionStatus = useFtpStore((s) => s.connectionStatus)
   const entries = useFtpStore((s) => s.entries)
   const currentPath = useFtpStore((s) => s.currentPath)
+  const showHidden = useSettingsStore((s) => s.showHidden)
 
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
   const [clearing, setClearing] = useState(false)
 
-  const dirCount = entries.filter((e) => e.type === 'directory').length
-  const fileCount = entries.filter((e) => e.type === 'file').length
+  // Count only what the file views actually show (respect the hidden-files setting).
+  const visibleEntries = filterHidden(entries, showHidden)
+  const dirCount = visibleEntries.filter((e) => e.type === 'directory').length
+  const fileCount = visibleEntries.filter((e) => e.type === 'file').length
 
   const fetchCacheStats = useCallback(async () => {
     const result = await window.api.invoke<IpcResult<CacheStats>>('cache:getStats')

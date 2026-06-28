@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { FileContextMenu } from './FileContextMenu'
 import { FilePropertiesDialog } from './FilePropertiesDialog'
-import { formatBytes, formatDate } from '@renderer/lib/utils'
+import { formatBytes, formatDate, filterHidden } from '@renderer/lib/utils'
 import type { FtpFileEntry } from '@shared/types/ftp'
 
 function getFileIcon(entry: FtpFileEntry): string {
@@ -28,14 +29,16 @@ export function FileListView(): React.JSX.Element {
   const [contextPos, setContextPos] = useState<{ x: number; y: number } | null>(null)
   const [propertiesEntry, setPropertiesEntry] = useState<FtpFileEntry | null>(null)
 
+  const showHidden = useSettingsStore((s) => s.showHidden)
+
   const sorted = useMemo(
     () =>
-      [...entries].sort((a, b) => {
+      filterHidden(entries, showHidden).sort((a, b) => {
         if (a.type === 'directory' && b.type !== 'directory') return -1
         if (a.type !== 'directory' && b.type === 'directory') return 1
         return a.name.localeCompare(b.name)
       }),
-    [entries]
+    [entries, showHidden]
   )
 
   const sortedNames = useMemo(() => sorted.map((e) => e.name), [sorted])

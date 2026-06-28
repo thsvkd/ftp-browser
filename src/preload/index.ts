@@ -12,7 +12,7 @@ const INVOKE_CHANNELS = [
   'ftp:deleteServer',
   'ftp:getRecentPaths',
   'ftp:downloadPreview',
-  'ftp:delete',
+  'ftp:deleteBatch',
   'ftp:rename',
   'ftp:mkdir',
   // Local FS
@@ -21,12 +21,16 @@ const INVOKE_CHANNELS = [
   'local:selectDirectory',
   'local:selectSaveDirectory',
   'local:copyFiles',
-  'local:delete',
+  'local:deleteBatch',
   // Transfer
   'transfer:enqueue',
   'transfer:cancel',
   'transfer:clearCompleted',
   'transfer:getAll',
+  // File operations (copy/move/delete progress)
+  'operation:cancel',
+  'operation:clearFinished',
+  'operation:getAll',
   // Thumbnail
   'thumbnail:request',
   'thumbnail:requestBatch',
@@ -48,6 +52,8 @@ const EVENT_CHANNELS = [
   'ftp:connectionStatus',
   'transfer:updated',
   'transfer:progress',
+  'operation:updated',
+  'operation:progress',
   'thumbnail:ready',
   'thumbnail:error',
   'localThumbnail:ready',

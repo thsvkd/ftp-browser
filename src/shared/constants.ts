@@ -9,7 +9,9 @@ export const IMAGE_EXTENSIONS = new Set([
   '.tif'
 ])
 
-export const THUMBNAIL_SIZE = 150
+// Generated thumbnails are sized to the maximum gallery zoom so they stay crisp
+// when zoomed all the way in (the gallery max thumbnail size derives from this).
+export const THUMBNAIL_SIZE = 360
 export const THUMBNAIL_QUALITY = 80
 export const MAX_CACHE_SIZE_BYTES = 500 * 1024 * 1024 // 500MB
 export const MAX_PREVIEW_CACHE_SIZE_BYTES = 1024 * 1024 * 1024 // 1GB

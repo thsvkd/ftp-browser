@@ -6,10 +6,9 @@ import type { FtpFileEntry } from '@shared/types/ftp'
 
 interface ThumbnailImageProps {
   entry: FtpFileEntry
-  size?: number
 }
 
-export function ThumbnailImage({ entry, size = 150 }: ThumbnailImageProps): React.JSX.Element {
+export function ThumbnailImage({ entry }: ThumbnailImageProps): React.JSX.Element {
   const host = useFtpStore((s) => s.host)
   const port = useFtpStore((s) => s.port)
   const currentPath = useFtpStore((s) => s.currentPath)
@@ -58,15 +57,11 @@ export function ThumbnailImage({ entry, size = 150 }: ThumbnailImageProps): Reac
 
   if (thumbnailData) {
     return (
-      <div
-        ref={ref}
-        className="flex items-center justify-center"
-        style={{ width: size, maxHeight: size }}
-      >
+      <div ref={ref} className="flex h-full w-full items-center justify-center">
         <img
           src={thumbnailData.dataUrl}
           alt={entry.name}
-          className="max-h-full max-w-full rounded object-contain"
+          className="h-full w-full rounded object-contain"
           loading="lazy"
         />
       </div>
@@ -78,8 +73,7 @@ export function ThumbnailImage({ entry, size = 150 }: ThumbnailImageProps): Reac
     return (
       <div
         ref={ref}
-        className="flex items-center justify-center rounded bg-gray-100 text-xs text-gray-400 cursor-pointer hover:bg-gray-200"
-        style={{ width: size, maxHeight: size }}
+        className="flex h-full w-full cursor-pointer items-center justify-center rounded bg-gray-100 text-xs text-gray-400 hover:bg-gray-200"
         onClick={() => {
           clearError(cacheKey)
           requestedRef.current = false
@@ -95,8 +89,7 @@ export function ThumbnailImage({ entry, size = 150 }: ThumbnailImageProps): Reac
   return (
     <div
       ref={ref}
-      className="flex items-center justify-center rounded bg-gray-100 text-2xl text-gray-300"
-      style={{ width: size, height: size, maxHeight: '100%' }}
+      className="flex h-full w-full items-center justify-center rounded bg-gray-100 text-2xl text-gray-300"
     />
   )
 }

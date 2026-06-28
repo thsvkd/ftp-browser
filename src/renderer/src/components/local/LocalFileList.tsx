@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
 import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { isRootPath } from '@renderer/lib/localPath'
-import { formatBytes, formatDate } from '@renderer/lib/utils'
+import { formatBytes, formatDate, filterHidden } from '@renderer/lib/utils'
 import type { LocalFileEntry } from '@shared/types/local'
 
 function getFileIcon(entry: LocalFileEntry): string {
@@ -22,14 +23,16 @@ export function LocalFileList(): React.JSX.Element {
   const toggleSelect = useLocalSelectionStore((s) => s.toggleSelect)
   const selectRange = useLocalSelectionStore((s) => s.selectRange)
 
+  const showHidden = useSettingsStore((s) => s.showHidden)
+
   const sorted = useMemo(
     () =>
-      [...entries].sort((a, b) => {
+      filterHidden(entries, showHidden).sort((a, b) => {
         if (a.type === 'directory' && b.type !== 'directory') return -1
         if (a.type !== 'directory' && b.type === 'directory') return 1
         return a.name.localeCompare(b.name)
       }),
-    [entries]
+    [entries, showHidden]
   )
 
   const sortedNames = useMemo(() => sorted.map((e) => e.name), [sorted])

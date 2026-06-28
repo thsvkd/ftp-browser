@@ -5,19 +5,25 @@ import { StatusBar } from './StatusBar'
 import { RemoteExplorer } from '@renderer/components/remote/RemoteExplorer'
 import { LocalExplorer } from '@renderer/components/local/LocalExplorer'
 import { TransferPanel } from '@renderer/components/transfer/TransferPanel'
+import { OperationPanel } from '@renderer/components/transfer/OperationPanel'
 import { ConnectDialog } from '@renderer/components/server/ConnectDialog'
+import { SettingsDialog } from '@renderer/components/settings/SettingsDialog'
 import { useThumbnailListener } from '@renderer/hooks/useThumbnailListener'
 import { useLocalThumbnailListener } from '@renderer/hooks/useLocalThumbnailListener'
 
 export function AppShell(): React.JSX.Element {
   const [connectOpen, setConnectOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   useThumbnailListener()
   useLocalThumbnailListener()
 
   return (
     <div className="flex h-full flex-col">
-      <Toolbar onConnectClick={() => setConnectOpen(true)} />
+      <Toolbar
+        onConnectClick={() => setConnectOpen(true)}
+        onSettingsClick={() => setSettingsOpen(true)}
+      />
       <div className="flex-1 overflow-hidden">
         <PanelGroup direction="horizontal">
           <Panel defaultSize={50} minSize={25}>
@@ -29,9 +35,11 @@ export function AppShell(): React.JSX.Element {
           </Panel>
         </PanelGroup>
       </div>
+      <OperationPanel />
       <TransferPanel />
       <StatusBar />
       <ConnectDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

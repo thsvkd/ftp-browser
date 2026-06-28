@@ -4,6 +4,7 @@ import icon from '../../resources/icon.png?asset'
 import { initDatabase } from './db/database'
 import { registerFtpHandlers } from './ipc/ftpHandlers'
 import { registerLocalFsHandlers } from './ipc/localFsHandlers'
+import { registerOperationHandlers } from './ipc/operationHandlers'
 import { registerTransferHandlers } from './ipc/transferHandlers'
 import { registerThumbnailHandlers } from './ipc/thumbnailHandlers'
 import { registerPreviewHandlers } from './ipc/previewHandlers'
@@ -68,8 +69,9 @@ app.whenReady().then(() => {
   const db = initDatabase()
 
   // Register IPC handlers
-  const { manager, fileOps } = registerFtpHandlers(win)
-  registerLocalFsHandlers(win)
+  const operationManager = registerOperationHandlers(win)
+  const { manager, fileOps } = registerFtpHandlers(win, operationManager)
+  registerLocalFsHandlers(win, operationManager)
   registerTransferHandlers(win, fileOps)
   registerThumbnailHandlers(win, db, manager)
   registerPreviewHandlers(db, manager)
