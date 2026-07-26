@@ -13,6 +13,7 @@ import { ImagePreviewModal } from '@renderer/components/thumbnail/ImagePreviewMo
 import { useMarqueeSelection, type MarqueeRect } from '@renderer/hooks/useMarqueeSelection'
 import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
 import { itemIndicesInRect } from '@renderer/lib/gridGeometry'
+import { joinRemotePath } from '@renderer/lib/remoteDrop'
 import { filterHidden } from '@renderer/lib/utils'
 import { FileContextMenu } from './FileContextMenu'
 import { FilePropertiesDialog } from './FilePropertiesDialog'
@@ -35,9 +36,14 @@ function getFileIcon(entry: FtpFileEntry): string {
 interface FileGridViewProps {
   /** When true, show folders + image files only and use folder previews */
   gallery?: boolean
+  /** Remote folder path currently hovered during a drag, highlighted as the drop target. */
+  dragOverFolderPath?: string | null
 }
 
-export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.Element {
+export function FileGridView({
+  gallery = false,
+  dragOverFolderPath
+}: FileGridViewProps): React.JSX.Element {
   const entries = useFtpStore((s) => s.entries)
   const currentPath = useFtpStore((s) => s.currentPath)
   const host = useFtpStore((s) => s.host)
@@ -198,7 +204,10 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
     }
 
     e.dataTransfer.setData('application/x-remote-files', JSON.stringify(filesToDrag))
-    e.dataTransfer.effectAllowed = 'copy'
+    // 'copyMove' so the remote panel can accept a 'move' dropEffect (server→server
+    // move) while the local panel still accepts 'copy' (download). A 'copy'-only
+    // source would make Chromium reject a 'move' target and skip the drop event.
+    e.dataTransfer.effectAllowed = 'copyMove'
   }
 
   return (
@@ -272,18 +281,20 @@ export function FileGridView({ gallery = false }: FileGridViewProps): React.JSX.
                 const entry = item
                 const isSelected = selectedNames.has(entry.name)
                 const folderPath =
-                  entry.type === 'directory'
-                    ? currentPath === '/'
-                      ? `/${entry.name}`
-                      : `${currentPath}/${entry.name}`
-                    : ''
+                  entry.type === 'directory' ? joinRemotePath(currentPath, entry.name) : ''
+                const isDropTarget = folderPath !== '' && folderPath === dragOverFolderPath
 
                 return (
                   <div
                     key={`${virtualRow.index}-${colIdx}`}
                     data-grid-cell
+                    data-folder-path={folderPath || undefined}
                     className={`flex cursor-pointer flex-col items-center overflow-hidden rounded p-2 ${
-                      isSelected ? 'bg-blue-100' : 'hover:bg-blue-50'
+                      isDropTarget
+                        ? 'bg-blue-200 ring-1 ring-inset ring-blue-400'
+                        : isSelected
+                          ? 'bg-blue-100'
+                          : 'hover:bg-blue-50'
                     }`}
                     style={{ width: cellSize, height: cellSize }}
                     draggable={entry.type === 'file'}

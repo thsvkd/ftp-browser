@@ -2,16 +2,15 @@ import { useEffect, useState, useRef } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
-import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { RemoteBreadcrumb } from './RemoteBreadcrumb'
 import { FileListView } from './FileListView'
 import { FileGridView } from './FileGridView'
 import { ViewModeToggle } from '@renderer/components/common/ViewModeToggle'
+import { performRemoteDrop } from '@renderer/lib/remoteDrop'
 import { toast } from 'sonner'
 import type { FtpConnectionState } from '@shared/types/ftp'
 import type { DeleteTarget } from '@shared/types/operation'
-import type { UploadFileEntry } from '@shared/types/local'
 import type { IpcResult } from '@shared/types/ipc'
 
 export function RemoteExplorer(): React.JSX.Element {
@@ -26,10 +25,11 @@ export function RemoteExplorer(): React.JSX.Element {
   const viewMode = useSettingsStore((s) => s.remoteViewMode)
   const setViewMode = useSettingsStore((s) => s.setRemoteViewMode)
   const clearSelection = useSelectionStore((s) => s.clearSelection)
-  const enqueue = useTransferStore((s) => s.enqueue)
   const clearRemoteFolderPreviews = useGalleryStore((s) => s.clearRemote)
 
   const [isDragOver, setIsDragOver] = useState(false)
+  // Remote folder path currently hovered during a drag (drop lands inside it).
+  const [dragOverFolderPath, setDragOverFolderPath] = useState<string | null>(null)
   const dragCounterRef = useRef(0)
 
   // 디렉토리 변경 시 선택 해제 + 대기 중인 썸네일/폴더 preview 요청 취소 + 캐시 무효화
@@ -103,17 +103,27 @@ export function RemoteExplorer(): React.JSX.Element {
 
   const isAcceptableDrag = (e: React.DragEvent): boolean => {
     return (
+      e.dataTransfer.types.includes('application/x-remote-files') ||
       e.dataTransfer.types.includes('application/x-local-files') ||
       e.dataTransfer.types.includes('Files')
     )
   }
 
+  // Remote folder under the cursor, or null when over empty space / a file.
+  const folderPathFromEvent = (e: React.DragEvent): string | null => {
+    if (!(e.target instanceof Element)) return null
+    return e.target.closest('[data-folder-path]')?.getAttribute('data-folder-path') ?? null
+  }
+
   const handleDragOver = (e: React.DragEvent): void => {
     e.preventDefault()
     e.stopPropagation()
-    if (isAcceptableDrag(e)) {
-      e.dataTransfer.dropEffect = 'copy'
-    }
+    if (!isAcceptableDrag(e)) return
+    // Remote→remote is a move; uploads from local/OS are copies.
+    e.dataTransfer.dropEffect = e.dataTransfer.types.includes('application/x-remote-files')
+      ? 'move'
+      : 'copy'
+    setDragOverFolderPath(folderPathFromEvent(e))
   }
 
   const handleDragEnter = (e: React.DragEvent): void => {
@@ -131,6 +141,7 @@ export function RemoteExplorer(): React.JSX.Element {
     dragCounterRef.current--
     if (dragCounterRef.current === 0) {
       setIsDragOver(false)
+      setDragOverFolderPath(null)
     }
   }
 
@@ -139,67 +150,26 @@ export function RemoteExplorer(): React.JSX.Element {
     e.stopPropagation()
     dragCounterRef.current = 0
     setIsDragOver(false)
+    setDragOverFolderPath(null)
 
-    const path = useFtpStore.getState().currentPath
+    // Drop into the hovered folder when there is one, else the current directory.
+    const targetPath = folderPathFromEvent(e) ?? useFtpStore.getState().currentPath
 
     try {
-      // Collect dropped local paths from either an intra-app drag or a native OS drop.
-      let localPaths: string[]
-      const localFilesData = e.dataTransfer.getData('application/x-local-files')
-      if (localFilesData) {
-        const localFiles = JSON.parse(localFilesData) as Array<{ localPath: string }>
-        localPaths = localFiles.map((f) => f.localPath)
-      } else {
-        // Native file/folder drop (from OS file explorer). Electron 32+ requires webUtils.
-        localPaths = Array.from(e.dataTransfer.files)
-          .map((f) => window.api.getPathForFile(f))
-          .filter((p): p is string => Boolean(p))
-      }
-      if (localPaths.length === 0) return
-
-      // Expand dropped folders into their files, preserving folder structure.
-      const expanded = await window.api.invoke<IpcResult<UploadFileEntry[]>>(
-        'local:expandForUpload',
-        localPaths
-      )
-      if (!expanded.success) {
-        toast.error('Failed to read dropped items', { description: expanded.error })
-        return
-      }
-      const entries = expanded.data
-      const toRemote = (rel: string): string => (path === '/' ? `/${rel}` : `${path}/${rel}`)
-
-      // Ensure remote subdirectories exist before uploading files into them.
-      const dirs = new Set<string>()
-      for (const entry of entries) {
-        const remotePath = toRemote(entry.relativePath)
-        const slash = remotePath.lastIndexOf('/')
-        const dir = slash > 0 ? remotePath.slice(0, slash) : '/'
-        if (dir !== path && dir !== '/') dirs.add(dir)
-      }
-      // Best-effort directory creation. ftp:mkdir issues idempotent MKD per level
-      // and treats "already exists" as success, so a reported failure here is a
-      // hard error (socket/timeout). Real permission/quota failures that come back
-      // as an FTP negative reply are not caught here — they surface as failed file
-      // transfers in the transfer queue below.
-      for (const dir of dirs) {
-        const result = await window.api.invoke<IpcResult<void>>('ftp:mkdir', dir)
-        if (!result.success) {
-          console.warn('[RemoteExplorer] Failed to create remote directory:', dir, result.error)
-        }
-      }
-
-      // Enqueue each file for upload.
-      for (const entry of entries) {
-        const remotePath = toRemote(entry.relativePath)
-        const fileName = entry.relativePath.slice(entry.relativePath.lastIndexOf('/') + 1)
-        await enqueue('upload', entry.localPath, remotePath, fileName, entry.size)
-      }
+      await performRemoteDrop(e.dataTransfer, targetPath)
     } catch (err) {
-      toast.error('Failed to enqueue upload', {
+      toast.error('Failed to handle drop', {
         description: err instanceof Error ? err.message : String(err)
       })
     }
+  }
+
+  // Clear drag feedback when a drag started inside this panel ends without a drop
+  // (e.g. cancelled with Escape while still hovering — no dragleave/drop fires).
+  const handleDragEnd = (): void => {
+    dragCounterRef.current = 0
+    setIsDragOver(false)
+    setDragOverFolderPath(null)
   }
 
   if (connectionStatus !== 'connected') {
@@ -229,6 +199,7 @@ export function RemoteExplorer(): React.JSX.Element {
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
+      onDragEnd={handleDragEnd}
       onDrop={handleDrop}
     >
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-100 px-3 py-1">
@@ -249,9 +220,9 @@ export function RemoteExplorer(): React.JSX.Element {
           <div className="text-sm text-gray-400">Loading...</div>
         </div>
       ) : viewMode === 'list' ? (
-        <FileListView />
+        <FileListView dragOverFolderPath={dragOverFolderPath} />
       ) : (
-        <FileGridView gallery={viewMode === 'gallery'} />
+        <FileGridView gallery={viewMode === 'gallery'} dragOverFolderPath={dragOverFolderPath} />
       )}
     </div>
   )

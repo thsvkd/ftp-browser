@@ -3,6 +3,7 @@ import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
+import { joinRemotePath } from '@renderer/lib/remoteDrop'
 import { FileContextMenu } from './FileContextMenu'
 import { FilePropertiesDialog } from './FilePropertiesDialog'
 import { formatBytes, formatDate, filterHidden } from '@renderer/lib/utils'
@@ -18,7 +19,12 @@ function getFileIcon(entry: FtpFileEntry): string {
   return '📄'
 }
 
-export function FileListView(): React.JSX.Element {
+interface FileListViewProps {
+  /** Remote folder path currently hovered during a drag, highlighted as the drop target. */
+  dragOverFolderPath?: string | null
+}
+
+export function FileListView({ dragOverFolderPath }: FileListViewProps = {}): React.JSX.Element {
   const entries = useFtpStore((s) => s.entries)
   const currentPath = useFtpStore((s) => s.currentPath)
   const navigateTo = useFtpStore((s) => s.navigateTo)
@@ -107,7 +113,10 @@ export function FileListView(): React.JSX.Element {
     }
 
     e.dataTransfer.setData('application/x-remote-files', JSON.stringify(filesToDrag))
-    e.dataTransfer.effectAllowed = 'copy'
+    // 'copyMove' so the remote panel can accept a 'move' dropEffect (server→server
+    // move) while the local panel still accepts 'copy' (download). A 'copy'-only
+    // source would make Chromium reject a 'move' target and skip the drop event.
+    e.dataTransfer.effectAllowed = 'copyMove'
   }
 
   return (
@@ -135,37 +144,47 @@ export function FileListView(): React.JSX.Element {
               <td />
             </tr>
           )}
-          {sorted.map((entry) => (
-            <tr
-              key={entry.name}
-              className={`cursor-pointer ${
-                selectedNames.has(entry.name) ? 'bg-blue-100' : 'hover:bg-blue-50'
-              }`}
-              draggable={entry.type === 'file'}
-              onClick={(e) => handleClick(e, entry)}
-              onDoubleClick={() => handleDoubleClick(entry)}
-              onDragStart={(e) => handleDragStart(e, entry)}
-              onContextMenu={(e) => {
-                e.stopPropagation()
-                handleContextMenu(e, entry)
-              }}
-            >
-              <td className="px-3 py-1.5">
-                <span className="mr-2">{getFileIcon(entry)}</span>
-                <span className={entry.type === 'directory' ? 'font-medium' : ''}>
-                  {entry.name}
-                </span>
-              </td>
-              <td className="px-3 py-1.5 text-right text-gray-500">
-                {entry.type === 'file' ? formatBytes(entry.size) : '--'}
-              </td>
-              <td className="w-44 max-w-[11rem] px-3 py-1.5 text-gray-500">
-                <span className="block truncate" title={formatDate(entry.modifiedAt)}>
-                  {formatDate(entry.modifiedAt)}
-                </span>
-              </td>
-            </tr>
-          ))}
+          {sorted.map((entry) => {
+            const folderPath =
+              entry.type === 'directory' ? joinRemotePath(currentPath, entry.name) : null
+            const isDropTarget = folderPath !== null && folderPath === dragOverFolderPath
+            return (
+              <tr
+                key={entry.name}
+                data-folder-path={folderPath ?? undefined}
+                className={`cursor-pointer ${
+                  isDropTarget
+                    ? 'bg-blue-200 ring-1 ring-inset ring-blue-400'
+                    : selectedNames.has(entry.name)
+                      ? 'bg-blue-100'
+                      : 'hover:bg-blue-50'
+                }`}
+                draggable={entry.type === 'file'}
+                onClick={(e) => handleClick(e, entry)}
+                onDoubleClick={() => handleDoubleClick(entry)}
+                onDragStart={(e) => handleDragStart(e, entry)}
+                onContextMenu={(e) => {
+                  e.stopPropagation()
+                  handleContextMenu(e, entry)
+                }}
+              >
+                <td className="px-3 py-1.5">
+                  <span className="mr-2">{getFileIcon(entry)}</span>
+                  <span className={entry.type === 'directory' ? 'font-medium' : ''}>
+                    {entry.name}
+                  </span>
+                </td>
+                <td className="px-3 py-1.5 text-right text-gray-500">
+                  {entry.type === 'file' ? formatBytes(entry.size) : '--'}
+                </td>
+                <td className="w-44 max-w-[11rem] px-3 py-1.5 text-gray-500">
+                  <span className="block truncate" title={formatDate(entry.modifiedAt)}>
+                    {formatDate(entry.modifiedAt)}
+                  </span>
+                </td>
+              </tr>
+            )
+          })}
           {sorted.length === 0 && (
             <tr>
               <td colSpan={3} className="px-3 py-8 text-center text-gray-400">
