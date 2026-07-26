@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { formatBytes } from '@renderer/lib/utils'
 import type { TransferJob, TransferProgress } from '@shared/types/transfer'
@@ -25,10 +25,21 @@ export function TransferPanel(): React.JSX.Element {
   const clearCompleted = useTransferStore((s) => s.clearCompleted)
   const cancel = useTransferStore((s) => s.cancel)
   const [collapsed, setCollapsed] = useState(true)
+  const prevActiveCount = useRef(0)
 
   useEffect(() => {
     const unsubUpdated = window.api.on('transfer:updated', (...args: unknown[]) => {
-      setJobs(args[0] as TransferJob[])
+      const next = args[0] as TransferJob[]
+      setJobs(next)
+      // Auto-expand on the rising edge (0 -> active) so an upload/download's
+      // progress bar is visible without a manual click, mirroring how
+      // OperationPanel surfaces local copy/delete work. Only the rising edge so a
+      // user who manually collapses mid-transfer is not fought.
+      const active = next.filter((j) => j.status === 'active' || j.status === 'pending').length
+      if (active > 0 && prevActiveCount.current === 0) {
+        setCollapsed(false)
+      }
+      prevActiveCount.current = active
     })
     const unsubProgress = window.api.on('transfer:progress', (...args: unknown[]) => {
       updateProgress(args[0] as TransferProgress)
