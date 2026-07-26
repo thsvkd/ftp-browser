@@ -1,0 +1,7 @@
+# Shell scripts must use LF so POSIX shells (macOS/Linux/Git Bash) can execute
+# them regardless of the checkout platform. Without this, core.autocrlf would
+# rewrite them to CRLF on Windows and break the `#!/usr/bin/env bash` shebang.
+*.sh text eol=lf
+
+# PowerShell scripts use CRLF, the Windows convention.
+*.ps1 text eol=crlf
