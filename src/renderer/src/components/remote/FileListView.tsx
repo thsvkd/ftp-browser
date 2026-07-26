@@ -3,6 +3,7 @@ import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
+import { shouldDeferToNativeContextMenu } from '@renderer/lib/debugTools'
 import { joinRemotePath } from '@renderer/lib/remoteDrop'
 import { FileContextMenu } from './FileContextMenu'
 import { FilePropertiesDialog } from './FilePropertiesDialog'
@@ -75,6 +76,7 @@ export function FileListView({ dragOverFolderPath }: FileListViewProps = {}): Re
   }
 
   const handleContextMenu = (e: React.MouseEvent, entry: FtpFileEntry | null): void => {
+    if (shouldDeferToNativeContextMenu(e, window.api?.debugToolsEnabled ?? false)) return
     e.preventDefault()
     if (entry && !selectedNames.has(entry.name)) {
       selectSingle(entry.name)

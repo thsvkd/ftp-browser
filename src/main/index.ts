@@ -10,8 +10,11 @@ import { registerThumbnailHandlers } from './ipc/thumbnailHandlers'
 import { registerPreviewHandlers } from './ipc/previewHandlers'
 import { registerDragHandlers } from './ipc/dragHandlers'
 import { registerGalleryHandlers } from './ipc/galleryHandlers'
+import { registerDevtools } from './debug/devtools'
+import { isDebugEnabled, debugRendererArgs, DEVTOOLS_FLAG } from '@shared/debug'
 
 const isDev = !app.isPackaged
+const debugEnabled = isDebugEnabled(process.argv, app.isPackaged)
 
 let mainWindow: BrowserWindow | null = null
 
@@ -27,7 +30,8 @@ function createWindow(): BrowserWindow {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      additionalArguments: debugRendererArgs(debugEnabled)
     }
   })
 
@@ -54,14 +58,13 @@ app.whenReady().then(() => {
     app.setAppUserModelId(isDev ? process.execPath : 'com.ftp-browser')
   }
 
+  if (debugEnabled) {
+    const via = app.isPackaged ? DEVTOOLS_FLAG : 'dev build'
+    console.log(`[debug] Developer tools enabled (${via}): F12, Ctrl+Shift+C, Shift+right-click`)
+  }
+
   app.on('browser-window-created', (_, window) => {
-    if (!isDev) return
-    window.webContents.on('before-input-event', (event, input) => {
-      if (input.key === 'F12') {
-        window.webContents.toggleDevTools()
-        event.preventDefault()
-      }
-    })
+    registerDevtools(window, debugEnabled)
   })
 
   Menu.setApplicationMenu(null)

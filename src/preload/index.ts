@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import { hasDebugRendererArg } from '@shared/debug'
 
 const INVOKE_CHANNELS = [
   // FTP
@@ -87,7 +88,10 @@ const api = {
     }
   },
   // Electron 32+ removed File.path; resolve absolute path via webUtils.
-  getPathForFile: (file: File): string => webUtils.getPathForFile(file)
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
+  // Set by the main process through webPreferences.additionalArguments so views
+  // can offer developer affordances (Shift+right-click) only while debugging.
+  debugToolsEnabled: hasDebugRendererArg(process.argv)
 }
 
 if (process.contextIsolated) {

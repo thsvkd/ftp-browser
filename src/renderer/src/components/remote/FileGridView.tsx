@@ -12,6 +12,7 @@ import { RemoteFolderThumbnail } from '@renderer/components/thumbnail/RemoteFold
 import { ImagePreviewModal } from '@renderer/components/thumbnail/ImagePreviewModal'
 import { useMarqueeSelection, type MarqueeRect } from '@renderer/hooks/useMarqueeSelection'
 import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
+import { shouldDeferToNativeContextMenu } from '@renderer/lib/debugTools'
 import { itemIndicesInRect } from '@renderer/lib/gridGeometry'
 import { joinRemotePath } from '@renderer/lib/remoteDrop'
 import { filterHidden } from '@renderer/lib/utils'
@@ -166,6 +167,7 @@ export function FileGridView({
   }
 
   const handleContextMenu = (e: React.MouseEvent, entry: FtpFileEntry | null): void => {
+    if (shouldDeferToNativeContextMenu(e, window.api?.debugToolsEnabled ?? false)) return
     e.preventDefault()
     if (entry && !selectedNames.has(entry.name)) {
       selectSingle(entry.name)
