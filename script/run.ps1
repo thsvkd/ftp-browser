@@ -1,16 +1,5 @@
 #Requires -Version 5.1
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
-
-# UTF-8 출력 보장
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
-
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectDir = Split-Path -Parent $ScriptDir
-Set-Location $ProjectDir
-
-function Write-Fail ($msg) { Write-Host "[FAIL]  $msg" -ForegroundColor Red; exit 1 }
+. "$PSScriptRoot\_common.ps1"
 
 function Write-Usage {
     Write-Host "사용법: .\script\run.ps1 [--devtools]"
@@ -33,7 +22,10 @@ switch ($Mode) {
 Write-Host "========================================="
 Write-Host "  FTP Browser - 환경 확인"
 Write-Host "========================================="
-& powershell -NoProfile -ExecutionPolicy Bypass -File "$ScriptDir\setup.ps1"
+# 같은 PowerShell 엔진에서 직접 호출한다. powershell.exe(5.1)를 하드코딩하면 pwsh만
+# 설치된 환경에서 실패하고, 한 흐름 안에서 엔진이 갈려 동작이 달라진다.
+# 아래 dev 실행이 곧바로 다시 빌드하므로 프로덕션 빌드는 --no-build로 생략한다.
+& "$ScriptDir\setup.ps1" --no-build
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host ""
 
@@ -57,3 +49,4 @@ if ($DevTools) {
 } else {
     & npm run dev
 }
+exit $LASTEXITCODE

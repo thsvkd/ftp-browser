@@ -4,10 +4,10 @@
 
 ## 명령어
 
-`./scripts/setup.xxx`: 환경 설정 스크립트.
-`./scripts/run.xxx`: 에이전트 실행 스크립트.
-`./scripts/test.xxx`: 테스트 스크립트.
-`./scripts/lint.xxx`: 린트 스크립트.
+`./script/setup.xxx`: 환경 설정 스크립트. `--no-build`를 주면 프로덕션 빌드 대신 타입체크만 한다.
+`./script/run.xxx`: 앱 실행 스크립트. `setup --no-build`를 먼저 돌리고 dev 모드로 띄운다.
+`./script/test.xxx`: 테스트 스크립트.
+`./script/lint.xxx`: 린트 스크립트.
 
 ### 개발자 도구
 

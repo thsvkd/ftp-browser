@@ -1,20 +1,22 @@
-﻿#Requires -Version 5.1
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
+#Requires -Version 5.1
+. "$PSScriptRoot\_common.ps1"
 
-# UTF-8 출력 보장
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
+function Write-Usage {
+    Write-Host "사용법: .\script\setup.ps1 [--no-build]"
+    Write-Host "  (없음)      의존성 확인 + 프로덕션 빌드까지 수행"
+    Write-Host "  --no-build  프로덕션 빌드 대신 타입체크만 수행 (dev 실행 전 단계용)"
+}
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectDir = Split-Path -Parent $ScriptDir
-Set-Location $ProjectDir
-
-# -- Colors --
-function Write-Info  ($msg) { Write-Host "[INFO]  $msg" -ForegroundColor Cyan }
-function Write-Ok    ($msg) { Write-Host "[OK]    $msg" -ForegroundColor Green }
-function Write-Skip  ($msg) { Write-Host "[SKIP]  $msg" -ForegroundColor Yellow }
-function Write-Fail  ($msg) { Write-Host "[FAIL]  $msg" -ForegroundColor Red; exit 1 }
+# PowerShell은 `--` 단독 토큰만 인자 종료로 소비하므로 `--no-build`는 그대로 넘어온다.
+# run.ps1과 같은 방식으로 세 형태를 모두 인정한다.
+$Mode = if ($args.Count -ge 1) { [string]$args[0] } else { "" }
+$NoBuild = $false
+switch ($Mode) {
+    "" { }
+    { $_ -in "--no-build", "-no-build", "no-build" } { $NoBuild = $true }
+    { $_ -in "-h", "--help", "help" } { Write-Usage; exit 0 }
+    default { Write-Usage; Write-Fail "알 수 없는 인자: $Mode" }
+}
 
 # -- 1. Node.js 확인 --
 $RequiredNodeMajor = 20
@@ -67,7 +69,7 @@ if (-not (Test-Path "node_modules\better-sqlite3\build\Release\better_sqlite3.no
     $nativeOk = $false
 }
 
-$sharpCheck = & node -e "try { require('sharp'); process.exit(0) } catch { process.exit(1) }" 2>$null
+& node -e "require('sharp')" 2>$null
 if ($LASTEXITCODE -ne 0) {
     $nativeOk = $false
 }
@@ -81,29 +83,52 @@ if ($nativeOk) {
     Write-Ok "네이티브 모듈 빌드 완료"
 }
 
-# -- 5. 빌드 (out/ 디렉토리가 최신인지 확인) --
-$needBuild = $false
-
-if (-not (Test-Path "out\main") -or -not (Test-Path "out\renderer") -or -not (Test-Path "out\preload")) {
-    $needBuild = $true
-}
-
-if (-not $needBuild -and (Test-Path "out\main\index.js")) {
-    $outTime = (Get-Item "out\main\index.js").LastWriteTime
-    $newerSrc = Get-ChildItem -Path "src" -Recurse -File | Where-Object { $_.LastWriteTime -gt $outTime } | Select-Object -First 1
-    if ($newerSrc) {
-        $needBuild = $true
-    }
-}
-
-if ($needBuild) {
-    Write-Info "프로젝트 빌드 중..."
-    & npm run build
-    if ($LASTEXITCODE -ne 0) { Write-Fail "빌드 실패" }
-    Write-Ok "빌드 완료"
+# -- 5. 빌드 (--no-build면 타입체크만) --
+if ($NoBuild) {
+    # dev 모드에서는 electron-vite dev가 main/preload를 직접 빌드하고 renderer는 dev 서버가
+    # 서빙한다. 여기서 프로덕션 빌드를 하면 main/preload가 곧바로 dev 산출물에 덮여
+    # out/이 dev+프로덕션 혼합 상태가 되고, 시간만 버린다.
+    # 다만 electron-vite dev는 타입체크를 하지 않으므로 타입 안전망은 남겨 둔다.
+    Write-Info "타입체크 중 (빌드는 dev 서버가 담당)..."
+    & npm run typecheck
+    if ($LASTEXITCODE -ne 0) { Write-Fail "타입체크 실패" }
+    Write-Ok "타입체크 통과"
 } else {
-    Write-Skip "빌드 결과물 이미 최신 - 빌드 스킵"
+    # 산출물 3종 중 하나라도 없으면 out/이 불완전하므로 무조건 다시 빌드한다.
+    $buildArtifacts = @("out\main\index.js", "out\preload\index.js", "out\renderer\index.html")
+    # src/ 외에 빌드 결과를 바꾸는 루트 설정 파일들.
+    $buildConfigs = @(
+        "package.json", "electron.vite.config.ts",
+        "tsconfig.json", "tsconfig.node.json", "tsconfig.web.json",
+        "tailwind.config.js", "postcss.config.js"
+    )
+
+    $needBuild = $false
+    $missing = @($buildArtifacts | Where-Object { -not (Test-Path $_) })
+    if ($missing.Count -gt 0) {
+        $needBuild = $true
+    } else {
+        # 가장 오래된 산출물을 기준으로 삼아야 일부만 갱신된 out/을 최신으로 오판하지 않는다.
+        $oldestOut = ($buildArtifacts | ForEach-Object { (Get-Item $_).LastWriteTime } | Sort-Object)[0]
+        $buildInputs = @(Get-ChildItem -Path "src" -Recurse -File) +
+                       @($buildConfigs | Where-Object { Test-Path $_ } | ForEach-Object { Get-Item $_ })
+        $newerInput = $buildInputs | Where-Object { $_.LastWriteTime -gt $oldestOut } | Select-Object -First 1
+        if ($newerInput) { $needBuild = $true }
+    }
+
+    if ($needBuild) {
+        Write-Info "프로젝트 빌드 중..."
+        & npm run build
+        if ($LASTEXITCODE -ne 0) { Write-Fail "빌드 실패" }
+        Write-Ok "빌드 완료"
+    } else {
+        Write-Skip "빌드 결과물 이미 최신 - 빌드 스킵"
+    }
+
+    Write-Host ""
+    Write-Host "v 세팅 완료! .\script\run.ps1 로 앱을 실행하세요." -ForegroundColor Green
 }
 
-Write-Host ""
-Write-Host "v 세팅 완료! .\script\run.ps1 로 앱을 실행하세요." -ForegroundColor Green
+# 호출한 스크립트가 $LASTEXITCODE로 성공 여부를 판정할 수 있도록 명시적으로 종료한다.
+# (생략하면 직전 네이티브 명령의 종료 코드가 그대로 남아 오탐이 난다.)
+exit 0

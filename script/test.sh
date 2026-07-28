@@ -1,21 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-cd "$PROJECT_DIR"
-
-# ── Colors ──────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-
-info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
-ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()  { echo -e "${YELLOW}[SKIP]${NC}  $*"; }
-fail()  { echo -e "${RED}[FAIL]${NC}  $*"; exit 1; }
+source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 usage() {
   echo "사용법: ./script/test.sh [run|watch|coverage]"
@@ -35,7 +19,7 @@ fi
 case "$MODE" in
   run)
     info "테스트 실행 중 (vitest run)..."
-    npm test
+    npm test || fail "테스트 실패"
     ok "테스트 완료"
     ;;
   watch)
@@ -44,7 +28,7 @@ case "$MODE" in
     ;;
   coverage)
     info "테스트 + 커버리지 실행 중 (vitest run --coverage)..."
-    npm run test:coverage
+    npm run test:coverage || fail "테스트 실패"
     ok "테스트 완료"
     ;;
   -h|--help|help)

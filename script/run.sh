@@ -1,13 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-cd "$PROJECT_DIR"
-
-RED='\033[0;31m'
-NC='\033[0m'
-fail() { echo -e "${RED}[FAIL]${NC}  $*"; exit 1; }
+source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 usage() {
   echo "사용법: ./script/run.sh [--devtools]"
@@ -27,10 +19,15 @@ esac
 echo "========================================="
 echo "  FTP Browser — 환경 확인"
 echo "========================================="
-bash "$SCRIPT_DIR/setup.sh"
+# 아래 dev 실행이 곧바로 다시 빌드하므로 프로덕션 빌드는 --no-build로 생략한다.
+bash "$SCRIPT_DIR/setup.sh" --no-build
 echo ""
 
 # ── 2. 앱 실행 (dev 모드 — HMR 지원) ──────────────────
+# ELECTRON_RUN_AS_NODE 환경변수가 설정되면 Electron이 일반 Node.js로 동작하여
+# require('electron')이 내장 모듈 대신 npm 패키지로 해석됨 (VSCode 터미널 등에서 발생)
+unset ELECTRON_RUN_AS_NODE
+
 echo "========================================="
 if [ "$DEVTOOLS" -eq 1 ]; then
   echo "  FTP Browser — 앱 실행 (dev, --devtools)"

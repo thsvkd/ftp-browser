@@ -1,20 +1,5 @@
 #Requires -Version 5.1
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
-
-# UTF-8 출력 보장
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
-
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectDir = Split-Path -Parent $ScriptDir
-Set-Location $ProjectDir
-
-# -- Colors --
-function Write-Info  ($msg) { Write-Host "[INFO]  $msg" -ForegroundColor Cyan }
-function Write-Ok    ($msg) { Write-Host "[OK]    $msg" -ForegroundColor Green }
-function Write-Skip  ($msg) { Write-Host "[SKIP]  $msg" -ForegroundColor Yellow }
-function Write-Fail  ($msg) { Write-Host "[FAIL]  $msg" -ForegroundColor Red; exit 1 }
+. "$PSScriptRoot\_common.ps1"
 
 function Write-Usage {
     Write-Host "사용법: .\script\lint.ps1 [fix|check]"
@@ -22,7 +7,7 @@ function Write-Usage {
     Write-Host "  check  ESLint 검사 + Prettier 포맷 검사 (수정 없음, CI용)"
 }
 
-$Mode = if ($args.Count -ge 1) { $args[0] } else { "fix" }
+$Mode = if ($args.Count -ge 1) { [string]$args[0] } else { "fix" }
 
 # -- 의존성 확인 --
 if (-not (Test-Path "node_modules")) {
@@ -51,9 +36,12 @@ switch ($Mode) {
     }
     { $_ -in "-h", "--help", "help" } {
         Write-Usage
+        exit 0
     }
     default {
         Write-Usage
         Write-Fail "알 수 없는 모드: $Mode"
     }
 }
+
+exit 0

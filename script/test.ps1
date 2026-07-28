@@ -1,20 +1,5 @@
 #Requires -Version 5.1
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
-
-# UTF-8 출력 보장
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
-
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectDir = Split-Path -Parent $ScriptDir
-Set-Location $ProjectDir
-
-# -- Colors --
-function Write-Info  ($msg) { Write-Host "[INFO]  $msg" -ForegroundColor Cyan }
-function Write-Ok    ($msg) { Write-Host "[OK]    $msg" -ForegroundColor Green }
-function Write-Skip  ($msg) { Write-Host "[SKIP]  $msg" -ForegroundColor Yellow }
-function Write-Fail  ($msg) { Write-Host "[FAIL]  $msg" -ForegroundColor Red; exit 1 }
+. "$PSScriptRoot\_common.ps1"
 
 function Write-Usage {
     Write-Host "사용법: .\script\test.ps1 [run|watch|coverage]"
@@ -23,7 +8,7 @@ function Write-Usage {
     Write-Host "  coverage 커버리지 포함 실행 (vitest run --coverage)"
 }
 
-$Mode = if ($args.Count -ge 1) { $args[0] } else { "run" }
+$Mode = if ($args.Count -ge 1) { [string]$args[0] } else { "run" }
 
 # -- 의존성 확인 --
 if (-not (Test-Path "node_modules")) {
@@ -41,6 +26,7 @@ switch ($Mode) {
     "watch" {
         Write-Info "테스트 watch 모드 (vitest) - 종료하려면 Ctrl+C..."
         & npm run test:watch
+        exit $LASTEXITCODE
     }
     "coverage" {
         Write-Info "테스트 + 커버리지 실행 중 (vitest run --coverage)..."
@@ -50,9 +36,12 @@ switch ($Mode) {
     }
     { $_ -in "-h", "--help", "help" } {
         Write-Usage
+        exit 0
     }
     default {
         Write-Usage
         Write-Fail "알 수 없는 모드: $Mode"
     }
 }
+
+exit 0
