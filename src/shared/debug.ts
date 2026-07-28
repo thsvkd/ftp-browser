@@ -1,5 +1,5 @@
 /**
- * CLI flag that turns on every developer tool in a packaged build.
+ * CLI flag that turns on every developer tool.
  *
  * Not `--debug`: Electron hands unrecognised leading flags to Node, which
  * rejects `--debug` outright (DEP0062) and exits before the app ever starts.
@@ -10,11 +10,14 @@ export const DEVTOOLS_FLAG = '--devtools'
 export const DEBUG_RENDERER_ARG = '--ftp-browser-debug-tools'
 
 /**
- * Developer tools are always available while developing; a packaged build has
- * to opt in with `--devtools` so shipped apps stay closed by default.
+ * Developer tools stay off until the app is launched with `--devtools`.
+ *
+ * This holds for development builds too. Enabling them implicitly under `npm run
+ * dev` made F12 and right-click Inspect appear without anyone asking for them,
+ * and it meant the dev build and the shipped build behaved differently — so a
+ * flag-related regression could only ever surface after packaging.
  */
-export function isDebugEnabled(argv: readonly string[], isPackaged: boolean): boolean {
-  if (!isPackaged) return true
+export function isDebugEnabled(argv: readonly string[]): boolean {
   return argv.includes(DEVTOOLS_FLAG)
 }
 

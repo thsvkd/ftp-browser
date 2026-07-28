@@ -14,7 +14,7 @@ import { registerDevtools } from './debug/devtools'
 import { isDebugEnabled, debugRendererArgs, DEVTOOLS_FLAG } from '@shared/debug'
 
 const isDev = !app.isPackaged
-const debugEnabled = isDebugEnabled(process.argv, app.isPackaged)
+const debugEnabled = isDebugEnabled(process.argv)
 
 let mainWindow: BrowserWindow | null = null
 
@@ -59,8 +59,9 @@ app.whenReady().then(() => {
   }
 
   if (debugEnabled) {
-    const via = app.isPackaged ? DEVTOOLS_FLAG : 'dev build'
-    console.log(`[debug] Developer tools enabled (${via}): F12, Ctrl+Shift+C, Shift+right-click`)
+    console.log(
+      `[debug] Developer tools enabled (${DEVTOOLS_FLAG}): F12, Ctrl+Shift+C, Shift+right-click`
+    )
   }
 
   app.on('browser-window-created', (_, window) => {

@@ -9,11 +9,22 @@
 `./script/test.xxx`: 테스트 스크립트.
 `./script/lint.xxx`: 린트 스크립트.
 
+공통 헤더(UTF-8 출력, 프로젝트 루트 이동, `[INFO]`/`[OK]`/`[SKIP]`/`[FAIL]` 함수)는
+`script/_common.ps1` / `script/_common.sh`에 있고 각 스크립트가 첫 줄에서 dot-source(source)한다.
+
+run이 프로덕션 빌드를 건너뛰는 이유: `electron-vite dev`가 main/preload를 dev 모드로 다시 빌드하고
+renderer는 dev 서버가 서빙한다. setup에서 프로덕션 빌드를 하면 곧바로 덮여 시간만 버리고,
+`out/`이 dev(main·preload) + 프로덕션(renderer) 혼합 상태가 되어 `npm start`가 어긋난 조합을 실행한다.
+다만 `electron-vite dev`는 타입체크를 하지 않으므로 타입 안전망으로 `npm run typecheck`만 남긴다.
+
 ### 개발자 도구
 
 `./script/run.ps1 --devtools` (또는 `./script/run.sh --devtools`)로 실행하면 F12(DevTools 토글),
 Ctrl+Shift+C(요소 선택 모드), Shift+우클릭(네이티브 Inspect Element 메뉴)이 활성화된다.
-패키징 빌드는 `ftp-browser.exe --devtools`. dev 빌드는 플래그 없이도 항상 활성이다.
+패키징 빌드는 `ftp-browser.exe --devtools`.
+
+**dev 빌드도 플래그를 요구한다.** 플래그 없이 켜지면 요청하지도 않은 F12·우클릭 Inspect가 뜨고,
+무엇보다 dev와 패키징의 동작이 갈려 플래그 관련 회귀가 패키징 후에야 드러난다.
 
 플래그 이름이 `--debug`가 아닌 이유: Electron이 인식하지 못한 선행 플래그를 Node로 넘기는데,
 Node가 `--debug`를 DEP0062로 거부해 앱이 창도 못 띄우고 종료된다.
