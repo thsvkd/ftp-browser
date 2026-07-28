@@ -1,9 +1,12 @@
-import { useMemo, useRef } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
+import { shouldDeferToNativeContextMenu } from '@renderer/lib/debugTools'
 import { isRootPath } from '@renderer/lib/localPath'
+import { LocalFileContextMenu } from './LocalFileContextMenu'
+import { LocalFilePropertiesDialog } from './LocalFilePropertiesDialog'
 import { formatBytes, formatDate, filterHidden } from '@renderer/lib/utils'
 import type { LocalFileEntry } from '@shared/types/local'
 
@@ -26,6 +29,10 @@ export function LocalFileList(): React.JSX.Element {
   const selectSingle = useLocalSelectionStore((s) => s.selectSingle)
   const toggleSelect = useLocalSelectionStore((s) => s.toggleSelect)
   const selectRange = useLocalSelectionStore((s) => s.selectRange)
+
+  const [contextEntry, setContextEntry] = useState<LocalFileEntry | null>(null)
+  const [contextPos, setContextPos] = useState<{ x: number; y: number } | null>(null)
+  const [propertiesEntry, setPropertiesEntry] = useState<LocalFileEntry | null>(null)
 
   const showHidden = useSettingsStore((s) => s.showHidden)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -57,6 +64,16 @@ export function LocalFileList(): React.JSX.Element {
     if (entry.type === 'directory') {
       navigateTo(entry.path)
     }
+  }
+
+  const handleContextMenu = (e: React.MouseEvent, entry: LocalFileEntry | null): void => {
+    if (shouldDeferToNativeContextMenu(e, window.api?.debugToolsEnabled ?? false)) return
+    e.preventDefault()
+    if (entry && !selectedNames.has(entry.name)) {
+      selectSingle(entry.name)
+    }
+    setContextEntry(entry)
+    setContextPos({ x: e.clientX, y: e.clientY })
   }
 
   const handleDragStart = (e: React.DragEvent, entry: LocalFileEntry): void => {
@@ -93,7 +110,11 @@ export function LocalFileList(): React.JSX.Element {
   }
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-auto">
+    <div
+      ref={scrollRef}
+      className="flex-1 overflow-auto"
+      onContextMenu={(e) => handleContextMenu(e, null)}
+    >
       <table className="w-full text-left text-sm">
         <thead className="sticky top-0 bg-gray-100 text-xs text-gray-500">
           <tr>
@@ -123,6 +144,10 @@ export function LocalFileList(): React.JSX.Element {
               onClick={(e) => handleClick(e, entry)}
               onDoubleClick={() => handleDoubleClick(entry)}
               onDragStart={(e) => handleDragStart(e, entry)}
+              onContextMenu={(e) => {
+                e.stopPropagation()
+                handleContextMenu(e, entry)
+              }}
             >
               <td className="px-3 py-1.5">
                 <span className="mr-2">{getFileIcon(entry)}</span>
@@ -149,6 +174,18 @@ export function LocalFileList(): React.JSX.Element {
           )}
         </tbody>
       </table>
+      <LocalFileContextMenu
+        entry={contextEntry}
+        position={contextPos}
+        onClose={() => setContextPos(null)}
+        onShowProperties={setPropertiesEntry}
+      />
+      {propertiesEntry && (
+        <LocalFilePropertiesDialog
+          entry={propertiesEntry}
+          onClose={() => setPropertiesEntry(null)}
+        />
+      )}
     </div>
   )
 }

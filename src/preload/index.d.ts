@@ -20,6 +20,8 @@ type InvokeChannel =
   | 'local:expandForUpload'
   | 'local:copyFiles'
   | 'local:deleteBatch'
+  | 'local:rename'
+  | 'local:mkdir'
   | 'transfer:enqueue'
   | 'transfer:cancel'
   | 'transfer:clearCompleted'

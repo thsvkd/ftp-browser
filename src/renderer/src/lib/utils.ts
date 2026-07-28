@@ -19,6 +19,12 @@ export function formatDate(isoString: string): string {
   return date.toLocaleString()
 }
 
+/** Lower-cased extension including the leading dot, or '' when there is none. */
+export function getFileExtension(name: string): string {
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 ? name.substring(dot).toLowerCase() : ''
+}
+
 /** A file/dir is "hidden" when its name starts with a dot (Unix/FTP convention). */
 export function isHiddenName(name: string): boolean {
   return name.startsWith('.')

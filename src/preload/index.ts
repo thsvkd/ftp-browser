@@ -24,6 +24,8 @@ const INVOKE_CHANNELS = [
   'local:expandForUpload',
   'local:copyFiles',
   'local:deleteBatch',
+  'local:rename',
+  'local:mkdir',
   // Transfer
   'transfer:enqueue',
   'transfer:cancel',

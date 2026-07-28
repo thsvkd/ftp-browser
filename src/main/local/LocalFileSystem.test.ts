@@ -123,4 +123,112 @@ describe('LocalFileSystem', () => {
       await expect(fs.access(dir)).rejects.toThrow()
     })
   })
+
+  describe('rename', () => {
+    it('renames a file', async () => {
+      // covers: Test-61
+      const oldPath = path.join(tmpDir, 'before.txt')
+      const newPath = path.join(tmpDir, 'after.txt')
+      await fs.writeFile(oldPath, 'payload')
+
+      await localFs.rename(oldPath, newPath)
+
+      await expect(fs.access(oldPath)).rejects.toThrow()
+      expect(await fs.readFile(newPath, 'utf8')).toBe('payload')
+    })
+
+    it('renames a directory', async () => {
+      // covers: Test-62
+      const oldPath = path.join(tmpDir, 'before-dir')
+      const newPath = path.join(tmpDir, 'after-dir')
+      await fs.mkdir(oldPath)
+      await fs.writeFile(path.join(oldPath, 'inner.txt'), 'kept')
+
+      await localFs.rename(oldPath, newPath)
+
+      await expect(fs.access(oldPath)).rejects.toThrow()
+      expect((await fs.stat(newPath)).isDirectory()).toBe(true)
+      expect(await fs.readFile(path.join(newPath, 'inner.txt'), 'utf8')).toBe('kept')
+    })
+
+    it('fails without overwriting when the target name already exists', async () => {
+      // covers: Test-63
+      const oldPath = path.join(tmpDir, 'source.txt')
+      const newPath = path.join(tmpDir, 'occupied.txt')
+      await fs.writeFile(oldPath, 'source content')
+      await fs.writeFile(newPath, 'existing content')
+
+      // 메시지까지 단언하는 이유: 거부의 출처를 고정하기 위함이다. 맨 toThrow()는
+      // 우리가 심은 가드가 아니라 우발적인 OS 에러(권한, 잠긴 파일, 디렉터리 대상
+      // 등)로도 만족되므로, 계약(§6)이 고정한 `Target already exists: <basename>`을
+      // 요구해 의도한 경로로 거부되었음을 확인한다.
+      //
+      // 참고: fs.rename이 Windows에서는 기존 파일에 EPERM/EEXIST를 던진다는 통념은
+      // 실측으로 반증되었다. libuv가 MOVEFILE_REPLACE_EXISTING을 쓰기 때문에
+      // Windows에서도 POSIX와 똑같이 조용히 덮어쓴다(가드 제거 뮤테이션 결과:
+      // "promise resolved undefined instead of rejecting"). 즉 이 가드는 모든
+      // 플랫폼에서 필수다.
+      await expect(localFs.rename(oldPath, newPath)).rejects.toThrow(
+        /Target already exists: occupied\.txt/
+      )
+
+      // Neither side may be touched: the victim keeps its content and the
+      // source is still there (fs.rename silently clobbers on POSIX).
+      expect(await fs.readFile(newPath, 'utf8')).toBe('existing content')
+      expect(await fs.readFile(oldPath, 'utf8')).toBe('source content')
+    })
+  })
+
+  describe('rename — directory escape', () => {
+    it('refuses a target that points at a different directory', async () => {
+      // covers: Test-86
+      // 이 층은 렌더러 검증을 우회해 IPC를 직접 호출하는 경로를 막으려고 존재한다.
+      // 그러므로 렌더러를 거치지 않고 메서드를 직접 호출해 검증한다.
+      const otherDir = path.join(tmpDir, 'other')
+      await fs.mkdir(otherDir)
+      const oldPath = path.join(tmpDir, 'stay.txt')
+      await fs.writeFile(oldPath, 'payload')
+      const escapedPath = path.join(otherDir, 'stay.txt')
+
+      // Test-63과 같은 이유로 메시지까지 단언한다: 맨 toThrow()는 아무 OS 거부에나
+      // 만족하므로, 거부의 출처가 이 가드임을 강제해야 한다.
+      await expect(localFs.rename(oldPath, escapedPath)).rejects.toThrow(
+        /Rename must stay in the same directory/
+      )
+
+      // 파일은 조용히 옮겨지지 않고 제자리에 남아야 한다.
+      expect(await fs.readFile(oldPath, 'utf8')).toBe('payload')
+      await expect(fs.access(escapedPath)).rejects.toThrow()
+
+      // 대조군: 같은 디렉터리 안에서의 rename은 성공해야 한다. 가드를 "항상 거부"로
+      // 바꾸는 뮤테이션은 위 단언들을 통과하므로 이 대비에서만 죽는다.
+      const sameDirPath = path.join(tmpDir, 'renamed.txt')
+      await localFs.rename(oldPath, sameDirPath)
+      expect(await fs.readFile(sameDirPath, 'utf8')).toBe('payload')
+    })
+  })
+
+  describe('mkdir', () => {
+    it('creates a new directory', async () => {
+      // covers: Test-64
+      const dir = path.join(tmpDir, 'fresh')
+
+      await localFs.mkdir(dir)
+
+      expect((await fs.stat(dir)).isDirectory()).toBe(true)
+    })
+
+    it('fails when the name already exists', async () => {
+      // covers: Test-65
+      const dir = path.join(tmpDir, 'taken')
+      await fs.mkdir(dir)
+      await fs.writeFile(path.join(dir, 'marker.txt'), 'untouched')
+
+      await expect(localFs.mkdir(dir)).rejects.toThrow()
+
+      // recursive:true would have resolved silently and left this assertion
+      // meaningless, so also prove the existing contents survived.
+      expect(await fs.readFile(path.join(dir, 'marker.txt'), 'utf8')).toBe('untouched')
+    })
+  })
 })

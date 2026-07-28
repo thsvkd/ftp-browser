@@ -1,4 +1,4 @@
-import { useRef, useCallback, useMemo, useEffect, useLayoutEffect } from 'react'
+import { useState, useRef, useCallback, useMemo, useEffect, useLayoutEffect } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
@@ -11,9 +11,12 @@ import { LocalThumbnailImage } from '@renderer/components/thumbnail/LocalThumbna
 import { LocalFolderThumbnail } from '@renderer/components/thumbnail/LocalFolderThumbnail'
 import { useMarqueeSelection, type MarqueeRect } from '@renderer/hooks/useMarqueeSelection'
 import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
+import { shouldDeferToNativeContextMenu } from '@renderer/lib/debugTools'
 import { itemIndicesInRect } from '@renderer/lib/gridGeometry'
 import { isRootPath } from '@renderer/lib/localPath'
 import { filterHidden } from '@renderer/lib/utils'
+import { LocalFileContextMenu } from './LocalFileContextMenu'
+import { LocalFilePropertiesDialog } from './LocalFilePropertiesDialog'
 import type { LocalFileEntry } from '@shared/types/local'
 
 const GRID_ITEM_SIZE = 150
@@ -45,6 +48,10 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
   const toggleSelect = useLocalSelectionStore((s) => s.toggleSelect)
   const selectRange = useLocalSelectionStore((s) => s.selectRange)
   const selectAll = useLocalSelectionStore((s) => s.selectAll)
+
+  const [contextEntry, setContextEntry] = useState<LocalFileEntry | null>(null)
+  const [contextPos, setContextPos] = useState<{ x: number; y: number } | null>(null)
+  const [propertiesEntry, setPropertiesEntry] = useState<LocalFileEntry | null>(null)
 
   const showHidden = useSettingsStore((s) => s.showHidden)
   const galleryThumbSize = useSettingsStore((s) => s.galleryThumbSize)
@@ -146,6 +153,16 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
     }
   }
 
+  const handleContextMenu = (e: React.MouseEvent, entry: LocalFileEntry | null): void => {
+    if (shouldDeferToNativeContextMenu(e, window.api?.debugToolsEnabled ?? false)) return
+    e.preventDefault()
+    if (entry && !selectedNames.has(entry.name)) {
+      selectSingle(entry.name)
+    }
+    setContextEntry(entry)
+    setContextPos({ x: e.clientX, y: e.clientY })
+  }
+
   const handleDragStart = (e: React.DragEvent, entry: LocalFileEntry): void => {
     const sel = useLocalSelectionStore.getState().selectedNames
     const allEntries = useLocalFsStore.getState().entries
@@ -172,6 +189,7 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
     <div
       ref={parentRef}
       className="flex-1 select-none overflow-auto"
+      onContextMenu={(e) => handleContextMenu(e, null)}
       onMouseDown={onMarqueeMouseDown}
     >
       <div
@@ -250,6 +268,10 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
                     onClick={(e) => handleClick(e, entry)}
                     onDoubleClick={() => handleDoubleClick(entry)}
                     onDragStart={(e) => handleDragStart(e, entry)}
+                    onContextMenu={(e) => {
+                      e.stopPropagation()
+                      handleContextMenu(e, entry)
+                    }}
                   >
                     <div className="flex min-h-0 w-full flex-1 items-center justify-center">
                       {entry.isImage ? (
@@ -288,6 +310,19 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
         <div className="flex items-center justify-center py-8 text-sm text-gray-400">
           Empty directory
         </div>
+      )}
+
+      <LocalFileContextMenu
+        entry={contextEntry}
+        position={contextPos}
+        onClose={() => setContextPos(null)}
+        onShowProperties={setPropertiesEntry}
+      />
+      {propertiesEntry && (
+        <LocalFilePropertiesDialog
+          entry={propertiesEntry}
+          onClose={() => setPropertiesEntry(null)}
+        />
       )}
     </div>
   )

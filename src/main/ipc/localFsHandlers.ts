@@ -64,6 +64,27 @@ export function registerLocalFsHandlers(
     }
   })
 
+  ipcMain.handle(
+    'local:rename',
+    async (_event, oldPath: string, newPath: string): Promise<IpcResult<void>> => {
+      try {
+        await localFs.rename(oldPath, newPath)
+        return { success: true, data: undefined }
+      } catch (err) {
+        return ipcError(err)
+      }
+    }
+  )
+
+  ipcMain.handle('local:mkdir', async (_event, dirPath: string): Promise<IpcResult<void>> => {
+    try {
+      await localFs.mkdir(dirPath)
+      return { success: true, data: undefined }
+    } catch (err) {
+      return ipcError(err)
+    }
+  })
+
   // Expand dropped files/folders into a flat list of files to upload, with
   // POSIX relative paths that preserve folder structure (folders recurse).
   ipcMain.handle(

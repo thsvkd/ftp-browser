@@ -80,6 +80,38 @@ export class LocalFileSystem {
   }
 
   /**
+   * Rename a file or directory, refusing to clobber an existing target.
+   *
+   * `fs.rename` silently replaces the destination on POSIX, which would destroy
+   * a file the user never named. There is no atomic no-overwrite rename in the
+   * fs API, so this checks first and accepts the (narrow) race: another process
+   * creating the target in between still loses the file. Guarding the common
+   * case — the user typing a name that is already taken — is what matters here.
+   */
+  async rename(oldPath: string, newPath: string): Promise<void> {
+    // A name carrying a separator (`..\other`) would make this a move: the file
+    // leaves the directory the user is looking at and `fs.rename` reports
+    // success. Compare resolved parents so the operation stays a rename. The
+    // renderer validates too, but that check is bypassed by calling IPC directly.
+    if (path.dirname(path.resolve(oldPath)) !== path.dirname(path.resolve(newPath))) {
+      throw new Error('Rename must stay in the same directory')
+    }
+    if (await this.exists(newPath)) {
+      throw new Error(`Target already exists: ${path.basename(newPath)}`)
+    }
+    await fs.rename(oldPath, newPath)
+  }
+
+  /**
+   * Create a single directory. Deliberately not `recursive: true` — that would
+   * succeed silently when the name is already taken, hiding the collision from
+   * the user instead of reporting it.
+   */
+  async mkdir(dirPath: string): Promise<void> {
+    await fs.mkdir(dirPath)
+  }
+
+  /**
    * Stream-copy a single file, reporting each read chunk's length so callers can
    * accumulate byte progress. Polls `shouldCancel` between chunks; on cancel it
    * removes the partial destination and throws an error tagged `cancelled`.
