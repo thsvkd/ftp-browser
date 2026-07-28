@@ -10,3 +10,11 @@ out
 .claude/
 _test_electron.mjs
 NUL
+
+# Stryker(뮤테이션 테스트) 산출물. 리포트는 실행할 때마다 재생성된다.
+.stryker-tmp/
+/reports/
+.stryker-output.txt
+
+# 작업 메모(스크래치). 커밋 대상이 아니다.
+/TODO.md

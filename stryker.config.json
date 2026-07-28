@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "npm",
+  "testRunner": "vitest",
+  "reporters": ["html", "clear-text", "progress"],
+  "coverageAnalysis": "perTest",
+  "_comment": "범위는 이번 변경분으로 한정한다. 신규 파일은 통째로, 기존 파일은 추가한 라인 범위만 넣는다. 파일 전체를 넣으면 이번 테스트 케이스 리스트의 대상이 아닌 기존 로직(가상 스크롤, 마퀴 선택, 스트림 복사 등)이 분모에 들어가 점수가 실제 단언 강도를 반영하지 못한다. 범위를 넓혀 측정할 때는 CLI에서 --mutate로 덮어쓴다.",
+  "_comment_maintenance": "아래 라인 범위는 해당 파일이 수정되면 조용히 어긋난다. 이 파일들을 건드린 커밋은 `git diff --unified=0 -- <file> | grep '^@@'`로 범위를 재확인할 것.",
+  "mutate": [
+    "src/shared/entryName.ts",
+    "src/renderer/src/components/local/LocalFileContextMenu.tsx",
+    "src/renderer/src/components/local/LocalFilePropertiesDialog.tsx",
+    "src/renderer/src/components/common/InfoRow.tsx",
+    "src/main/ipc/localFsHandlers.ts:67-87",
+    "src/renderer/src/components/remote/FileContextMenu.tsx:103-108",
+    "src/renderer/src/components/remote/FileContextMenu.tsx:112-170",
+    "src/renderer/src/components/remote/FileContextMenu.tsx:178-196",
+    "src/renderer/src/components/remote/FileContextMenu.tsx:231-231",
+    "src/renderer/src/components/remote/FilePropertiesDialog.tsx:54-55",
+    "src/renderer/src/components/local/LocalFileList.tsx:33-36",
+    "src/renderer/src/components/local/LocalFileList.tsx:69-78",
+    "src/renderer/src/components/local/LocalFileList.tsx:113-117",
+    "src/renderer/src/components/local/LocalFileList.tsx:147-150",
+    "src/renderer/src/components/local/LocalFileList.tsx:177-188",
+    "src/renderer/src/components/local/LocalFileGridView.tsx:52-55",
+    "src/renderer/src/components/local/LocalFileGridView.tsx:156-165",
+    "src/renderer/src/components/local/LocalFileGridView.tsx:192-192",
+    "src/renderer/src/components/local/LocalFileGridView.tsx:271-274",
+    "src/renderer/src/components/local/LocalFileGridView.tsx:314-326",
+    "src/renderer/src/lib/utils.ts:22-27",
+    "src/main/local/LocalFileSystem.ts:82-106",
+    "src/shared/debug.ts:13-20"
+  ],
+  "thresholds": {
+    "high": 85,
+    "low": 70,
+    "break": 70
+  },
+  "tempDirName": ".stryker-tmp",
+  "cleanTempDir": true
+}
