@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
 import { X } from 'lucide-react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
-import { formatBytes, formatDate } from '@renderer/lib/utils'
+import { InfoRow } from '@renderer/components/common/InfoRow'
+import { formatBytes, formatDate, getFileExtension } from '@renderer/lib/utils'
 import type { FtpFileEntry } from '@shared/types/ftp'
 
 interface FilePropertiesDialogProps {
@@ -22,11 +23,6 @@ const IMAGE_EXTENSIONS = new Set([
   '.ico'
 ])
 
-function getFileExtension(name: string): string {
-  const dot = name.lastIndexOf('.')
-  return dot >= 0 ? name.substring(dot).toLowerCase() : ''
-}
-
 function getFileTypeLabel(entry: FtpFileEntry): string {
   if (entry.type === 'directory') return 'Directory'
   if (entry.type === 'symbolic-link') return 'Symbolic Link'
@@ -34,22 +30,6 @@ function getFileTypeLabel(entry: FtpFileEntry): string {
   if (IMAGE_EXTENSIONS.has(ext)) return `Image (${ext.substring(1).toUpperCase()})`
   if (ext) return `${ext.substring(1).toUpperCase()} File`
   return 'File'
-}
-
-function InfoRow({
-  label,
-  value
-}: {
-  label: string
-  value: string | undefined
-}): React.JSX.Element | null {
-  if (!value) return null
-  return (
-    <div className="flex items-start py-1.5">
-      <span className="w-24 shrink-0 text-gray-500">{label}</span>
-      <span className="break-all text-gray-800">{value}</span>
-    </div>
-  )
 }
 
 export function FilePropertiesDialog({
@@ -71,6 +51,8 @@ export function FilePropertiesDialog({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={onClose}
+      // 오버레이도 그리드 컨테이너의 DOM 자식이라, 막지 않으면 마퀴 선택 핸들러가 함께 돈다.
+      onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="w-80 rounded-lg bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">

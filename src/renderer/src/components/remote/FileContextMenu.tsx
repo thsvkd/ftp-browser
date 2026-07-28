@@ -4,6 +4,7 @@ import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { isSafeRemoteName, INVALID_REMOTE_NAME_MESSAGE } from '@shared/entryName'
 import type { FtpFileEntry } from '@shared/types/ftp'
 import type { DeleteTarget } from '@shared/types/operation'
 import type { IpcResult } from '@shared/types/ipc'
@@ -32,11 +33,11 @@ export function FileContextMenu({
   const enqueue = useTransferStore((s) => s.enqueue)
   const selectedNames = useSelectionStore((s) => s.selectedNames)
   const clearSelection = useSelectionStore((s) => s.clearSelection)
-  const [renaming, setRenaming] = useState(false)
+  const [editing, setEditing] = useState<'rename' | 'newFolder' | null>(null)
   const [newName, setNewName] = useState('')
 
   const handleClose = useCallback(() => {
-    setRenaming(false)
+    setEditing(null)
     onClose()
   }, [onClose])
 
@@ -99,28 +100,74 @@ export function FileContextMenu({
   const handleRename = (): void => {
     if (!entry) return
     setNewName(entry.name)
-    setRenaming(true)
+    setEditing('rename')
+  }
+
+  const startNewFolder = (): void => {
+    setNewName('')
+    setEditing('newFolder')
   }
 
   const handleRenameSubmit = async (): Promise<void> => {
-    if (!entry || !newName || newName === entry.name) {
+    const name = newName.trim()
+    if (!entry || !name || name === entry.name) {
       handleClose()
       return
     }
-    const oldPath = buildRemotePath(entry.name)
-    const newPath = buildRemotePath(newName)
-    await window.api.invoke('ftp:rename', oldPath, newPath)
-    refresh()
-    handleClose()
+    if (!isSafeRemoteName(name)) {
+      toast.error('Invalid name', { description: INVALID_REMOTE_NAME_MESSAGE })
+      handleClose()
+      return
+    }
+    try {
+      // 이 IPC는 실패 시 던지지 않고 { success: false }를 반환한다. 반환값을 안 보면
+      // 550(권한 거부)·553(이름 거부) 같은 가장 흔한 실패가 조용히 통과한다.
+      const result = await window.api.invoke<IpcResult<void>>(
+        'ftp:rename',
+        buildRemotePath(entry.name),
+        buildRemotePath(name)
+      )
+      if (!result.success) {
+        toast.error('Failed to rename', { description: result.error })
+      }
+    } catch (err) {
+      toast.error('Failed to rename', {
+        description: err instanceof Error ? err.message : String(err)
+      })
+    } finally {
+      refresh()
+      handleClose()
+    }
   }
 
-  const handleNewFolder = async (): Promise<void> => {
-    const name = window.prompt('New folder name:')
-    if (!name) return
-    const newPath = buildRemotePath(name)
-    await window.api.invoke('ftp:mkdir', newPath)
-    refresh()
-    handleClose()
+  const handleNewFolderSubmit = async (): Promise<void> => {
+    const name = newName.trim()
+    if (!name) {
+      handleClose()
+      return
+    }
+    if (!isSafeRemoteName(name)) {
+      toast.error('Invalid name', { description: INVALID_REMOTE_NAME_MESSAGE })
+      handleClose()
+      return
+    }
+    try {
+      const result = await window.api.invoke<IpcResult<void>>('ftp:mkdir', buildRemotePath(name))
+      if (!result.success) {
+        toast.error('Failed to create folder', { description: result.error })
+      }
+    } catch (err) {
+      toast.error('Failed to create folder', {
+        description: err instanceof Error ? err.message : String(err)
+      })
+    } finally {
+      refresh()
+      handleClose()
+    }
+  }
+
+  const submitEdit = (): void => {
+    void (editing === 'rename' ? handleRenameSubmit() : handleNewFolderSubmit())
   }
 
   return (
@@ -128,15 +175,20 @@ export function FileContextMenu({
       className="fixed z-50 min-w-[160px] rounded-md border border-gray-200 bg-white py-1 shadow-lg"
       style={{ left: position.x, top: position.y }}
       onClick={(e) => e.stopPropagation()}
+      // 메뉴는 그리드 컨테이너의 DOM 자식이라 position:fixed여도 이벤트는 그대로 버블링된다.
+      // 막지 않으면 메뉴 버튼을 누르는 순간 마퀴 선택 핸들러가 선택을 통째로 비운다.
+      onMouseDown={(e) => e.stopPropagation()}
     >
-      {renaming ? (
+      {editing ? (
         <div className="px-3 py-2">
           <input
             type="text"
             value={newName}
+            aria-label={editing === 'rename' ? 'New name' : 'New folder name'}
+            placeholder={editing === 'newFolder' ? 'New folder name' : undefined}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') handleRenameSubmit()
+              if (e.key === 'Enter') submitEdit()
               if (e.key === 'Escape') handleClose()
             }}
             className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
@@ -176,7 +228,7 @@ export function FileContextMenu({
           )}
           <button
             className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
-            onClick={handleNewFolder}
+            onClick={startNewFolder}
           >
             New Folder
           </button>
