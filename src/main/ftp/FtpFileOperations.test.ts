@@ -137,7 +137,9 @@ describe('FtpFileOperations', () => {
     it('preserves spaces and special characters in directory names', async () => {
       await ops.mkdir('/device/DCIM/3GS (@3GSSSS)')
 
-      expect(mockClient.sendIgnoringError).toHaveBeenLastCalledWith('MKD /device/DCIM/3GS (@3GSSSS)')
+      expect(mockClient.sendIgnoringError).toHaveBeenLastCalledWith(
+        'MKD /device/DCIM/3GS (@3GSSSS)'
+      )
     })
 
     it('resolves when MKD reports the directory already exists (the original bug)', async () => {
