@@ -43,6 +43,100 @@ export function queryMenu(): HTMLElement | null {
   return screen.queryByRole('button', { name: 'New Folder' })
 }
 
+/**
+ * 열려 있는 컨텍스트 메뉴의 루트 DOM 노드. Fragment는 DOM 노드가 아니므로
+ * New Folder 버튼의 부모가 곧 메뉴 루트 div다(핸드오프 6절 C표).
+ *
+ * 전제조건: 메뉴가 **버튼 목록 상태**로 보이고 있어야 한다(editing 브랜치가 아님).
+ * editing 상태(rename/newFolder 입력창)에서는 New Folder 버튼 자체가 렌더되지 않으므로
+ * (LocalFileContextMenu.tsx/FileContextMenu.tsx의 `editing ? <input/> : <>...버튼들...</>`
+ * 분기가 배타적) 이 함수를 그 상태에서 부르면 안 된다. 위치가 입력창 전환 후에도
+ * 유지되는지 보려면(Test-107) editing 진입 **전에** 루트를 한 번 잡아 참조를 재사용하라
+ * — 같은 외곽 div가 재사용되므로 참조는 계속 유효하다.
+ */
+export function menuRoot(): HTMLElement {
+  // 셀렉터는 queryMenu와 같아야 한다. 따로 적으면 라벨이 바뀔 때 한쪽만 따라간다.
+  const button = queryMenu()
+  if (!button) {
+    throw new Error(
+      'menuRoot() is only valid while the button list is showing (New Folder button not found). ' +
+        'If the menu just switched to the inline rename/new-folder input, capture the root ' +
+        'before that transition and reuse the reference instead of calling menuRoot() again.'
+    )
+  }
+  const root = button.parentElement
+  if (!root) throw new Error('menu root element not found')
+  return root
+}
+
+/**
+ * 메뉴 위치 보정(D6: useLayoutEffect + ref 실측)을 검증하기 위해 메뉴 크기와 뷰포트
+ * 크기를 고정한다. jsdom은 레이아웃을 계산하지 않아 getBoundingClientRect가 항상
+ * 0을 반환하므로, 이를 목해 실측 결과를 결정론적으로 만든다.
+ *
+ * `setMenuSize`로 렌더 도중 크기를 바꿀 수 있다(예: editing 전환 시 입력창 한 줄로
+ * 줄어드는 것을 흉내). 크기를 고정 상수로 두면 "매번 다시 측정하는" 구현과
+ * "크기를 아예 하드코딩한" 구현을 구분하지 못하므로(핸드오프 §1), 매 호출마다
+ * 현재 크기를 다시 읽도록 클로저로 구현한다. `restore`를 afterEach에서 호출해
+ * 원래 디스크립터로 되돌린다.
+ */
+export function stubMenuViewport(
+  menuSize: { width: number; height: number },
+  viewport: { width: number; height: number }
+): {
+  setMenuSize: (size: { width: number; height: number }) => void
+  restore: () => void
+} {
+  const rectDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    'getBoundingClientRect'
+  )
+  const widthDescriptor = Object.getOwnPropertyDescriptor(window, 'innerWidth')
+  const heightDescriptor = Object.getOwnPropertyDescriptor(window, 'innerHeight')
+
+  let currentSize = menuSize
+
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: currentSize.width,
+      bottom: currentSize.height,
+      width: currentSize.width,
+      height: currentSize.height,
+      toJSON: () => ({})
+    })
+  })
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: viewport.width })
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: viewport.height })
+
+  return {
+    setMenuSize: (size) => {
+      currentSize = size
+    },
+    restore: () => {
+      if (rectDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', rectDescriptor)
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, 'getBoundingClientRect')
+      }
+      if (widthDescriptor) {
+        Object.defineProperty(window, 'innerWidth', widthDescriptor)
+      } else {
+        Reflect.deleteProperty(window, 'innerWidth')
+      }
+      if (heightDescriptor) {
+        Object.defineProperty(window, 'innerHeight', heightDescriptor)
+      } else {
+        Reflect.deleteProperty(window, 'innerHeight')
+      }
+    }
+  }
+}
+
 /** 로컬 선택 스토어의 현재 선택(정렬본). */
 export function localSelectedNames(): string[] {
   return [...useLocalSelectionStore.getState().selectedNames].sort()

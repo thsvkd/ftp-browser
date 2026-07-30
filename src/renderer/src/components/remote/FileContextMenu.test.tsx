@@ -1,12 +1,17 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, cleanup } from '@testing-library/react'
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
-import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
+import {
+  invokeCalls,
+  makeApiMock,
+  menuRoot,
+  stubMenuViewport
+} from '@renderer/test/rendererTestUtils'
 import { INVALID_REMOTE_NAME_MESSAGE } from '@shared/entryName'
 import type { FtpFileEntry } from '@shared/types/ftp'
 import { FileContextMenu } from './FileContextMenu'
@@ -39,8 +44,18 @@ function calls(channel: string): unknown[][] {
   return invokeCalls(mockInvoke, channel)
 }
 
-/** 메뉴를 렌더한다. `entry`가 null이면 빈 공간 우클릭에 해당한다. */
-function renderMenu(entry: FtpFileEntry | null): { onClose: ReturnType<typeof vi.fn> } {
+/**
+ * 메뉴를 렌더한다. `entry`가 null이면 빈 공간 우클릭에 해당한다.
+ * `position` 기본은 (10,10) — 뷰포트 보정과 무관한 대다수 테스트에 안전한 값.
+ */
+function renderMenu(
+  entry: FtpFileEntry | null,
+  position: { x: number; y: number } | null = { x: 10, y: 10 }
+): {
+  onClose: ReturnType<typeof vi.fn>
+  /** Test-107/108: 메뉴가 열린 채로 position prop만 바꿔 재렌더한다(부모의 재오픈을 흉내). */
+  rerenderPosition: (position: { x: number; y: number } | null) => void
+} {
   useFtpStore.setState({
     currentPath: REMOTE_DIR,
     entries: entry ? [entry] : [],
@@ -52,8 +67,14 @@ function renderMenu(entry: FtpFileEntry | null): { onClose: ReturnType<typeof vi
     lastClickedName: null
   })
   const onClose = vi.fn()
-  render(<FileContextMenu entry={entry} position={{ x: 10, y: 10 }} onClose={onClose} />)
-  return { onClose }
+  const menu = (pos: { x: number; y: number } | null): React.JSX.Element => (
+    <FileContextMenu entry={entry} position={pos} onClose={onClose} />
+  )
+  const { rerender } = render(menu(position))
+  const rerenderPosition = (pos: { x: number; y: number } | null): void => {
+    rerender(menu(pos))
+  }
+  return { onClose, rerenderPosition }
 }
 
 /** 메뉴를 열고 인라인 입력에 이름을 넣어 Enter로 제출한다. */
@@ -253,5 +274,147 @@ describe('FileContextMenu — failed IPC results surface as toasts', () => {
         description: '553 Name not allowed'
       })
     })
+  })
+})
+
+// B절: 위치 통합. getBoundingClientRect를 목해 메뉴 크기를 (160,200)으로,
+// window.innerWidth/innerHeight를 (1000,800)으로 고정한다.
+describe('FileContextMenu — viewport clamping', () => {
+  const MOCK_MENU_SIZE = { width: 160, height: 200 }
+  const MOCK_VIEWPORT = { width: 1000, height: 800 }
+  let viewportStub: ReturnType<typeof stubMenuViewport>
+
+  beforeEach(() => {
+    viewportStub = stubMenuViewport(MOCK_MENU_SIZE, MOCK_VIEWPORT)
+  })
+
+  afterEach(() => {
+    viewportStub.restore()
+  })
+
+  it('flips the menu upward when it opens near the bottom edge', () => {
+    // covers: Test-105
+    renderMenu(ftpFile('a.txt'), { x: 10, y: 700 })
+
+    expect(menuRoot().style.top).toBe('500px')
+  })
+
+  it('keeps the anchor position when the menu fully fits the viewport', () => {
+    // covers: Test-106
+    renderMenu(ftpFile('a.txt'), { x: 10, y: 10 })
+
+    expect(menuRoot().style.left).toBe('10px')
+    expect(menuRoot().style.top).toBe('10px')
+  })
+
+  it('keeps the flipped position after switching to the inline rename input', async () => {
+    // covers: Test-107
+    // Test-108과 짝이다. 이 케이스만 있으면 위치를 영영 갱신하지 않는 구현도 통과한다.
+    // editing 브랜치는 New Folder 버튼을 렌더하지 않으므로 루트는 그 전에 한 번만
+    // 잡아 참조를 재사용한다(같은 외곽 div가 재사용되므로 유효하다).
+    // 메뉴 크기를 입력창 한 줄(60px)로 줄여, "전환 시 다시 측정하면 더 이상 넘치지
+    // 않아 700px로 돌아가는" 재측정 구현(핸드오프 §5 기각안)을 걸러낸다.
+    // 700+60=760<=796이라 재측정 구현이면 top이 700px가 되어 이 단언이 실패한다.
+    // 한계: "크기를 (160,200)으로 하드코딩한" 구현은 B절 전체를 통과한다. 잡으려면
+    // Test-105/108의 확정 기대값을 바꿔야 해 §6 1:1 금지에 걸리므로, D6(useLayoutEffect
+    // +ref 실측) 준수는 구현 리뷰와 §8-5 E2E 실측으로 확인한다.
+    const user = userEvent.setup()
+    renderMenu(ftpFile('a.txt'), { x: 10, y: 700 })
+    const root = menuRoot()
+    expect(root.style.top).toBe('500px')
+
+    viewportStub.setMenuSize({ width: 160, height: 60 })
+    await user.click(screen.getByRole('button', { name: 'Rename' }))
+
+    expect(screen.getByRole('textbox')).not.toBeNull()
+    expect(root.style.top).toBe('500px')
+  })
+
+  it('recomputes the position on every reopen', () => {
+    // covers: Test-108
+    const { rerenderPosition } = renderMenu(ftpFile('a.txt'), { x: 10, y: 700 })
+    expect(menuRoot().style.top).toBe('500px')
+
+    rerenderPosition(null)
+    rerenderPosition({ x: 10, y: 10 })
+
+    expect(menuRoot().style.top).toBe('10px')
+  })
+})
+
+// C절: 닫기 트리거 5종(D9). 위치 보정과 무관하므로 기본 (10,10)로 연다.
+describe('FileContextMenu — dismiss triggers', () => {
+  function openMenu(): { onClose: ReturnType<typeof vi.fn> } {
+    return renderMenu(ftpFile('a.txt'))
+  }
+
+  it('closes on an outside left click', () => {
+    // covers: Test-109
+    const { onClose } = openMenu()
+
+    fireEvent.click(document.body)
+
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('does not close on a click inside the menu', () => {
+    // covers: Test-110
+    const { onClose } = openMenu()
+
+    fireEvent.click(menuRoot())
+
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('closes on Escape while showing the button list', () => {
+    // covers: Test-111
+    const { onClose } = openMenu()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('closes on an outside right click', () => {
+    // covers: Test-112
+    const { onClose } = openMenu()
+
+    fireEvent.contextMenu(document.body)
+
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('does not close on a right click inside the menu', () => {
+    // covers: Test-113
+    const { onClose } = openMenu()
+
+    fireEvent.contextMenu(menuRoot())
+
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('closes when the window loses focus', () => {
+    // covers: Test-115
+    const { onClose } = openMenu()
+
+    fireEvent.blur(window)
+
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('closes when a scroll container outside the menu scrolls', () => {
+    // covers: Test-116
+    // 함정 2: 내부 스크롤은 document까지 버블링되지 않는다. capture 단계 등록이
+    // 없으면 이 테스트가 RED가 된다.
+    const { onClose } = openMenu()
+    const scrollContainer = document.createElement('div')
+    document.body.appendChild(scrollContainer)
+
+    try {
+      fireEvent.scroll(scrollContainer)
+      expect(onClose).toHaveBeenCalled()
+    } finally {
+      document.body.removeChild(scrollContainer)
+    }
   })
 })

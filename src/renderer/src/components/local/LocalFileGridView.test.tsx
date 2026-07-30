@@ -241,3 +241,24 @@ describe('LocalFileGridView — context menu wiring', () => {
     expect(calls('local:deleteBatch')[0][0]).toHaveLength(3)
   })
 })
+
+// D절(핸드오프 함정 1): 닫기 트리거로 document에 새 contextmenu 리스너가 붙으면,
+// 메뉴를 여는 우클릭 자체가 같은 native 이벤트로 그 리스너까지 버블링돼 메뉴를
+// 열자마자 닫아버릴 수 있다.
+//
+// 한계 — 이 테스트는 그 회귀를 잡지 못한다(핸드오프 함정 4). jsdom의 이벤트
+// dispatch는 JS 스택 안에서 동기로 끝나 전파 도중 마이크로태스크 체크포인트가
+// 돌지 않고, React 19는 sync-lane 작업을 마이크로태스크로 스케줄한다. 따라서
+// 메뉴 커밋이 dispatch 중간에 일어나지 않아, 자기충돌 가드를 통째로 지워도 이
+// 테스트는 GREEN이다. 실제 보장은 8절 E2E 체크리스트 (a)가 전담한다.
+// 안전망으로 오인하지 말 것.
+describe('LocalFileGridView — context menu self-conflict guard', () => {
+  it('keeps the menu open despite the new document contextmenu dismiss listener', () => {
+    // covers: Test-114
+    renderGrid()
+
+    fireEvent.contextMenu(gridCell('a.txt'))
+
+    expect(queryMenu()).not.toBeNull()
+  })
+})
