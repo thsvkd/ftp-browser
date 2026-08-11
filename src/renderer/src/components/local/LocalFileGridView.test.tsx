@@ -3,13 +3,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, createEvent, cleanup, waitFor } from '@testing-library/react'
 import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
-import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import {
+  useSettingsStore,
+  GALLERY_THUMB_DEFAULT,
+  GALLERY_THUMB_STEP
+} from '@renderer/stores/useSettingsStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import {
   invokeCalls,
   localSelectedNames as selectedNames,
   makeApiMock,
   queryMenu,
+  stubGridLayout,
   type ApiMock
 } from '@renderer/test/rendererTestUtils'
 import type { LocalFileEntry } from '@shared/types/local'
@@ -38,64 +43,7 @@ function calls(channel: string): unknown[][] {
   return invokeCalls(mockInvoke, channel)
 }
 
-const LAYOUT_PROPS = [
-  'clientWidth',
-  'clientHeight',
-  'offsetWidth',
-  'offsetHeight',
-  'getBoundingClientRect'
-] as const
-
-let savedLayoutDescriptors: Array<[string, PropertyDescriptor | undefined]> = []
-
-/**
- * jsdom은 레이아웃을 계산하지 않아 스크롤 컨테이너 크기가 0이고, 그러면 TanStack Virtual이
- * 아무 행도 렌더하지 않는다(실측: 스텁 없이는 컨테이너가 자식 없이 비어 있어 셀을 찾지 못한다).
- * 셀을 우클릭하려면 실제 크기가 필요하므로 채워 넣고, 다른 테스트 파일로 새지 않도록
- * 원본 디스크립터를 저장해 두었다가 되돌린다.
- */
-function stubLayout(): void {
-  savedLayoutDescriptors = LAYOUT_PROPS.map((prop) => [
-    prop,
-    Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop)
-  ])
-
-  const rect = {
-    x: 0,
-    y: 0,
-    top: 0,
-    left: 0,
-    right: 1200,
-    bottom: 800,
-    width: 1200,
-    height: 800,
-    toJSON: () => ({})
-  }
-  const values: Record<string, unknown> = {
-    clientWidth: 1200,
-    clientHeight: 800,
-    offsetWidth: 1200,
-    offsetHeight: 800,
-    getBoundingClientRect: () => rect
-  }
-  for (const prop of LAYOUT_PROPS) {
-    Object.defineProperty(HTMLElement.prototype, prop, {
-      configurable: true,
-      value: values[prop]
-    })
-  }
-}
-
-function restoreLayout(): void {
-  for (const [prop, descriptor] of savedLayoutDescriptors) {
-    if (descriptor) {
-      Object.defineProperty(HTMLElement.prototype, prop, descriptor)
-    } else {
-      Reflect.deleteProperty(HTMLElement.prototype, prop)
-    }
-  }
-  savedLayoutDescriptors = []
-}
+let layoutStub: ReturnType<typeof stubGridLayout>
 
 function renderGrid(options: { selected?: string[] } = {}): HTMLElement {
   useLocalSelectionStore.setState({
@@ -103,6 +51,17 @@ function renderGrid(options: { selected?: string[] } = {}): HTMLElement {
     lastClickedName: null
   })
   const { container } = render(<LocalFileGridView />)
+  const root = container.firstElementChild
+  if (!(root instanceof HTMLElement)) throw new Error('LocalFileGridView rendered no root element')
+  return root
+}
+
+/**
+ * 갤러리 모드로 렌더한다. wheel 리스너는 `gallery`일 때만 등록되므로(LocalFileGridView.tsx:136)
+ * 줌 배선을 보려면 이 경로여야 한다. 반환값이 리스너가 붙은 스크롤 컨테이너다.
+ */
+function renderGallery(): HTMLElement {
+  const { container } = render(<LocalFileGridView gallery />)
   const root = container.firstElementChild
   if (!(root instanceof HTMLElement)) throw new Error('LocalFileGridView rendered no root element')
   return root
@@ -117,7 +76,7 @@ function gridCell(name: string): HTMLElement {
 beforeEach(() => {
   vi.clearAllMocks()
   mockInvoke.mockResolvedValue({ success: true })
-  stubLayout()
+  layoutStub = stubGridLayout()
   apiMock = makeApiMock(mockInvoke)
   vi.stubGlobal('api', apiMock)
 
@@ -135,7 +94,7 @@ afterEach(() => {
   // RTL이 auto-cleanup을 등록하지만 그것은 이 훅보다 **나중에** 돈다(실측).
   // 언마운트가 아래 프로토타입 복원·전역 해제보다 먼저 일어나야 한다.
   cleanup()
-  restoreLayout()
+  layoutStub.restore()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -239,6 +198,53 @@ describe('LocalFileGridView — context menu wiring', () => {
     })
     // 핵심 단언: 눌린 순간 선택이 비워졌다면 1건만 전달된다.
     expect(calls('local:deleteBatch')[0][0]).toHaveLength(3)
+  })
+})
+
+// macOS 지원 D그룹. 그리드도 리스트와 같은 배선을 독립적으로 갖는다(D7).
+describe('LocalFileGridView — platform-aware selection modifiers', () => {
+  it('single-selects on Ctrl+click on macOS instead of toggling', () => {
+    // covers: Test-149
+    apiMock.platform = 'darwin'
+    renderGrid({ selected: ['b.txt'] })
+
+    fireEvent.click(gridCell('a.txt'), { ctrlKey: true })
+
+    expect(selectedNames()).toEqual(['a.txt'])
+  })
+
+  it('toggles the selection on Cmd+click on macOS', () => {
+    // covers: Test-150
+    apiMock.platform = 'darwin'
+    renderGrid({ selected: ['b.txt'] })
+    const cell = gridCell('a.txt')
+
+    fireEvent.click(cell, { metaKey: true })
+    expect(selectedNames()).toEqual(['a.txt', 'b.txt'])
+
+    // 토글이므로 같은 항목을 다시 누르면 빠진다. 이 왕복이 없으면
+    // "항상 선택에 더하기만" 하는 구현도 통과한다.
+    fireEvent.click(cell, { metaKey: true })
+    expect(selectedNames()).toEqual(['b.txt'])
+  })
+})
+
+// G그룹 배선 검증(정정 2). 순수 함수 Test-144~146만으로는 뷰가 그 함수를 실제로 부르는지
+// 알 수 없다. wheel은 { passive: false } 네이티브 리스너라 React 합성 이벤트가 아닌
+// 실제 WheelEvent를 디스패치해야 한다.
+describe('LocalFileGridView — gallery zoom modifiers', () => {
+  it('zooms the gallery on Cmd+wheel on macOS', () => {
+    // covers: Test-160
+    apiMock.platform = 'darwin'
+    useSettingsStore.setState({ galleryThumbSize: GALLERY_THUMB_DEFAULT })
+    const root = renderGallery()
+
+    fireEvent.wheel(root, { deltaY: -100, metaKey: true })
+
+    // "핸들러가 불렸다"가 아니라 크기가 정확히 한 스텝 움직였음을 본다.
+    expect(useSettingsStore.getState().galleryThumbSize).toBe(
+      GALLERY_THUMB_DEFAULT + GALLERY_THUMB_STEP
+    )
   })
 })
 

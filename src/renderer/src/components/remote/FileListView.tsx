@@ -4,6 +4,7 @@ import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
 import { shouldDeferToNativeContextMenu } from '@renderer/lib/debugTools'
+import { currentPlatform, isToggleSelectModifier } from '@renderer/lib/platform'
 import { joinRemotePath } from '@renderer/lib/remoteDrop'
 import { FileContextMenu } from './FileContextMenu'
 import { FilePropertiesDialog } from './FilePropertiesDialog'
@@ -61,7 +62,7 @@ export function FileListView({ dragOverFolderPath }: FileListViewProps = {}): Re
   const handleClick = (e: React.MouseEvent, entry: FtpFileEntry): void => {
     if (e.shiftKey) {
       selectRange(entry.name, sortedNames)
-    } else if (e.ctrlKey || e.metaKey) {
+    } else if (isToggleSelectModifier(e, currentPlatform())) {
       toggleSelect(entry.name)
     } else {
       selectSingle(entry.name)

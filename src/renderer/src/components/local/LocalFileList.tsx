@@ -5,6 +5,7 @@ import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
 import { shouldDeferToNativeContextMenu } from '@renderer/lib/debugTools'
 import { isRootPath } from '@renderer/lib/localPath'
+import { currentPlatform, isToggleSelectModifier } from '@renderer/lib/platform'
 import { LocalFileContextMenu } from './LocalFileContextMenu'
 import { LocalFilePropertiesDialog } from './LocalFilePropertiesDialog'
 import { formatBytes, formatDate, filterHidden } from '@renderer/lib/utils'
@@ -53,7 +54,7 @@ export function LocalFileList(): React.JSX.Element {
   const handleClick = (e: React.MouseEvent, entry: LocalFileEntry): void => {
     if (e.shiftKey) {
       selectRange(entry.name, sortedNames)
-    } else if (e.ctrlKey || e.metaKey) {
+    } else if (isToggleSelectModifier(e, currentPlatform())) {
       toggleSelect(entry.name)
     } else {
       selectSingle(entry.name)

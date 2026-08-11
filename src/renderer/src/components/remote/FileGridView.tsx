@@ -14,6 +14,7 @@ import { useMarqueeSelection, type MarqueeRect } from '@renderer/hooks/useMarque
 import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
 import { shouldDeferToNativeContextMenu } from '@renderer/lib/debugTools'
 import { itemIndicesInRect } from '@renderer/lib/gridGeometry'
+import { currentPlatform, isToggleSelectModifier, isZoomModifier } from '@renderer/lib/platform'
 import { joinRemotePath } from '@renderer/lib/remoteDrop'
 import { filterHidden } from '@renderer/lib/utils'
 import { FileContextMenu } from './FileContextMenu'
@@ -133,13 +134,13 @@ export function FileGridView({
     virtualizer.measure()
   }, [cellSize, columnCount, virtualizer])
 
-  // Ctrl+wheel zooms gallery thumbnails. Native non-passive listener so we can
-  // preventDefault (otherwise Electron zooms the whole page).
+  // Ctrl/Cmd+wheel zooms gallery thumbnails. Native non-passive listener so we
+  // can preventDefault (otherwise Electron zooms the whole page).
   useEffect(() => {
     const el = parentRef.current
     if (!el || !gallery) return
     const onWheel = (e: WheelEvent): void => {
-      if (!e.ctrlKey) return
+      if (!isZoomModifier(e, currentPlatform())) return
       e.preventDefault()
       adjustGalleryThumbSize(e.deltaY < 0 ? GALLERY_THUMB_STEP : -GALLERY_THUMB_STEP)
     }
@@ -150,7 +151,7 @@ export function FileGridView({
   const handleClick = (e: React.MouseEvent, entry: FtpFileEntry): void => {
     if (e.shiftKey) {
       selectRange(entry.name, sortedNames)
-    } else if (e.ctrlKey || e.metaKey) {
+    } else if (isToggleSelectModifier(e, currentPlatform())) {
       toggleSelect(entry.name)
     } else {
       selectSingle(entry.name)

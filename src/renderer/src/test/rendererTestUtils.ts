@@ -8,6 +8,7 @@
 import { screen } from '@testing-library/react'
 import { vi, type Mock } from 'vitest'
 import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
+import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 
 /** preload가 없는 테스트 환경에 주입하는 `window.api` 목. */
 export interface ApiMock {
@@ -15,18 +16,24 @@ export interface ApiMock {
   on: Mock
   getPathForFile: Mock
   debugToolsEnabled: boolean
+  platform: string
 }
 
 /**
- * `debugToolsEnabled`는 이벤트 시점에 읽히므로, 반환된 객체를 테스트에서 그대로
- * 변경해 debug 모드를 켤 수 있다(재stub 불필요).
+ * `debugToolsEnabled`·`platform`은 이벤트 시점에 읽히므로, 반환된 객체를 테스트에서
+ * 그대로 변경해 debug 모드나 플랫폼을 바꿀 수 있다(재stub 불필요).
+ *
+ * `platform` 기본값이 `'win32'`인 이유: 기존 컴포넌트 테스트들이 Windows 동작을
+ * 전제로 작성돼 있다. 기본값을 바꾸면 이번 범위와 무관한 테스트가 무더기로 깨지고,
+ * 그 실패는 회귀가 아니라 목 설정 변경의 부작용이라 신호가 오염된다(핸드오프 §4).
  */
 export function makeApiMock(invoke: Mock): ApiMock {
   return {
     invoke,
     on: vi.fn(() => () => undefined),
     getPathForFile: vi.fn(() => ''),
-    debugToolsEnabled: false
+    debugToolsEnabled: false,
+    platform: 'win32'
   }
 }
 
@@ -140,4 +147,67 @@ export function stubMenuViewport(
 /** 로컬 선택 스토어의 현재 선택(정렬본). */
 export function localSelectedNames(): string[] {
   return [...useLocalSelectionStore.getState().selectedNames].sort()
+}
+
+/** 원격 선택 스토어의 현재 선택(정렬본). */
+export function remoteSelectedNames(): string[] {
+  return [...useSelectionStore.getState().selectedNames].sort()
+}
+
+const GRID_LAYOUT_PROPS = [
+  'clientWidth',
+  'clientHeight',
+  'offsetWidth',
+  'offsetHeight',
+  'getBoundingClientRect'
+] as const
+
+/**
+ * jsdom은 레이아웃을 계산하지 않아 스크롤 컨테이너 크기가 0이고, 그러면 TanStack Virtual이
+ * 아무 행도 렌더하지 않는다(실측: 스텁 없이는 컨테이너가 자식 없이 비어 있어 셀을 찾지 못한다).
+ * 셀을 조작하려면 실제 크기가 필요하므로 채워 넣고, 다른 테스트 파일로 새지 않도록
+ * 원본 디스크립터를 저장해 두었다가 `restore`로 되돌린다.
+ */
+export function stubGridLayout(): { restore: () => void } {
+  const saved: Array<[string, PropertyDescriptor | undefined]> = GRID_LAYOUT_PROPS.map((prop) => [
+    prop,
+    Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop)
+  ])
+
+  const rect = {
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    right: 1200,
+    bottom: 800,
+    width: 1200,
+    height: 800,
+    toJSON: () => ({})
+  }
+  const values: Record<string, unknown> = {
+    clientWidth: 1200,
+    clientHeight: 800,
+    offsetWidth: 1200,
+    offsetHeight: 800,
+    getBoundingClientRect: () => rect
+  }
+  for (const prop of GRID_LAYOUT_PROPS) {
+    Object.defineProperty(HTMLElement.prototype, prop, {
+      configurable: true,
+      value: values[prop]
+    })
+  }
+
+  return {
+    restore: () => {
+      for (const [prop, descriptor] of saved) {
+        if (descriptor) {
+          Object.defineProperty(HTMLElement.prototype, prop, descriptor)
+        } else {
+          Reflect.deleteProperty(HTMLElement.prototype, prop)
+        }
+      }
+    }
+  }
 }

@@ -189,6 +189,48 @@ describe('LocalFileList — context menu wiring', () => {
   })
 })
 
+// macOS 지원 D그룹. Ctrl+클릭은 macOS의 보조 클릭이므로 선택 토글로도 읽으면
+// 컨텍스트 메뉴가 뜨면서 선택까지 뒤집힌다(D7).
+describe('LocalFileList — platform-aware selection modifiers', () => {
+  it('single-selects on Ctrl+click on macOS instead of toggling', () => {
+    // covers: Test-147
+    apiMock.platform = 'darwin'
+    renderList({ selected: ['b.txt'] })
+
+    fireEvent.click(screen.getByText('a.txt'), { ctrlKey: true })
+
+    expect(selectedNames()).toEqual(['a.txt'])
+  })
+
+  it('toggles the selection on Cmd+click on macOS', () => {
+    // covers: Test-148
+    apiMock.platform = 'darwin'
+    renderList({ selected: ['b.txt'] })
+    const row = screen.getByText('a.txt')
+
+    fireEvent.click(row, { metaKey: true })
+    expect(selectedNames()).toEqual(['a.txt', 'b.txt'])
+
+    // 토글이므로 같은 항목을 다시 누르면 빠진다. 이 왕복이 없으면
+    // "항상 선택에 더하기만" 하는 구현도 통과한다.
+    fireEvent.click(row, { metaKey: true })
+    expect(selectedNames()).toEqual(['b.txt'])
+  })
+
+  it('keeps Ctrl+click toggling on Windows', () => {
+    // covers: Test-155
+    // makeApiMock의 platform 기본값이 'win32'다(핸드오프 §4).
+    renderList({ selected: ['b.txt'] })
+    const row = screen.getByText('a.txt')
+
+    fireEvent.click(row, { ctrlKey: true })
+    expect(selectedNames()).toEqual(['a.txt', 'b.txt'])
+
+    fireEvent.click(row, { ctrlKey: true })
+    expect(selectedNames()).toEqual(['b.txt'])
+  })
+})
+
 // D절(핸드오프 함정 1): 닫기 트리거로 document에 새 contextmenu 리스너가 붙으면,
 // 메뉴를 여는 우클릭 자체가 같은 native 이벤트로 그 리스너까지 버블링돼 메뉴를
 // 열자마자 닫아버릴 수 있다.

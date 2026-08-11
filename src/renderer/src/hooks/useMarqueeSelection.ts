@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { currentPlatform, isToggleSelectModifier } from '@renderer/lib/platform'
 
 /** Marquee rectangle in content (scroll) space, for rendering the overlay. */
 export interface MarqueeBox {
@@ -29,8 +30,8 @@ interface Params {
 /**
  * Rubber-band (marquee) selection for a scrollable grid. A drag that starts on
  * empty space (not on an element marked `data-grid-cell`) draws a rectangle and
- * selects every intersecting item. Holding Ctrl/Cmd/Shift adds to the existing
- * selection instead of replacing it.
+ * selects every intersecting item. Holding Shift, or the platform's selection
+ * toggle modifier, adds to the existing selection instead of replacing it.
  */
 export function useMarqueeSelection({
   scrollRef,
@@ -59,7 +60,7 @@ export function useMarqueeSelection({
       // Starting on an item is a click/drag-and-drop, not a marquee.
       if ((e.target as HTMLElement).closest('[data-grid-cell]')) return
 
-      const additive = e.ctrlKey || e.metaKey || e.shiftKey
+      const additive = isToggleSelectModifier(e, currentPlatform()) || e.shiftKey
       const base = additive ? new Set(getRef.current()) : new Set<string>()
       if (!additive) setRef.current([]) // plain click on empty space clears
 
