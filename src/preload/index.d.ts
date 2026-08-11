@@ -57,6 +57,7 @@ interface FtpBrowserAPI {
   on: (channel: EventChannel, callback: (...args: unknown[]) => void) => () => void
   getPathForFile: (file: File) => string
   debugToolsEnabled: boolean
+  platform: string
 }
 
 declare global {

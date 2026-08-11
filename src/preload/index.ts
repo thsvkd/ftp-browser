@@ -93,7 +93,11 @@ const api = {
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   // Set by the main process through webPreferences.additionalArguments so views
   // can offer developer affordances (Shift+right-click) only while debugging.
-  debugToolsEnabled: hasDebugRendererArg(process.argv)
+  debugToolsEnabled: hasDebugRendererArg(process.argv),
+  // The renderer needs the platform to pick modifier rules (Ctrl+click is the
+  // secondary click on macOS). `navigator.platform` is deprecated, so pass the
+  // process value across the bridge the same way as `debugToolsEnabled`.
+  platform: process.platform
 }
 
 if (process.contextIsolated) {

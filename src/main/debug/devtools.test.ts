@@ -19,11 +19,16 @@ import {
   type ShortcutInput
 } from './devtools'
 
-/** before-input-event가 넘겨주는 Input 객체의 기본 형태 */
+/**
+ * before-input-event가 넘겨주는 Input 객체의 기본 형태.
+ * `code` 기본값은 빈 문자열 — 이 픽스처가 물리 키를 특정하지 않는다는 뜻이다.
+ * `key` 기준으로 매칭하는 기존 케이스(F12·Ctrl+Shift+C)는 그대로 통과한다.
+ */
 function keyInput(overrides: Partial<ShortcutInput> = {}): ShortcutInput {
   return {
     type: 'keyDown',
     key: 'a',
+    code: '',
     control: false,
     shift: false,
     alt: false,
@@ -38,52 +43,148 @@ function chord(overrides: Partial<ShortcutInput> = {}): ShortcutInput {
   return keyInput({ key: 'C', control: true, shift: true, ...overrides })
 }
 
+/** macOS 관례 조합 Cmd+Option+<key>. `key` 기준이므로 win32 케이스에만 쓴다. */
+function macChord(key: string, overrides: Partial<ShortcutInput> = {}): ShortcutInput {
+  return keyInput({ key, meta: true, alt: true, ...overrides })
+}
+
+/**
+ * macOS 관례 조합 Cmd+Option+<물리 키>. D11에 따라 매칭은 `code`로 한다.
+ *
+ * `key`는 keyInput의 기본값('a')을 그대로 둔다 — 일부러 `'i'`·`'c'`가 아닌 값이라
+ * `key` 기준으로 매칭하는 구현은 이 헬퍼를 쓰는 케이스를 통과할 수 없다.
+ * 실기에서 오는 실제 글리프 값은 Test-165·166이 따로 고정한다.
+ */
+function macCodeChord(code: string, overrides: Partial<ShortcutInput> = {}): ShortcutInput {
+  return keyInput({ code, meta: true, alt: true, ...overrides })
+}
+
 describe('matchDebugShortcut', () => {
   it('should map F12 keyDown to toggle-devtools', () => {
     // covers: Test-5
-    expect(matchDebugShortcut(keyInput({ key: 'F12' }))).toBe('toggle-devtools')
+    expect(matchDebugShortcut(keyInput({ key: 'F12' }), 'win32')).toBe('toggle-devtools')
   })
 
   it('should map Ctrl+Shift+C to inspect-element', () => {
     // covers: Test-6
-    expect(matchDebugShortcut(chord())).toBe('inspect-element')
+    expect(matchDebugShortcut(chord(), 'win32')).toBe('inspect-element')
   })
 
   it('should map Ctrl+Shift+c (lowercase) to inspect-element', () => {
     // covers: Test-7
-    expect(matchDebugShortcut(chord({ key: 'c' }))).toBe('inspect-element')
+    expect(matchDebugShortcut(chord({ key: 'c' }), 'win32')).toBe('inspect-element')
   })
 
   it('should ignore keyUp so one keypress does not fire twice', () => {
     // covers: Test-8
-    expect(matchDebugShortcut(chord({ type: 'keyUp' }))).toBeNull()
-    expect(matchDebugShortcut(keyInput({ type: 'keyUp', key: 'F12' }))).toBeNull()
+    expect(matchDebugShortcut(chord({ type: 'keyUp' }), 'win32')).toBeNull()
+    expect(matchDebugShortcut(keyInput({ type: 'keyUp', key: 'F12' }), 'win32')).toBeNull()
   })
 
   it('should require both Control and Shift for inspect-element', () => {
     // covers: Test-9
-    expect(matchDebugShortcut(keyInput({ key: 'C', shift: true }))).toBeNull()
-    expect(matchDebugShortcut(keyInput({ key: 'C', control: true }))).toBeNull()
+    expect(matchDebugShortcut(keyInput({ key: 'C', shift: true }), 'win32')).toBeNull()
+    expect(matchDebugShortcut(keyInput({ key: 'C', control: true }), 'win32')).toBeNull()
   })
 
   it('should reject extra modifiers on the inspect-element chord', () => {
     // covers: Test-10
-    expect(matchDebugShortcut(chord({ alt: true }))).toBeNull()
-    expect(matchDebugShortcut(chord({ meta: true }))).toBeNull()
+    expect(matchDebugShortcut(chord({ alt: true }), 'win32')).toBeNull()
+    expect(matchDebugShortcut(chord({ meta: true }), 'win32')).toBeNull()
   })
 
   it('should return null for unrelated keys', () => {
     // covers: Test-11
-    expect(matchDebugShortcut(keyInput({ key: 'A' }))).toBeNull()
-    expect(matchDebugShortcut(keyInput({ key: 'Enter' }))).toBeNull()
-    expect(matchDebugShortcut(keyInput({ key: 'F11' }))).toBeNull()
-    expect(matchDebugShortcut(chord({ key: 'x' }))).toBeNull()
+    expect(matchDebugShortcut(keyInput({ key: 'A' }), 'win32')).toBeNull()
+    expect(matchDebugShortcut(keyInput({ key: 'Enter' }), 'win32')).toBeNull()
+    expect(matchDebugShortcut(keyInput({ key: 'F11' }), 'win32')).toBeNull()
+    expect(matchDebugShortcut(chord({ key: 'x' }), 'win32')).toBeNull()
   })
 
   it('should ignore auto-repeated keys so holding the chord does not storm', () => {
     // covers: Test-35
-    expect(matchDebugShortcut(chord({ isAutoRepeat: true }))).toBeNull()
-    expect(matchDebugShortcut(keyInput({ key: 'F12', isAutoRepeat: true }))).toBeNull()
+    expect(matchDebugShortcut(chord({ isAutoRepeat: true }), 'win32')).toBeNull()
+    expect(matchDebugShortcut(keyInput({ key: 'F12', isAutoRepeat: true }), 'win32')).toBeNull()
+  })
+})
+
+// B그룹: 플랫폼 인자에 따른 분기. D8 — macOS는 Cmd+Option 조합을 **추가**할 뿐
+// 기존 F12·Ctrl+Shift+C를 제거하지 않으며, Windows 경로에는 회귀가 없다.
+describe('matchDebugShortcut — platform-specific chords', () => {
+  it('should map Cmd+Option+KeyI to toggle-devtools on macOS', () => {
+    // covers: Test-126
+    // D11: Option은 glyph modifier라 `key`에 레이아웃 문자가 남는다. 물리 키 위치인
+    // `code`로 매칭해야 레이아웃·IME와 무관해진다.
+    expect(matchDebugShortcut(macCodeChord('KeyI'), 'darwin')).toBe('toggle-devtools')
+  })
+
+  it('should map Cmd+Option+KeyC to inspect-element on macOS', () => {
+    // covers: Test-127
+    expect(matchDebugShortcut(macCodeChord('KeyC'), 'darwin')).toBe('inspect-element')
+  })
+
+  it('should still map F12 to toggle-devtools on macOS', () => {
+    // covers: Test-128
+    expect(matchDebugShortcut(keyInput({ key: 'F12' }), 'darwin')).toBe('toggle-devtools')
+  })
+
+  it('should still map Ctrl+Shift+C to inspect-element on macOS', () => {
+    // covers: Test-129
+    expect(matchDebugShortcut(chord(), 'darwin')).toBe('inspect-element')
+  })
+
+  it('should not map Cmd+Option+I on Windows', () => {
+    // covers: Test-130
+    expect(matchDebugShortcut(macChord('i'), 'win32')).toBeNull()
+  })
+
+  it('should not map Cmd+Option+C on Windows', () => {
+    // covers: Test-131
+    expect(matchDebugShortcut(macChord('c'), 'win32')).toBeNull()
+  })
+
+  it('should keep mapping F12 to toggle-devtools on Windows', () => {
+    // covers: Test-132
+    expect(matchDebugShortcut(keyInput({ key: 'F12' }), 'win32')).toBe('toggle-devtools')
+  })
+
+  it('should keep mapping Ctrl+Shift+C to inspect-element on Windows', () => {
+    // covers: Test-133
+    expect(matchDebugShortcut(chord(), 'win32')).toBe('inspect-element')
+  })
+
+  it('should require Option alongside Cmd on macOS', () => {
+    // covers: Test-134
+    expect(matchDebugShortcut(keyInput({ code: 'KeyI', meta: true }), 'darwin')).toBeNull()
+  })
+
+  it('should require Cmd alongside Option on macOS', () => {
+    // covers: Test-135
+    expect(matchDebugShortcut(keyInput({ code: 'KeyI', alt: true }), 'darwin')).toBeNull()
+  })
+
+  it('should ignore keyUp and auto-repeat for the macOS chord too', () => {
+    // covers: Test-136
+    expect(matchDebugShortcut(macCodeChord('KeyI', { type: 'keyUp' }), 'darwin')).toBeNull()
+    expect(matchDebugShortcut(macCodeChord('KeyI', { isAutoRepeat: true }), 'darwin')).toBeNull()
+  })
+
+  it('should map Cmd+Option+KeyI even when the layout yields a dead key', () => {
+    // covers: Test-165
+    // US 배열에서 Option+I는 dead key(ˆ)다. `key` 기준 구현은 여기서 죽는다.
+    expect(matchDebugShortcut(macCodeChord('KeyI', { key: 'ˆ' }), 'darwin')).toBe('toggle-devtools')
+  })
+
+  it('should map Cmd+Option+KeyC even when the layout yields a cedilla', () => {
+    // covers: Test-166
+    // US 배열에서 Option+C는 'ç'다.
+    expect(matchDebugShortcut(macCodeChord('KeyC', { key: 'ç' }), 'darwin')).toBe('inspect-element')
+  })
+
+  it('should reject the macOS chord when Ctrl is also held', () => {
+    // covers: Test-167
+    // Ctrl+Shift+C 분기가 `!alt && !meta`로 엄격한 것과 대칭을 맞춘다.
+    expect(matchDebugShortcut(macCodeChord('KeyI', { control: true }), 'darwin')).toBeNull()
   })
 })
 
@@ -222,7 +323,7 @@ function makeEvent(): { preventDefault: Mock } {
 }
 
 function register(win: FakeWindow['win'], debugEnabled: boolean): void {
-  registerDevtools(win as unknown as BrowserWindow, debugEnabled)
+  registerDevtools(win as unknown as BrowserWindow, debugEnabled, 'win32')
 }
 
 /**

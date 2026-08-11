@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, Menu } from 'electron'
+import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
 import { initDatabase } from './db/database'
@@ -11,7 +11,9 @@ import { registerPreviewHandlers } from './ipc/previewHandlers'
 import { registerDragHandlers } from './ipc/dragHandlers'
 import { registerGalleryHandlers } from './ipc/galleryHandlers'
 import { registerDevtools } from './debug/devtools'
+import { applyApplicationMenu } from './menu/appMenu'
 import { isDebugEnabled, debugRendererArgs, DEVTOOLS_FLAG } from '@shared/debug'
+import { APP_NAME } from '@shared/constants'
 
 const isDev = !app.isPackaged
 const debugEnabled = isDebugEnabled(process.argv)
@@ -26,7 +28,7 @@ function createWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     autoHideMenuBar: false,
-    title: 'FTP Browser',
+    title: APP_NAME,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -59,16 +61,20 @@ app.whenReady().then(() => {
   }
 
   if (debugEnabled) {
+    // Mirrors matchDebugShortcut: macOS adds the Cmd+Option pair and still
+    // accepts the Windows chords, so both are worth announcing there (D8).
+    const macOnlyChords = process.platform === 'darwin' ? 'Cmd+Option+I, Cmd+Option+C, ' : ''
     console.log(
-      `[debug] Developer tools enabled (${DEVTOOLS_FLAG}): F12, Ctrl+Shift+C, Shift+right-click`
+      `[debug] Developer tools enabled (${DEVTOOLS_FLAG}): ` +
+        `${macOnlyChords}F12, Ctrl+Shift+C, Shift+right-click`
     )
   }
 
   app.on('browser-window-created', (_, window) => {
-    registerDevtools(window, debugEnabled)
+    registerDevtools(window, debugEnabled, process.platform)
   })
 
-  Menu.setApplicationMenu(null)
+  applyApplicationMenu(process.platform)
   const win = createWindow()
   const db = initDatabase()
 

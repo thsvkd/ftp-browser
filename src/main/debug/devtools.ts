@@ -3,10 +3,17 @@ import type { BrowserWindow, Input, WebContents } from 'electron'
 
 type DebugAction = 'toggle-devtools' | 'inspect-element'
 
-/** The parts of Electron's `Input` the shortcut matcher reads. */
+/**
+ * The parts of Electron's `Input` the shortcut matcher reads.
+ *
+ * `code` (physical key position) is required alongside `key` because macOS
+ * keeps Option in the glyph modifiers: with Cmd+Option held, `key` carries the
+ * layout's dead key or accented character (ˆ, ç, or a Hangul jamo), never the
+ * plain letter. D11 matches the Cmd+Option chords on `code` for that reason.
+ */
 export type ShortcutInput = Pick<
   Input,
-  'type' | 'key' | 'control' | 'shift' | 'alt' | 'meta' | 'isAutoRepeat'
+  'type' | 'key' | 'code' | 'control' | 'shift' | 'alt' | 'meta' | 'isAutoRepeat'
 >
 
 interface Point {
@@ -49,21 +56,32 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Map a keystroke to a debug action. Only a non-repeating `keyDown` matches:
- * the matching `keyUp` would run the action twice, and holding the chord down
- * would queue one DevTools open per repeat.
+ * Map a keystroke to a debug action on `platform`. Only a non-repeating
+ * `keyDown` matches: the matching `keyUp` would run the action twice, and
+ * holding the chord down would queue one DevTools open per repeat.
+ *
+ * The platform is injected rather than read from `process.platform` so both
+ * branches can be exercised from one test suite.
  */
-export function matchDebugShortcut(input: ShortcutInput): DebugAction | null {
+export function matchDebugShortcut(input: ShortcutInput, platform: string): DebugAction | null {
   if (input.type !== 'keyDown' || input.isAutoRepeat) return null
   if (input.key === 'F12') return 'toggle-devtools'
-  if (
-    input.key.toLowerCase() === 'c' &&
-    input.control &&
-    input.shift &&
-    !input.alt &&
-    !input.meta
-  ) {
+  const key = input.key.toLowerCase()
+  if (key === 'c' && input.control && input.shift && !input.alt && !input.meta) {
     return 'inspect-element'
+  }
+  // macOS binds the inspector to Cmd+Option instead, and a MacBook's F12 is a
+  // volume key unless `fn` is held. The Windows chords stay recognised on macOS
+  // for external keyboards, so this branch only ever adds matches.
+  //
+  // Matched on `code` rather than `key` (D11): Option is a glyph modifier on
+  // macOS, so it rewrites the character even while Cmd is held — `key` arrives
+  // as ˆ, ç or a Hangul jamo depending on layout and IME, while `code` is the
+  // physical key position and is unaffected. The negative guards mirror the
+  // Ctrl+Shift+C branch above, which likewise refuses extra modifiers.
+  if (platform === 'darwin' && input.meta && input.alt && !input.control && !input.shift) {
+    if (input.code === 'KeyI') return 'toggle-devtools'
+    if (input.code === 'KeyC') return 'inspect-element'
   }
   return null
 }
@@ -147,13 +165,17 @@ async function inspectElementUnderCursor(win: BrowserWindow): Promise<void> {
  *   modifier state, so the Shift-only rule is enforced in the renderer, which
  *   `preventDefault()`s every other right-click before it reaches us.
  */
-export function registerDevtools(win: BrowserWindow, debugEnabled: boolean): void {
+export function registerDevtools(
+  win: BrowserWindow,
+  debugEnabled: boolean,
+  platform: string
+): void {
   if (!debugEnabled) return
   const wc = win.webContents
   let inspecting = false
 
   wc.on('before-input-event', (event, input) => {
-    const action = matchDebugShortcut(input)
+    const action = matchDebugShortcut(input, platform)
     if (!action) return
     event.preventDefault()
 
