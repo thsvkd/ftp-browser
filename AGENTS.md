@@ -23,11 +23,47 @@ renderer는 dev 서버가 서빙한다. setup에서 프로덕션 빌드를 하�
 Ctrl+Shift+C(요소 선택 모드), Shift+우클릭(네이티브 Inspect Element 메뉴)이 활성화된다.
 패키징 빌드는 `ftp-browser.exe --devtools`.
 
+macOS는 여기에 **Cmd+Option+I**(토글)와 **Cmd+Option+C**(요소 선택)를 더한다. 맥북 내장 키보드의
+F12는 기본이 볼륨 키라 `fn`을 함께 눌러야 하므로, 관례 조합이 없으면 사실상 쓸 수단이 없다.
+기존 조합도 그대로 인정하므로 외장 키보드에서는 F12·Ctrl+Shift+C가 계속 동작한다.
+
+Cmd+Option 조합만 `input.key`가 아니라 **`input.code`**(`KeyI`/`KeyC`)로 매칭한다. macOS에서 Option은
+glyph modifier라 Cmd가 눌려도 문자 매핑에 남는다 — US 배열에서 Option+I는 dead key(ˆ), Option+C는 `ç`,
+한글 입력 상태에서는 자모가 온다. `key`로 매칭하면 레이아웃과 IME에 따라 단축키가 죽는다.
+F12·Ctrl+Shift+C는 glyph modifier의 영향을 받지 않으므로 계속 `key` 기준이다.
+
 **dev 빌드도 플래그를 요구한다.** 플래그 없이 켜지면 요청하지도 않은 F12·우클릭 Inspect가 뜨고,
 무엇보다 dev와 패키징의 동작이 갈려 플래그 관련 회귀가 패키징 후에야 드러난다.
 
 플래그 이름이 `--debug`가 아닌 이유: Electron이 인식하지 못한 선행 플래그를 Node로 넘기는데,
 Node가 `--debug`를 DEP0062로 거부해 앱이 창도 못 띄우고 종료된다.
+
+### macOS
+
+`./script/run.sh`로 실행한다. `.sh` 스크립트에는 실행 비트가 필요하다(`chmod +x script/*.sh`).
+
+**애플리케이션 메뉴는 macOS에서만 설치한다.** macOS는 키보드 단축키를 앱 메뉴에 바인딩하므로,
+메뉴가 없으면 Cmd+Q·Cmd+W·Cmd+C/V/X/A·Cmd+Z가 **전부** 죽는다. 입력창에 붙여넣기조차 안 된다.
+Windows/Linux는 계속 `setApplicationMenu(null)`이다 — 그쪽은 메뉴바가 없는 편이 의도된 UI다.
+
+메뉴 템플릿에 **매크로 role(`viewMenu`·`editMenu`·`windowMenu`·`appMenu`·`fileMenu`·`help`)을 쓰지 않는다.**
+`{ role: 'viewMenu' }`는 런타임에 Toggle Developer Tools를 포함해 전개되므로 `--devtools` 플래그
+게이트가 그대로 뚫린다. 템플릿에는 `'viewMenu'` 문자열 하나만 남아 눈으로도 테스트로도 놓치기 쉽다.
+각 메뉴는 명시적 `submenu` 배열로 쓰고 개별 항목 role만 쓴다.
+
+최상위 항목에는 `label`이 **반드시** 있어야 한다. 없으면 `Invalid template for MenuItem`으로 throw해
+`app.whenReady()` 안에서 앱이 창도 못 띄우고 죽는다. macOS가 첫 메뉴 제목을 앱 이름으로 덮어써서
+화면에는 보이지 않지만, 그것은 표시 계층의 이야기이고 템플릿 검증은 별개다.
+dev 실행에서 첫 메뉴가 "Electron"으로 보이는 것은 `app.name` 때문이며 패키징 빌드에서는 `productName`을 따른다.
+
+**Ctrl+클릭은 macOS의 보조 클릭(우클릭)이다.** 그래서 macOS에서는 Cmd만 선택 토글로 인정하고 Ctrl은
+무시한다. 둘 다 토글로 보면 컨텍스트 메뉴가 뜨면서 선택 상태까지 뒤집힌다.
+갤러리 줌은 반대로 Ctrl과 Cmd를 **둘 다** 인정한다 — 트랙패드 핀치가 `ctrlKey`인 wheel 이벤트로
+도착하므로 Ctrl을 빼면 맥북의 주된 줌 수단이 죽는다. Windows에서 meta는 Win 키라 줌 수정자가 아니다.
+
+플랫폼 판정은 순수 함수에 `platform` 문자열을 주입해서 한다(`main/menu/appMenu.ts`,
+`main/debug/devtools.ts`, `renderer/src/lib/platform.ts`). 함수 안에서 `process.platform`을 직접 읽으면
+테스트에서 두 플랫폼을 한 스위트로 검증할 수 없다. 렌더러는 preload가 넘기는 `window.api.platform`을 쓴다.
 
 ## 정의
 
