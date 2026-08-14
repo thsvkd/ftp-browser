@@ -13,11 +13,21 @@ asarUnpack:
   - resources/**
 win:
   executableName: ftp-browser
+  arch:
+    - x64
+  target:
+    - nsis
+    - portable
 nsis:
+  oneClick: true
+  perMachine: false
+  allowElevation: false
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+portable:
+  artifactName: ${name}-${version}-portable.${ext}
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
@@ -38,6 +48,3 @@ linux:
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
-publish:
-  provider: generic
-  url: https://example.com/auto-updates

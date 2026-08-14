@@ -8,6 +8,7 @@
 `./script/run.xxx`: 앱 실행 스크립트. `setup --no-build`를 먼저 돌리고 dev 모드로 띄운다.
 `./script/test.xxx`: 테스트 스크립트.
 `./script/lint.xxx`: 린트 스크립트.
+`./script/package.ps1`: Windows x64 NSIS 설치기 + portable exe를 `dist/`에 만든다. 배포는 `vX.Y.Z` 태그(package.json 버전과 동일)를 푸시하면 GitHub Actions가 GitHub Releases에 올린다.
 
 공통 헤더(UTF-8 출력, 프로젝트 루트 이동, `[INFO]`/`[OK]`/`[SKIP]`/`[FAIL]` 함수)는
 `script/_common.ps1` / `script/_common.sh`에 있고 각 스크립트가 첫 줄에서 dot-source(source)한다.
