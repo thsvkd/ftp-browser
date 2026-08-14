@@ -18,7 +18,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 26
+          # jsdom 30 needs ^22.22.2 || ^24.15.0; better-sqlite3 12 has no Node 26 prebuilds.
+          node-version: 24.15.0
           cache: npm
 
       - name: Install dependencies

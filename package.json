@@ -1,11 +1,11 @@
 {
   "name": "ftp-browser",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "FTP server browser with image thumbnail preview",
   "main": "./out/main/index.js",
   "author": "thsvkd",
   "engines": {
-    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+    "node": "^22.22.2 || ^24.15.0"
   },
   "scripts": {
     "format": "prettier --write .",
