@@ -19,7 +19,7 @@ switch ($Mode) {
 }
 
 # -- 1. Node.js 확인 --
-$RequiredNodeMajor = 20
+$RequiredNodeMajor = 22
 
 $nodePath = Get-Command node -ErrorAction SilentlyContinue
 if ($nodePath) {

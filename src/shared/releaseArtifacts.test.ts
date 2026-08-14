@@ -463,6 +463,15 @@ function isOverlyBroadUploadGlob(glob: string): boolean {
   )
 }
 
+/** setup-node spec that satisfies jsdom 30 (`^22.22.2 || ^24.15.0 || >=26.0.0`). */
+function isJsdom30CompatibleNodeSpec(spec: string): boolean {
+  const trimmed = spec.trim()
+  if (trimmed === '26' || /^26\./.test(trimmed)) return true
+  if (/^24\.(1[5-9]|[2-9]\d)(?:\.|$)/.test(trimmed)) return true
+  if (/^22\.(22\.(?:[2-9]|\d{2,})|2[3-9]|[3-9]\d)(?:\.|$)/.test(trimmed)) return true
+  return false
+}
+
 function isBuildWinInvocation(line: string): boolean {
   const stripped = stripInlineComment(line).trim()
   if (!stripped || isWriteOrEcho(stripped)) return false
@@ -587,6 +596,15 @@ describe('.github/workflows/release.yml contract', () => {
       expect(unexcludedDoubleStar && !hasBlockmapExclusion(globs)).toBe(false)
       expect(broad.some((glob) => !glob.includes('**'))).toBe(false)
     }
+  })
+
+  it('should pin a Node version that jsdom 30 can boot', () => {
+    // covers: Test-185
+    // jsdom 30 engines: ^22.22.2 || ^24.15.0 || >=26.0.0
+    // Node 20 + undici 8 throws: webidl.util.markAsUncloneable is not a function
+    const spec = yamlScalar(readRepoFile('.github/workflows/release.yml'), 'node-version')
+    expect(spec).toBeDefined()
+    expect(isJsdom30CompatibleNodeSpec(spec ?? '')).toBe(true)
   })
 })
 

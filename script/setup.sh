@@ -16,7 +16,7 @@ case "${1:-}" in
 esac
 
 # ── 1. Node.js 확인 ────────────────────────────────────
-REQUIRED_NODE_MAJOR=20
+REQUIRED_NODE_MAJOR=22
 
 if command -v node &>/dev/null; then
   NODE_VER="$(node -v)"
