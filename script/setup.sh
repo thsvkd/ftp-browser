@@ -54,7 +54,14 @@ else
   ok "의존성 설치 완료"
 fi
 
-# ── 4. 네이티브 모듈 확인 (better-sqlite3, sharp) ──────
+# ── 4. Electron 바이너리 (43+ 는 postinstall 이 없음) ─
+if [ ! -f "node_modules/electron/path.txt" ]; then
+  info "Electron 바이너리 없음. 다운로드 중..."
+  node node_modules/electron/install.js || fail "Electron 바이너리 설치 실패"
+  ok "Electron 바이너리 설치 완료"
+fi
+
+# ── 5. 네이티브 모듈 확인 (better-sqlite3, sharp) ──────
 NATIVE_OK=true
 
 if [ ! -f "node_modules/better-sqlite3/build/Release/better_sqlite3.node" ]; then
@@ -74,7 +81,7 @@ else
   ok "네이티브 모듈 빌드 완료"
 fi
 
-# ── 5. 빌드 (--no-build면 타입체크만) ──────────────────
+# ── 6. 빌드 (--no-build면 타입체크만) ──────────────────
 if [ "$NO_BUILD" -eq 1 ]; then
   # dev 모드에서는 electron-vite dev가 main/preload를 직접 빌드하고 renderer는 dev 서버가
   # 서빙한다. 여기서 프로덕션 빌드를 하면 main/preload가 곧바로 dev 산출물에 덮여
