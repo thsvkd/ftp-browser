@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import { Group, Panel, Separator } from 'react-resizable-panels'
 import { Toolbar } from './Toolbar'
 import { StatusBar } from './StatusBar'
 import { RemoteExplorer } from '@renderer/components/remote/RemoteExplorer'
@@ -25,15 +25,15 @@ export function AppShell(): React.JSX.Element {
         onSettingsClick={() => setSettingsOpen(true)}
       />
       <div className="flex-1 overflow-hidden">
-        <PanelGroup direction="horizontal">
-          <Panel defaultSize={50} minSize={25}>
+        <Group orientation="horizontal">
+          <Panel defaultSize="50%" minSize="25%">
             <LocalExplorer />
           </Panel>
-          <PanelResizeHandle className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors" />
-          <Panel defaultSize={50} minSize={25}>
+          <Separator className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors" />
+          <Panel defaultSize="50%" minSize="25%">
             <RemoteExplorer />
           </Panel>
-        </PanelGroup>
+        </Group>
       </div>
       <OperationPanel />
       <TransferPanel />

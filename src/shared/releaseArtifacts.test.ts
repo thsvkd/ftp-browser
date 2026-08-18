@@ -385,7 +385,7 @@ function extractJobSteps(source: string): string[] {
     let itemIndent: string | null = null
     let current: string[] = []
 
-    const flush = () => {
+    const flush = (): void => {
       if (current.length === 0) return
       const first = current[0].replace(/^([ \t]*)-\s+/, '$1')
       steps.push([first, ...current.slice(1)].join('\n'))
