@@ -1,183 +1,66 @@
-# AGENTS.md
+# CLAUDE.md
 
-상세한 가이드라인 및 스펙은 docs/SPEC.md를 참조.
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
-## 명령어
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
-`./script/setup.xxx`: 환경 설정 스크립트. `--no-build`를 주면 프로덕션 빌드 대신 타입체크만 한다.
-`./script/run.xxx`: 앱 실행 스크립트. `setup --no-build`를 먼저 돌리고 dev 모드로 띄운다.
-`./script/test.xxx`: 테스트 스크립트.
-`./script/lint.xxx`: 린트 스크립트.
-`./script/package.ps1`: Windows x64 NSIS 설치기 + portable exe를 `dist/`에 만든다. 배포는 `vX.Y.Z` 태그(package.json 버전과 동일)를 푸시하면 GitHub Actions가 GitHub Releases에 올린다.
+## 1. Think Before Coding
 
-공통 헤더(UTF-8 출력, 프로젝트 루트 이동, `[INFO]`/`[OK]`/`[SKIP]`/`[FAIL]` 함수)는
-`script/_common.ps1` / `script/_common.sh`에 있고 각 스크립트가 첫 줄에서 dot-source(source)한다.
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
 
-run이 프로덕션 빌드를 건너뛰는 이유: `electron-vite dev`가 main/preload를 dev 모드로 다시 빌드하고
-renderer는 dev 서버가 서빙한다. setup에서 프로덕션 빌드를 하면 곧바로 덮여 시간만 버리고,
-`out/`이 dev(main·preload) + 프로덕션(renderer) 혼합 상태가 되어 `npm start`가 어긋난 조합을 실행한다.
-다만 `electron-vite dev`는 타입체크를 하지 않으므로 타입 안전망으로 `npm run typecheck`만 남긴다.
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
 
-### 개발자 도구
+## 2. Simplicity First
 
-`./script/run.ps1 --devtools` (또는 `./script/run.sh --devtools`)로 실행하면 F12(DevTools 토글),
-Ctrl+Shift+C(요소 선택 모드), Shift+우클릭(네이티브 Inspect Element 메뉴)이 활성화된다.
-패키징 빌드는 `ftp-browser.exe --devtools`.
+**Minimum code that solves the problem. Nothing speculative.**
 
-macOS는 여기에 **Cmd+Option+I**(토글)와 **Cmd+Option+C**(요소 선택)를 더한다. 맥북 내장 키보드의
-F12는 기본이 볼륨 키라 `fn`을 함께 눌러야 하므로, 관례 조합이 없으면 사실상 쓸 수단이 없다.
-기존 조합도 그대로 인정하므로 외장 키보드에서는 F12·Ctrl+Shift+C가 계속 동작한다.
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
 
-Cmd+Option 조합만 `input.key`가 아니라 **`input.code`**(`KeyI`/`KeyC`)로 매칭한다. macOS에서 Option은
-glyph modifier라 Cmd가 눌려도 문자 매핑에 남는다 — US 배열에서 Option+I는 dead key(ˆ), Option+C는 `ç`,
-한글 입력 상태에서는 자모가 온다. `key`로 매칭하면 레이아웃과 IME에 따라 단축키가 죽는다.
-F12·Ctrl+Shift+C는 glyph modifier의 영향을 받지 않으므로 계속 `key` 기준이다.
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
 
-**dev 빌드도 플래그를 요구한다.** 플래그 없이 켜지면 요청하지도 않은 F12·우클릭 Inspect가 뜨고,
-무엇보다 dev와 패키징의 동작이 갈려 플래그 관련 회귀가 패키징 후에야 드러난다.
+## 3. Surgical Changes
 
-플래그 이름이 `--debug`가 아닌 이유: Electron이 인식하지 못한 선행 플래그를 Node로 넘기는데,
-Node가 `--debug`를 DEP0062로 거부해 앱이 창도 못 띄우고 종료된다.
+**Touch only what you must. Clean up only your own mess.**
 
-### macOS
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
 
-`./script/run.sh`로 실행한다. `.sh` 스크립트에는 실행 비트가 필요하다(`chmod +x script/*.sh`).
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
 
-**애플리케이션 메뉴는 macOS에서만 설치한다.** macOS는 키보드 단축키를 앱 메뉴에 바인딩하므로,
-메뉴가 없으면 Cmd+Q·Cmd+W·Cmd+C/V/X/A·Cmd+Z가 **전부** 죽는다. 입력창에 붙여넣기조차 안 된다.
-Windows/Linux는 계속 `setApplicationMenu(null)`이다 — 그쪽은 메뉴바가 없는 편이 의도된 UI다.
+The test: Every changed line should trace directly to the user's request.
 
-메뉴 템플릿에 **매크로 role(`viewMenu`·`editMenu`·`windowMenu`·`appMenu`·`fileMenu`·`help`)을 쓰지 않는다.**
-`{ role: 'viewMenu' }`는 런타임에 Toggle Developer Tools를 포함해 전개되므로 `--devtools` 플래그
-게이트가 그대로 뚫린다. 템플릿에는 `'viewMenu'` 문자열 하나만 남아 눈으로도 테스트로도 놓치기 쉽다.
-각 메뉴는 명시적 `submenu` 배열로 쓰고 개별 항목 role만 쓴다.
+## 4. Goal-Driven Execution
 
-최상위 항목에는 `label`이 **반드시** 있어야 한다. 없으면 `Invalid template for MenuItem`으로 throw해
-`app.whenReady()` 안에서 앱이 창도 못 띄우고 죽는다. macOS가 첫 메뉴 제목을 앱 이름으로 덮어써서
-화면에는 보이지 않지만, 그것은 표시 계층의 이야기이고 템플릿 검증은 별개다.
-dev 실행에서 첫 메뉴가 "Electron"으로 보이는 것은 `app.name` 때문이며 패키징 빌드에서는 `productName`을 따른다.
+**Define success criteria. Loop until verified.**
 
-**Ctrl+클릭은 macOS의 보조 클릭(우클릭)이다.** 그래서 macOS에서는 Cmd만 선택 토글로 인정하고 Ctrl은
-무시한다. 둘 다 토글로 보면 컨텍스트 메뉴가 뜨면서 선택 상태까지 뒤집힌다.
-갤러리 줌은 반대로 Ctrl과 Cmd를 **둘 다** 인정한다 — 트랙패드 핀치가 `ctrlKey`인 wheel 이벤트로
-도착하므로 Ctrl을 빼면 맥북의 주된 줌 수단이 죽는다. Windows에서 meta는 Win 키라 줌 수정자가 아니다.
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
 
-플랫폼 판정은 순수 함수에 `platform` 문자열을 주입해서 한다(`main/menu/appMenu.ts`,
-`main/debug/devtools.ts`, `renderer/src/lib/platform.ts`). 함수 안에서 `process.platform`을 직접 읽으면
-테스트에서 두 플랫폼을 한 스위트로 검증할 수 없다. 렌더러는 preload가 넘기는 `window.api.platform`을 쓴다.
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
 
-## 정의
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-### 용어 정의
+---
 
-- 테스트 케이스 리스트: R1에서 인간과 합의한 케이스 리스트. 테스트 코드가 아님.
-- 테스트 코드: R2에서 테스트 케이스 리스트를 1:1로 번역한 코드.
-- 핸드오프 문서: 테스트 케이스 리스트 + 핵심 결정 + 기각한 대안 + 관련 코드 포인터를 포함한 문서. R2에서 테스트 코드 작성 시 참조.
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
-### 완료(GREEN)의 정의
-
-> 테스트는 기능의 SSoT다. 따라서 **green = 완료가 성립하도록** 테스트를 작성(불신 전제의 수동 재검증이 아니라, 신뢰 가능하게 만드는 것이 목표).
-
-- 구체적으로 green은 다음을 뜻한다:
-  - R1에서 **인간과 합의해 확정한 테스트 케이스 리스트**가 정의.
-  - 확정 테스트 케이스 리스트를 올바르게 코드로 인코딩.
-  - 각 테스트 코드가 동작을 **진짜로 단언**함(뮤테이션으로 검증).
-  - 모두 통과.
-
-- 테스트 케이스 리스트 외의 케이스는 완료 범위 밖이며, **유지보수 루프**로 회귀 테스트와 함께 테스트 케이스 리스트에 추가한다(그 순간부터 완료의 일부가 된다).
-
-### 적대적 리뷰 루프 정의
-
-- 구현한 내용에 대해서 리뷰하는 루프. 다음과 같은 과정을 거친다.
-  1. 구현자가 코드를 작성.
-  2. 적대적 리뷰어를 호출하여 리뷰를 진행.
-  3. MEDIUM 이상의 피드백이 있으면 구현자에게 피드백을 전달.
-  4. 구현자는 피드백을 반영하여 다시 코드를 수정.
-  5. 리뷰어는 수정된 코드에 대해 다시 리뷰를 진행.
-  6. 리뷰어가 더 이상 MEDIUM 이상 지적이 없다고 판단할 때까지 반복.
-  7. 루프 종료 후 LOW 피드백을 출력하고, 반영 여부는 인간 검수 게이트에서 결정.
-- 리뷰어는 반드시 **신선한 컨텍스트(별도 서브에이전트)**에서 실행한다. 구현 대화 내 자기검토 금지.
-- 피드백 레벨:
-  - **CRITICAL**: 동작 오류, 보안 취약점, 데이터 손실 위험. 즉시 반영.
-  - **HIGH**: 테스트 케이스 미커버, 잘못된 단언, 엣지케이스 누락, 명확한 설계 결함. 루프 내 반영.
-  - **MEDIUM**: 나쁜 관행, 미래 버그 가능성, 유지보수성 저해. 루프 내 반영.
-  - **LOW**: 스타일·이름·취향 수준. 루프 종료 후 인간 결정.
-
-## 워크플로우
-
-### R0. 작업 유형 판별
-
-먼저 유형을 결정한 후, 동작을 분기한다.
-
-- **기능(feature)**: 아래의 전체 R1->R4 워크플로우를 실행.
-- **버그(bug)**: 먼저 버그를 **재현하는 RED 회귀 테스트 코드**를 작성하고(이미 담당 테스트 코드가 있다면 RED가 되게 수정) GREEN이 되도록 구현한다.
-- **리팩토링(refactor)**: 동작 불변이 완료 기준. 새 RED을 작성하지 않는다. **기존 테스트 코드가 계속 green**임을 보장하고, 커버리지가 부족하면 characterization 테스트 코드를 먼저 보강한 뒤 변경한다.
-
-### R1 - 계획 + 합의 (코드 작성 금지)
-
-> 우선순위: **근본 원인 해결 > 최소 변경**. 근본 해결의 범위 안에서 최소·정당한 변경.
-
-1. **PRD**: 기획 의도·해결하려는 문제를 명시한다. 기존 코드/패턴을 조사한다.
-2. **테스트 케이스 합의(grilling)**: 사용자와 결정 트리의 가지를 끝까지 내려가며, "이 테스트 케이스 집합 통과 = 완료"라는 **인수 기준을 번호 매긴 리스트**를 구현 전에 확정한다(`Test-N`). 모호한 어휘는 `docs/CONTEXT.md`에 고정한다.
-3. **인간 검수 게이트**: 인간 사용자가 테스트 케이스 리스트를 검수한다: "이 리스트가 완료의 정의로 충분한가? 빠진 게 있나?" — 이 게이트는 **인간만** 닫을 수 있다(AI 리뷰로 대체 불가).
-4. **핸드오프 문서 작성**: 풀 컨텍스트를 가진 메인 에이전트가, 탐색 부산물은 버리고 합의를 고충실도로 외부 문서화한다. 포함: **테스트 케이스 리스트 + 핵심 결정 + 기각한 대안 + 관련 코드 포인터**. 이 문서가 이후 새 컨텍스트를 가진 에이전트들의 입력이 된다.
-
-### R2 - TDD (새 에이전트로 위임)
-
-> 핸드오프 문서가 충실하면, 새 컨텍스트 에이전트로의 위임이 컨텍스트 오염과 번역 손실을 동시에 낮춘다.
-> 분리의 핵심 경계: **테스트 작성자 ≠ 구현자**가 되도록 한다. 구현자가 테스트에 맞춰 코드를 특수처리하는 자기참조를 차단한다.
-
-1. **테스트 코드 작성**: 새로운 컨텍스트를 가지는 에이전트가 핸드오프의 테스트 케이스 리스트를 **1:1 매핑**하는 테스트 코드를 작성한다. 새 케이스를 추가·재해석하지 않는다. 각 테스트에 `covers: Test-N` 태그를 단다.
-2. **테스트 코드에 대한 적대적 리뷰 루프 실행**: 작성한 테스트 코드가 핸드오프 문서를 충실히 따르는지 리뷰한다.
-3. **RED 확인**: 각 테스트가 **의도한 단언 실패**로 RED임을 실행 출력으로 확인한다.
-4. **실제 구현 진행**: 핸드오프 문서를 참고하여 구현을 진행한다. 테스트를 약화·skip·삭제해 green에 도달 시도 금지.
-5. **GREEN 확인**: 테스트 실제 실행 출력으로 확인한다. 자기보고("통과한 것 같다") 금지.
-6. **뮤테이션 스코어 확인**: 뮤테이션 테스트를 실행해 임계값 이상인지 확인한다. 임계값 미달 시 단언이 약한 테스트 코드를 보강한다.
-
-### R3 - 검증 루프
-
-1. **구현 코드에 대한 적대적 리뷰 루프 실행**: 작성한 구현 코드가 핸드오프 문서를 충실히 따르는지 리뷰한다.
-2. **AI slop 제거**: `/ai-slop-cleaner`로 검토한다.
-3. **E2E 실측 검증**: 자동화 테스트로 검증하기 어려운 영역(시스템 통합, 실제 환경 의존 동작)에 한정해 실제 실행으로 검증한다. 테스트 코드가 이미 검증한 동작은 수동으로 재확인하지 않는다. 실패 시 R2 4번 단계(실제 구현 진행)로 되돌아간다.
-4. **완료 증거 게이트**: 추정으로 완료를 주장하지 않는다. **증거 번들**을 산출한다:
-   - 실행한 정확한 명령어와 출력(테스트/린트/타입체크/뮤테이션/빌드 등).
-   - 변경 diff와 영향 범위, 테스트 케이스 리스트 <-> 테스트 코드 대응표.
-   - 구현 중 내린 가정·결정, R1 합의 대비 이탈 사항.
-
-### R4 - 마무리
-
-1. 필요 시 문서를 업데이트한다.
-2. **인간 검수용 HTML 보고서**를 작성한다.
-   - 인간용: 문제/원인/해결/결과가 잘 드러나게 작성된 인터랙티브 보고서.
-   - 검증 증거: R3의 증거 번들 포함.
-   - 테마: 라이트 모드.
-3. **인간 승인 게이트**: 사용자가 보고서를 검수하고 승인한다(합의 <-> 구현물 대조).
-4. **커밋**: 승인된 경우에만 진행. 올바른 디렉토리 확인. 커밋은 논리적 변경 단위로. 테스트 + 구현을 함께 커밋. 관련 변경점만 커밋. **승인 전 push 절대 금지**.
-
-## 규칙
-
-- **하드코딩 금지**. 대신 설정/환경변수 사용.
-- 문제를 **우회/회피 금지**. 증상만 덮지 말고 재현 -> 원인 가설 -> 가설 검증 테스트 -> 수정 순으로 근본 해결한다.
-- 기존 패턴/네이밍을 무시한 **새 패턴 도입 금지**. 도입 전 동일 계층의 기존 구현을 1개 이상 읽고 그 시그니처/네이밍을 따른다.
-- 사용자 질의 시 각 항목에 **번호**를 붙여 명확히 소통한다.
-
-## 강제 항목
-
-- RED/GREEN 실행 증거 -> Stop agent-hook(테스트 스위트 실행·결과 확인 후에만 종료 허용).
-- 뮤테이션 스코어 임계값 -> CI 머지 게이트.
-- 신선 컨텍스트 리뷰어 -> 공식 `code-review` 플러그인 / 다른 모델 워커.
-- 자동 포맷 -> PostToolUse 훅(매 Write/Edit).
-- **시크릿 절대 커밋·하드코딩 금지** -> `.env`/시크릿 매니저 + `gitleaks` pre-commit + `.env` 경로 PreToolUse 차단.
-- **승인 없이 `git push` 금지** -> 권한 설정 + pre-push 훅.
-- 무승인 허용: 읽기, 단일 파일 린트/타입체크, 특정 테스트. / 승인 필요: 패키지 설치, push, 전체 빌드/E2E, 파일 삭제, 인프라 변경.
-
-## Git 컨벤션
-
-- 커밋 메시지는 항상 **영어**. Conventional Commits 준수.
-- 제목: `<type>(<scope>): <subject>`. 본문(필요 시): `- [내용]`.
-- 사용자 이름·이메일은 `git config user.name` / `git config user.email` 출력 사용.
-- `Co-Authored-By:` / `Made-with:` 금지. 트레일러는 아래 형식만:
-  ```
-  Signed-off-by: {사용자 이름} <{사용자 이메일}>
-  Assisted-by: Claude Code (<model-id>)
-  ```
