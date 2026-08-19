@@ -41,6 +41,9 @@ export function registerFtpHandlers(
     async (_event, payload: FtpConnectPayload): Promise<IpcResult<void>> => {
       try {
         const result = await manager.connect(payload)
+        if (result.cancelled) {
+          return { success: false, error: 'Connection cancelled' }
+        }
         if (result.success) {
           // UPSERT server info (keyed on host+port)
           try {

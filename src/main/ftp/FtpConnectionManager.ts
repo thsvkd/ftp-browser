@@ -35,6 +35,11 @@ export class FtpConnectionManager extends EventEmitter {
   private _port = 0
   private _config: FtpConnectPayload | null = null
   /**
+   * connect()와 disconnect()가 교차될 때 in-flight access()가 늦게 성공해도
+   * connected로 커밋되지 않도록 한다. disconnect(그리고 새 connect)마다 증가.
+   */
+  private connectGeneration = 0
+  /**
    * basic-ftp Client는 한 번에 하나의 task만 실행 가능. 메인 클라이언트를 공유하는
    * 모든 경로(list, transfer, thumbnail/preview fallback 등)를 이 promise chain으로
    * 직렬화하여 "Client is closed because user launched task while another one is still
@@ -47,7 +52,10 @@ export class FtpConnectionManager extends EventEmitter {
     this.client = createConfiguredClient()
   }
 
-  async connect(config: FtpConnectPayload): Promise<{ success: boolean; error?: string }> {
+  async connect(
+    config: FtpConnectPayload
+  ): Promise<{ success: boolean; error?: string; cancelled?: boolean }> {
+    const generation = ++this.connectGeneration
     try {
       this.emitStatus('connecting', config.host)
 
@@ -56,14 +64,20 @@ export class FtpConnectionManager extends EventEmitter {
       this.client.close()
       this.client = createConfiguredClient()
       this.mainClientLock = Promise.resolve()
+      const client = this.client
 
-      await this.client.access({
+      await client.access({
         host: config.host,
         port: config.port,
         user: config.user,
         password: config.password,
         secure: config.secure
       })
+
+      if (generation !== this.connectGeneration) {
+        client.close()
+        return { success: false, cancelled: true }
+      }
 
       this._connected = true
       this._host = config.host
@@ -74,6 +88,9 @@ export class FtpConnectionManager extends EventEmitter {
 
       return { success: true }
     } catch (err) {
+      if (generation !== this.connectGeneration) {
+        return { success: false, cancelled: true }
+      }
       this._connected = false
       const { message } = classifyError(err)
       this.emitStatus('error', config.host, message)
@@ -123,6 +140,7 @@ export class FtpConnectionManager extends EventEmitter {
   }
 
   async disconnect(): Promise<void> {
+    this.connectGeneration++
     this.client.close()
     this._connected = false
     this._config = null

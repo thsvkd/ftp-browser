@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import type { FtpServer, RecentPath } from '@shared/types/ftp'
 import type { IpcResult } from '@shared/types/ipc'
@@ -23,6 +23,8 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
   const [selectedServerId, setSelectedServerId] = useState<number | null>(null)
 
   const connect = useFtpStore((s) => s.connect)
+  const disconnect = useFtpStore((s) => s.disconnect)
+  const connectAttemptRef = useRef(0)
 
   const selectServer = useCallback((server: FtpServer): void => {
     setHost(server.host)
@@ -77,6 +79,7 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
   }
 
   const handleConnect = async (): Promise<void> => {
+    const attempt = ++connectAttemptRef.current
     setConnecting(true)
     setError('')
     let cleanHost = host.trim()
@@ -101,6 +104,10 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
       },
       initialPath
     )
+    if (attempt !== connectAttemptRef.current) {
+      setConnecting(false)
+      return
+    }
     setConnecting(false)
     if (success) {
       onClose()
@@ -110,12 +117,21 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
     }
   }
 
+  const handleCancel = (): void => {
+    if (connecting) {
+      connectAttemptRef.current++
+      setConnecting(false)
+      void disconnect()
+    }
+    onClose()
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     if (e.key === 'Enter' && !connecting) {
       handleConnect()
     }
     if (e.key === 'Escape') {
-      onClose()
+      handleCancel()
     }
   }
 
@@ -274,7 +290,7 @@ export function ConnectDialog({ open, onClose }: ConnectDialogProps): React.JSX.
 
         <div className="mt-5 flex justify-end gap-2">
           <button
-            onClick={onClose}
+            onClick={handleCancel}
             className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Cancel

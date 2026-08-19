@@ -39,6 +39,12 @@ interface FtpStore {
   setConnectionState: (state: FtpConnectionState) => void
 }
 
+/**
+ * connect()가 await 중일 때 disconnect()가 오면, 늦게 도착한 성공/실패를
+ * 커밋하지 않기 위한 세대 번호. UI에 노출하지 않는다.
+ */
+let connectGeneration = 0
+
 export const useFtpStore = create<FtpStore>((set, get) => ({
   connectionStatus: 'disconnected',
   host: '',
@@ -51,15 +57,25 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
   historyIndex: 0,
 
   connect: async (config, initialPath = '/') => {
+    const generation = ++connectGeneration
     set({ error: null })
     const result = await window.api.invoke<IpcResult<void>>('ftp:connect', config)
+    if (generation !== connectGeneration) return false
     if (result.success) {
       set({ host: config.host, port: config.port })
       await get().navigateTo(initialPath)
+      if (generation !== connectGeneration) {
+        set({ error: null, loading: false })
+        return false
+      }
       // If initial path failed, fall back to root
       if (get().error && initialPath !== '/') {
         set({ error: null })
         await get().navigateTo('/')
+        if (generation !== connectGeneration) {
+          set({ error: null, loading: false })
+          return false
+        }
       }
       if (get().error) {
         return false
@@ -71,6 +87,7 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
   },
 
   disconnect: async () => {
+    connectGeneration++
     await window.api.invoke('ftp:disconnect')
     set({
       connectionStatus: 'disconnected',
@@ -79,15 +96,18 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
       currentPath: '/',
       entries: [],
       error: null,
+      loading: false,
       history: ['/'],
       historyIndex: 0
     })
   },
 
   navigateTo: async (path) => {
+    const generation = connectGeneration
     set({ loading: true, error: null })
     try {
       const result = await window.api.invoke<IpcResult<FtpListData>>('ftp:list', path)
+      if (generation !== connectGeneration) return
       if (result.success) {
         const { history, historyIndex } = get()
         const newHistory = [...history.slice(0, historyIndex + 1), path]
@@ -102,6 +122,7 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
         set({ error: result.error, loading: false })
       }
     } catch (err) {
+      if (generation !== connectGeneration) return
       set({
         error: err instanceof Error ? err.message : String(err),
         loading: false

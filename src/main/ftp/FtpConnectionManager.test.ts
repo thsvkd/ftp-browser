@@ -59,6 +59,9 @@ describe('FtpConnectionManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(Client.prototype.access).mockReset()
+    vi.mocked(Client.prototype.close).mockReset()
+    vi.mocked(Client.prototype.list).mockReset()
     manager = new FtpConnectionManager()
   })
 
@@ -132,6 +135,117 @@ describe('FtpConnectionManager', () => {
       const errorEvent = statusEvents.find((e) => e.status === 'error')
       expect(errorEvent).toBeDefined()
       expect(errorEvent?.error).toBe('Auth failed')
+    })
+  })
+
+  describe('disconnect during connect', () => {
+    it('should abort an in-flight connect and not emit connected or error', async () => {
+      let rejectAccess: ((err: Error) => void) | undefined
+      vi.mocked(Client.prototype.access).mockImplementation(
+        () =>
+          new Promise((_, reject) => {
+            rejectAccess = reject
+          })
+      )
+      vi.mocked(Client.prototype.close).mockImplementation(() => {
+        rejectAccess?.(new Error('User closed client during task'))
+      })
+
+      const statuses: string[] = []
+      manager.on('connectionStatus', (state) => statuses.push(state.status))
+
+      const connectPromise = manager.connect({
+        host: 'ftp.example.com',
+        port: 21,
+        user: 'user',
+        password: 'pass',
+        secure: false
+      })
+      await vi.waitFor(() => expect(Client.prototype.access).toHaveBeenCalled())
+
+      await manager.disconnect()
+      const result = await connectPromise
+
+      expect(result.success).toBe(false)
+      expect(result.cancelled).toBe(true)
+      expect(manager.isConnected()).toBe(false)
+      expect(statuses).toEqual(['connecting', 'disconnected'])
+    })
+
+    it('should not close a newer connect client when a stale access resolves', async () => {
+      const accessResolvers: Array<(value: FTPResponse) => void> = []
+      vi.mocked(Client.prototype.access).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            accessResolvers.push(resolve)
+          })
+      )
+      const closedClients: Client[] = []
+      vi.mocked(Client.prototype.close).mockImplementation(function (this: Client) {
+        closedClients.push(this)
+      })
+
+      const first = manager.connect({
+        host: 'a.example',
+        port: 21,
+        user: 'user',
+        password: 'pass',
+        secure: false
+      })
+      await vi.waitFor(() => expect(accessResolvers).toHaveLength(1))
+
+      await manager.disconnect()
+
+      const second = manager.connect({
+        host: 'b.example',
+        port: 21,
+        user: 'user',
+        password: 'pass',
+        secure: false
+      })
+      await vi.waitFor(() => expect(accessResolvers).toHaveLength(2))
+      const newerClient = manager.getClient()
+
+      accessResolvers[0]!({} as FTPResponse)
+      await expect(first).resolves.toMatchObject({ success: false, cancelled: true })
+      expect(closedClients).not.toContain(newerClient)
+
+      accessResolvers[1]!({} as FTPResponse)
+      await expect(second).resolves.toMatchObject({ success: true })
+      expect(manager.isConnected()).toBe(true)
+      expect(manager.getHost()).toBe('b.example')
+    })
+
+    it('should not mark connected if access finishes after disconnect', async () => {
+      let resolveAccess: ((value: FTPResponse) => void) | undefined
+      vi.mocked(Client.prototype.access).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveAccess = resolve
+          })
+      )
+
+      const statuses: string[] = []
+      manager.on('connectionStatus', (state) => statuses.push(state.status))
+
+      const connectPromise = manager.connect({
+        host: 'ftp.example.com',
+        port: 21,
+        user: 'user',
+        password: 'pass',
+        secure: false
+      })
+      await vi.waitFor(() => expect(Client.prototype.access).toHaveBeenCalled())
+
+      await manager.disconnect()
+      resolveAccess!({} as FTPResponse)
+      const result = await connectPromise
+
+      expect(result.success).toBe(false)
+      expect(result.cancelled).toBe(true)
+      expect(manager.isConnected()).toBe(false)
+      expect(statuses).not.toContain('connected')
+      expect(statuses).not.toContain('error')
     })
   })
 
