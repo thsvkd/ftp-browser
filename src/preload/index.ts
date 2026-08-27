@@ -28,6 +28,7 @@ const INVOKE_CHANNELS = [
   'local:mkdir',
   // Transfer
   'transfer:enqueue',
+  'transfer:enqueueBatch',
   'transfer:cancel',
   'transfer:clearCompleted',
   'transfer:getAll',

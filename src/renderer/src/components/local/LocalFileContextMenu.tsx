@@ -37,7 +37,7 @@ export function LocalFileContextMenu({
   const currentPath = useLocalFsStore((s) => s.currentPath)
   const entries = useLocalFsStore((s) => s.entries)
   const refresh = useLocalFsStore((s) => s.refresh)
-  const enqueue = useTransferStore((s) => s.enqueue)
+  const enqueueBatch = useTransferStore((s) => s.enqueueBatch)
   const selectedNames = useLocalSelectionStore((s) => s.selectedNames)
   const clearSelection = useLocalSelectionStore((s) => s.clearSelection)
   const connectionStatus = useFtpStore((s) => s.connectionStatus)
@@ -139,15 +139,15 @@ export function LocalFileContextMenu({
     if (files.length === 0) return
     const remoteDir = useFtpStore.getState().currentPath
     try {
-      for (const file of files) {
-        await enqueue(
-          'upload',
-          file.path,
-          joinRemotePath(remoteDir, file.name),
-          file.name,
-          file.size
-        )
-      }
+      await enqueueBatch(
+        'upload',
+        files.map((file) => ({
+          localPath: file.path,
+          remotePath: joinRemotePath(remoteDir, file.name),
+          fileName: file.name,
+          totalBytes: file.size
+        }))
+      )
     } catch (err) {
       toast.error('Failed to enqueue upload', {
         description: err instanceof Error ? err.message : String(err)

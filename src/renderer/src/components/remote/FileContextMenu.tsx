@@ -31,7 +31,7 @@ export function FileContextMenu({
   const currentPath = useFtpStore((s) => s.currentPath)
   const entries = useFtpStore((s) => s.entries)
   const refresh = useFtpStore((s) => s.refresh)
-  const enqueue = useTransferStore((s) => s.enqueue)
+  const enqueueBatch = useTransferStore((s) => s.enqueueBatch)
   const selectedNames = useSelectionStore((s) => s.selectedNames)
   const clearSelection = useSelectionStore((s) => s.clearSelection)
   const [editing, setEditing] = useState<'rename' | 'newFolder' | null>(null)
@@ -134,11 +134,15 @@ export function FileContextMenu({
     if (files.length === 0) return
     const result = await window.api.invoke<IpcResult<string | null>>('local:selectSaveDirectory')
     if (result.success && result.data) {
-      for (const file of files) {
-        const destPath = `${result.data}/${file.name}`
-        const remotePath = buildRemotePath(file.name)
-        enqueue('download', destPath, remotePath, file.name, file.size)
-      }
+      await enqueueBatch(
+        'download',
+        files.map((file) => ({
+          localPath: `${result.data}/${file.name}`,
+          remotePath: buildRemotePath(file.name),
+          fileName: file.name,
+          totalBytes: file.size
+        }))
+      )
     }
     handleClose()
   }

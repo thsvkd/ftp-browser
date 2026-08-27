@@ -2,7 +2,12 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { TransferQueue } from '../transfer/TransferQueue'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
 import { ipcError } from '../utils/errorClassifier'
-import type { TransferJob, TransferProgress, TransferDirection } from '@shared/types/transfer'
+import type {
+  TransferJob,
+  TransferProgress,
+  TransferDirection,
+  TransferEnqueueItem
+} from '@shared/types/transfer'
 import type { IpcResult } from '@shared/types/ipc'
 
 interface EnqueuePayload {
@@ -11,6 +16,12 @@ interface EnqueuePayload {
   remotePath: string
   fileName: string
   totalBytes: number
+}
+
+interface EnqueueBatchPayload {
+  direction: TransferDirection
+  items: TransferEnqueueItem[]
+  forceBatch?: boolean
 }
 
 export function registerTransferHandlers(
@@ -41,6 +52,18 @@ export function registerTransferHandlers(
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
+
+  ipcMain.handle(
+    'transfer:enqueueBatch',
+    (_event, payload: EnqueueBatchPayload): IpcResult<string[]> => {
+      try {
+        const ids = queue.enqueueBatch(payload.direction, payload.items, payload.forceBatch)
+        return { success: true, data: ids }
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
 
   ipcMain.handle('transfer:cancel', (_event, id: string): IpcResult<void> => {
     try {

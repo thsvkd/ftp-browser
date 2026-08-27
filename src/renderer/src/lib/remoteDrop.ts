@@ -77,7 +77,7 @@ async function moveRemoteFiles(items: RemoteFileDragItem[], targetPath: string):
  * creating any missing remote subdirectories first.
  */
 async function uploadLocalPaths(localPaths: string[], targetPath: string): Promise<void> {
-  const enqueue = useTransferStore.getState().enqueue
+  const enqueueBatch = useTransferStore.getState().enqueueBatch
 
   // Expand dropped folders into their files, preserving folder structure.
   const expanded = await window.api.invoke<IpcResult<UploadFileEntry[]>>(
@@ -111,12 +111,17 @@ async function uploadLocalPaths(localPaths: string[], targetPath: string): Promi
     }
   }
 
-  // Enqueue each file for upload.
-  for (const entry of entries) {
-    const remotePath = toRemote(entry.relativePath)
-    const fileName = entry.relativePath.slice(entry.relativePath.lastIndexOf('/') + 1)
-    await enqueue('upload', entry.localPath, remotePath, fileName, entry.size)
-  }
+  const containsFolder = entries.some((entry) => entry.relativePath.includes('/'))
+  await enqueueBatch(
+    'upload',
+    entries.map((entry) => ({
+      localPath: entry.localPath,
+      remotePath: toRemote(entry.relativePath),
+      fileName: entry.relativePath.slice(entry.relativePath.lastIndexOf('/') + 1),
+      totalBytes: entry.size
+    })),
+    containsFolder
+  )
 }
 
 /**

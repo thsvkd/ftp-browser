@@ -1,5 +1,10 @@
 import { create } from 'zustand'
-import type { TransferJob, TransferProgress } from '@shared/types/transfer'
+import type {
+  TransferDirection,
+  TransferEnqueueItem,
+  TransferJob,
+  TransferProgress
+} from '@shared/types/transfer'
 import type { IpcResult } from '@shared/types/ipc'
 
 interface TransferStore {
@@ -7,11 +12,16 @@ interface TransferStore {
   setJobs: (jobs: TransferJob[]) => void
   updateProgress: (progress: TransferProgress) => void
   enqueue: (
-    direction: 'upload' | 'download',
+    direction: TransferDirection,
     localPath: string,
     remotePath: string,
     fileName: string,
     totalBytes: number
+  ) => Promise<void>
+  enqueueBatch: (
+    direction: TransferDirection,
+    items: TransferEnqueueItem[],
+    forceBatch?: boolean
   ) => Promise<void>
   cancel: (id: string) => Promise<void>
   clearCompleted: () => Promise<void>
@@ -37,6 +47,18 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
       fileName,
       totalBytes
     })) as IpcResult<string>
+    if (!result.success) {
+      throw new Error(result.error)
+    }
+  },
+
+  enqueueBatch: async (direction, items, forceBatch = false) => {
+    if (items.length === 0) return
+    const result = (await window.api.invoke('transfer:enqueueBatch', {
+      direction,
+      items,
+      forceBatch
+    })) as IpcResult<string[]>
     if (!result.success) {
       throw new Error(result.error)
     }

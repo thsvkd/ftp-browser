@@ -48,6 +48,55 @@ describe('TransferQueue', () => {
       const id2 = queue.enqueue('upload', '/local/b.jpg', '/remote/b.jpg', 'b.jpg', 200)
       expect(id1).not.toBe(id2)
     })
+
+    it('should enqueue a multi-file transfer as one batch', () => {
+      ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockImplementation(
+        () => new Promise(() => {})
+      )
+
+      const ids = queue.enqueueBatch('download', [
+        {
+          localPath: '/local/a.jpg',
+          remotePath: '/remote/a.jpg',
+          fileName: 'a.jpg',
+          totalBytes: 100
+        },
+        {
+          localPath: '/local/b.jpg',
+          remotePath: '/remote/b.jpg',
+          fileName: 'b.jpg',
+          totalBytes: 200
+        }
+      ])
+
+      const jobs = queue.getAll()
+      expect(ids).toHaveLength(2)
+      expect(jobs).toHaveLength(2)
+      expect(jobs[0].batchId).toBeTruthy()
+      expect(jobs[1].batchId).toBe(jobs[0].batchId)
+      expect(jobs.map((job) => job.status)).toEqual(['active', 'pending'])
+    })
+
+    it('should keep a one-file folder transfer grouped when forced', () => {
+      ;(mockFileOps.upload as ReturnType<typeof vi.fn>).mockImplementation(
+        () => new Promise(() => {})
+      )
+
+      queue.enqueueBatch(
+        'upload',
+        [
+          {
+            localPath: '/local/folder/only.jpg',
+            remotePath: '/remote/folder/only.jpg',
+            fileName: 'only.jpg',
+            totalBytes: 100
+          }
+        ],
+        true
+      )
+
+      expect(queue.getAll()[0].batchId).toBeTruthy()
+    })
   })
 
   describe('getAll', () => {
@@ -114,6 +163,42 @@ describe('TransferQueue', () => {
       const remaining = queue.getAll()
       expect(remaining.filter((j) => j.status === 'completed')).toHaveLength(0)
     })
+
+    it('should retain completed files that contribute to an active batch total', async () => {
+      let resolveFirst: (() => void) | undefined
+      ;(mockFileOps.download as ReturnType<typeof vi.fn>)
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              resolveFirst = resolve
+            })
+        )
+        .mockImplementationOnce(() => new Promise(() => {}))
+
+      queue.enqueueBatch('download', [
+        {
+          localPath: '/local/a.jpg',
+          remotePath: '/remote/a.jpg',
+          fileName: 'a.jpg',
+          totalBytes: 100
+        },
+        {
+          localPath: '/local/b.jpg',
+          remotePath: '/remote/b.jpg',
+          fileName: 'b.jpg',
+          totalBytes: 200
+        }
+      ])
+      resolveFirst?.()
+
+      await vi.waitFor(() => {
+        expect(queue.getAll().map((job) => job.status)).toEqual(['completed', 'active'])
+      })
+
+      queue.clearCompleted()
+
+      expect(queue.getAll()).toHaveLength(2)
+    })
   })
 
   describe('processNext (sequential processing)', () => {
@@ -147,6 +232,7 @@ describe('TransferQueue', () => {
       await vi.waitFor(() => {
         const jobs = queue.getAll()
         expect(jobs[0].status).toBe('completed')
+        expect(jobs[0].transferredBytes).toBe(100)
       })
     })
 

@@ -2,7 +2,12 @@ import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
 import { classifyError, isRetryableError } from '../utils/errorClassifier'
-import type { TransferJob, TransferDirection, TransferProgress } from '@shared/types/transfer'
+import type {
+  TransferJob,
+  TransferDirection,
+  TransferEnqueueItem,
+  TransferProgress
+} from '@shared/types/transfer'
 
 const MAX_RETRIES = 3
 const RETRY_DELAY_MS = 2000
@@ -22,21 +27,30 @@ export class TransferQueue extends EventEmitter {
     fileName: string,
     totalBytes: number
   ): string {
-    const id = randomUUID()
-    const job: TransferJob = {
-      id,
+    return this.enqueueBatch(direction, [{ localPath, remotePath, fileName, totalBytes }])[0]
+  }
+
+  enqueueBatch(
+    direction: TransferDirection,
+    items: TransferEnqueueItem[],
+    forceBatch = false
+  ): string[] {
+    if (items.length === 0) return []
+
+    const batchId = items.length > 1 || forceBatch ? randomUUID() : undefined
+    const jobs: TransferJob[] = items.map((item) => ({
+      id: randomUUID(),
+      batchId,
       direction,
-      localPath,
-      remotePath,
-      fileName,
-      totalBytes,
+      ...item,
       transferredBytes: 0,
       status: 'pending'
-    }
-    this.queue.push(job)
+    }))
+
+    this.queue.push(...jobs)
     this.emit('queue:updated', this.getAll())
     this.processNext()
-    return id
+    return jobs.map((job) => job.id)
   }
 
   cancel(id: string): void {
@@ -48,8 +62,15 @@ export class TransferQueue extends EventEmitter {
   }
 
   clearCompleted(): void {
+    const activeBatchIds = new Set(
+      this.queue
+        .filter((job) => job.batchId && (job.status === 'active' || job.status === 'pending'))
+        .map((job) => job.batchId as string)
+    )
     this.queue = this.queue.filter(
-      (j) => j.status !== 'completed' && j.status !== 'failed' && j.status !== 'cancelled'
+      (job) =>
+        (job.batchId !== undefined && activeBatchIds.has(job.batchId)) ||
+        (job.status !== 'completed' && job.status !== 'failed' && job.status !== 'cancelled')
     )
     this.emit('queue:updated', this.getAll())
   }
@@ -86,6 +107,7 @@ export class TransferQueue extends EventEmitter {
       } else {
         await this.fileOps.upload(next.localPath, next.remotePath, onProgress)
       }
+      next.transferredBytes = next.totalBytes
       next.status = 'completed'
       next.completedAt = new Date().toISOString()
     } catch (err) {

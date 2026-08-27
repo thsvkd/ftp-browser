@@ -23,6 +23,7 @@ type InvokeChannel =
   | 'local:rename'
   | 'local:mkdir'
   | 'transfer:enqueue'
+  | 'transfer:enqueueBatch'
   | 'transfer:cancel'
   | 'transfer:clearCompleted'
   | 'transfer:getAll'

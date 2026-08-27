@@ -22,7 +22,7 @@ export function LocalExplorer(): React.JSX.Element {
   const goForward = useLocalFsStore((s) => s.goForward)
   const refresh = useLocalFsStore((s) => s.refresh)
   const clearSelection = useLocalSelectionStore((s) => s.clearSelection)
-  const enqueue = useTransferStore((s) => s.enqueue)
+  const enqueueBatch = useTransferStore((s) => s.enqueueBatch)
   const viewMode = useSettingsStore((s) => s.localViewMode)
   const setViewMode = useSettingsStore((s) => s.setLocalViewMode)
   const clearLocalFolderPreviews = useGalleryStore((s) => s.clearLocal)
@@ -143,10 +143,15 @@ export function LocalExplorer(): React.JSX.Element {
           size: number
         }>
         const localDir = useLocalFsStore.getState().currentPath
-        for (const file of remoteFiles) {
-          const localPath = joinLocalPath(localDir, file.fileName)
-          await enqueue('download', localPath, file.remotePath, file.fileName, file.size)
-        }
+        await enqueueBatch(
+          'download',
+          remoteFiles.map((file) => ({
+            localPath: joinLocalPath(localDir, file.fileName),
+            remotePath: file.remotePath,
+            fileName: file.fileName,
+            totalBytes: file.size
+          }))
+        )
         return
       }
 

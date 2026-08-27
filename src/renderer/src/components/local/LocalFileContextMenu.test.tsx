@@ -52,7 +52,7 @@ function dirEntry(name: string): LocalFileEntry {
 }
 
 const mockInvoke = vi.fn()
-const mockEnqueue = vi.fn()
+const mockEnqueueBatch = vi.fn()
 const mockRefresh = vi.fn()
 
 interface SetupOptions {
@@ -86,7 +86,7 @@ function setup(options: SetupOptions): {
     connectionStatus: options.connected ? 'connected' : 'disconnected'
   })
   useSettingsStore.setState({ confirmBeforeDelete: options.confirmBeforeDelete ?? false })
-  useTransferStore.setState({ enqueue: mockEnqueue })
+  useTransferStore.setState({ enqueueBatch: mockEnqueueBatch })
 
   const onClose = vi.fn()
   const menu = (position: { x: number; y: number } | null): React.JSX.Element => (
@@ -284,7 +284,7 @@ describe('LocalFileContextMenu — actions', () => {
     })
   })
 
-  it('queues one upload per selected file against the remote current path', async () => {
+  it('queues selected files as one upload batch against the remote current path', async () => {
     // covers: Test-59
     const user = userEvent.setup()
     const docs = dirEntry('docs')
@@ -300,9 +300,19 @@ describe('LocalFileContextMenu — actions', () => {
     await user.click(screen.getByRole('button', { name: 'Upload (2)' }))
 
     await waitFor(() => {
-      expect(mockEnqueue.mock.calls).toEqual([
-        ['upload', 'C:\\work\\a.txt', '/remote/dir/a.txt', 'a.txt', 10],
-        ['upload', 'C:\\work\\b.txt', '/remote/dir/b.txt', 'b.txt', 20]
+      expect(mockEnqueueBatch).toHaveBeenCalledWith('upload', [
+        {
+          localPath: 'C:\\work\\a.txt',
+          remotePath: '/remote/dir/a.txt',
+          fileName: 'a.txt',
+          totalBytes: 10
+        },
+        {
+          localPath: 'C:\\work\\b.txt',
+          remotePath: '/remote/dir/b.txt',
+          fileName: 'b.txt',
+          totalBytes: 20
+        }
       ])
     })
   })
