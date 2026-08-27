@@ -1,4 +1,4 @@
-# script/*.ps1이 공통으로 dot-source하는 헤더.
+﻿# script/*.ps1이 공통으로 dot-source하는 헤더.
 # dot-source이므로 여기서 설정한 preference/변수/함수는 호출한 스크립트의 스코프에 적용된다.
 # 사용법: 각 스크립트 첫 줄에서 `. "$PSScriptRoot\_common.ps1"`
 
