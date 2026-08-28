@@ -525,6 +525,12 @@ describe('electron-builder.yml Windows release contract', () => {
     // covers: Test-177
     expect(yml).not.toContain('example.com')
   })
+
+  it('should unpack sharp and its platform-specific native dependencies from ASAR', () => {
+    const patterns = yamlListItems(yml, 'asarUnpack')
+    expect(patterns).toContain('**/node_modules/sharp/**/*')
+    expect(patterns).toContain('**/node_modules/@img/**/*')
+  })
 })
 
 describe('.github/workflows/release.yml contract', () => {
