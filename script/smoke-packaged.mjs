@@ -146,7 +146,8 @@ export async function runSmokeProcess(
     signalSource = process
   } = {}
 ) {
-  const child = spawnProcess(executable, [SMOKE_TEST_FLAG], {
+  const smokeArgs = platform === 'linux' ? [SMOKE_TEST_FLAG, '--no-sandbox'] : [SMOKE_TEST_FLAG]
+  const child = spawnProcess(executable, smokeArgs, {
     detached: platform !== 'win32',
     env: {
       ...process.env,

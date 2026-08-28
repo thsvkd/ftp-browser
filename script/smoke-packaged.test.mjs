@@ -20,13 +20,17 @@ function createFakeChild() {
   return child
 }
 
-function startFakeSmoke({ terminateTree = vi.fn().mockResolvedValue(), timeoutMs = 25 } = {}) {
+function startFakeSmoke({
+  terminateTree = vi.fn().mockResolvedValue(),
+  timeoutMs = 25,
+  platform = 'linux'
+} = {}) {
   const child = createFakeChild()
   const signalSource = new EventEmitter()
   const spawnProcess = vi.fn(() => child)
   const promise = runSmokeProcess('/fake/app', '/fake/user-data', {
     timeoutMs,
-    platform: 'linux',
+    platform,
     spawnProcess,
     terminateTree,
     signalSource
@@ -35,6 +39,29 @@ function startFakeSmoke({ terminateTree = vi.fn().mockResolvedValue(), timeoutMs
 }
 
 describe('packaged smoke process lifecycle', () => {
+  it('should disable the Chromium sandbox for the Linux CI smoke process', async () => {
+    const harness = startFakeSmoke()
+    harness.child.emit('close', 0, null)
+
+    await harness.promise
+    expect(harness.spawnProcess).toHaveBeenCalledWith(
+      '/fake/app',
+      ['--smoke-test', '--no-sandbox'],
+      expect.any(Object)
+    )
+  })
+
+  it.each(['darwin', 'win32'])(
+    'should keep the Chromium sandbox enabled on %s',
+    async (platform) => {
+      const harness = startFakeSmoke({ platform })
+      harness.child.emit('close', 0, null)
+
+      await harness.promise
+      expect(harness.spawnProcess.mock.calls[0][1]).toEqual(['--smoke-test'])
+    }
+  )
+
   it('should pass only after a clean app exit', async () => {
     const harness = startFakeSmoke()
     harness.child.emit('close', 0, null)

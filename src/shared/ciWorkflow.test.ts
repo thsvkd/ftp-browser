@@ -89,6 +89,12 @@ describe('cross-platform CI workflow contract', () => {
     expect(body).toContain('node-version: 24.15.0')
     expect(body).toContain('cache: npm')
   })
+
+  it('should use the Node 24-based official setup actions', () => {
+    expect(body).toContain('uses: actions/checkout@v7')
+    expect(body).toContain('uses: actions/setup-node@v7')
+    expect(body).not.toMatch(/uses: actions\/(?:checkout|setup-node)@v4/)
+  })
 })
 
 describe('release verification contract', () => {
@@ -103,6 +109,12 @@ describe('release verification contract', () => {
     expect(workflow).toContain('uses: softprops/action-gh-release@v3')
     expect(workflow).toContain('overwrite_files: true')
     expect(workflow).not.toContain('uses: softprops/action-gh-release@v2')
+  })
+
+  it('should use the Node 24-based official setup actions', () => {
+    expect(workflow).toContain('uses: actions/checkout@v7')
+    expect(workflow).toContain('uses: actions/setup-node@v7')
+    expect(workflow).not.toMatch(/uses: actions\/(?:checkout|setup-node)@v4/)
   })
 })
 
