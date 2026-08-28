@@ -11,7 +11,7 @@ export default defineConfig({
     // docblock으로 전환한다. 전역을 jsdom으로 바꾸면 fs·electron을 다루는 기존
     // main 프로세스 테스트가 불필요하게 DOM 환경에서 돌아간다.
     environment: 'node',
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    include: ['src/**/*.{test,spec}.{ts,tsx}', 'script/**/*.test.mjs'],
     exclude: ['node_modules', 'out', 'dist'],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {

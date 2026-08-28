@@ -15,6 +15,10 @@ FTP 서버 브라우저. 이미지 썸네일 미리보기를 지원합니다.
 
 macOS / Linux 설치 파일은 아직 배포하지 않습니다.
 
+## 자동 검증
+
+Pull request와 `main` 브랜치 변경은 GitHub Actions에서 Windows x64, Linux x64, macOS arm64로 각각 테스트합니다. 각 환경은 unpacked 앱을 패키징한 뒤 실제 Electron 프로세스를 실행해 renderer와 네이티브 모듈이 정상적으로 시작되는지 확인합니다. 태그 릴리스도 이 검증이 모두 통과한 뒤 Windows 설치 파일을 배포합니다.
+
 ## 개발
 
 - `.\script\setup.ps1` — 의존성 + 프로덕션 빌드 (`--no-build`면 타입체크만)

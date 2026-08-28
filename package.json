@@ -1,6 +1,6 @@
 {
   "name": "ftp-browser",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "FTP server browser with image thumbnail preview",
   "main": "./out/main/index.js",
   "author": "thsvkd",
@@ -23,6 +23,7 @@
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
+    "smoke:packaged": "node script/smoke-packaged.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

@@ -12,11 +12,22 @@ import { registerDragHandlers } from './ipc/dragHandlers'
 import { registerGalleryHandlers } from './ipc/galleryHandlers'
 import { registerDevtools } from './debug/devtools'
 import { applyApplicationMenu } from './menu/appMenu'
+import {
+  PACKAGED_SMOKE_USER_DATA_ENV,
+  isPackagedSmokeTest,
+  startPackagedSmokeTest
+} from './smokeTest'
 import { isDebugEnabled, debugRendererArgs, DEVTOOLS_FLAG } from '@shared/debug'
 import { APP_NAME } from '@shared/constants'
 
 const isDev = !app.isPackaged
 const debugEnabled = isDebugEnabled(process.argv)
+const smokeTestEnabled = isPackagedSmokeTest(process.argv, app.isPackaged)
+const smokeUserDataPath = process.env[PACKAGED_SMOKE_USER_DATA_ENV]
+
+if (smokeTestEnabled && smokeUserDataPath) {
+  app.setPath('userData', smokeUserDataPath)
+}
 
 let mainWindow: BrowserWindow | null = null
 
@@ -38,8 +49,18 @@ function createWindow(): BrowserWindow {
   })
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow?.show()
+    if (!smokeTestEnabled) mainWindow?.show()
   })
+
+  if (smokeTestEnabled) {
+    startPackagedSmokeTest(mainWindow.webContents, {
+      exit: (code) => app.exit(code),
+      log: (message) => console.log(message),
+      error: (message) => console.error(message),
+      setTimeout: (handler, timeoutMs) => setTimeout(handler, timeoutMs),
+      clearTimeout: (handle) => clearTimeout(handle)
+    })
+  }
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -56,6 +77,12 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  if (smokeTestEnabled && !smokeUserDataPath) {
+    console.error(`[smoke] ${PACKAGED_SMOKE_USER_DATA_ENV} is required`)
+    app.exit(1)
+    return
+  }
+
   if (process.platform === 'win32') {
     app.setAppUserModelId(isDev ? process.execPath : 'com.ftp-browser')
   }
