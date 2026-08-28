@@ -557,8 +557,8 @@ describe('.github/workflows/release.yml contract', () => {
         'release-assets/*-mac-arm64.zip',
         'release-assets/*-mac-x64.dmg',
         'release-assets/*-mac-x64.zip',
-        'release-assets/*-linux-x64.AppImage',
-        'release-assets/*-linux-x64.deb'
+        'release-assets/*-linux-x86_64.AppImage',
+        'release-assets/*-linux-amd64.deb'
       ]
     ])
     for (const globs of lists) {
