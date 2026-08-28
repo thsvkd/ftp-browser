@@ -6,15 +6,49 @@ on:
       - v*
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   verify:
     uses: ./.github/workflows/ci.yml
 
-  release-windows:
+  build-release:
     needs: verify
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+            arch: x64
+            asset_paths: |
+              dist/*-setup.exe
+              dist/*-portable.exe
+          - os: macos-15
+            target: mac
+            arch: arm64
+            asset_paths: |
+              dist/*-mac-*.dmg
+              dist/*-mac-*.zip
+          - os: macos-15-intel
+            target: mac
+            arch: x64
+            asset_paths: |
+              dist/*-mac-*.dmg
+              dist/*-mac-*.zip
+          - os: ubuntu-latest
+            target: linux
+            arch: x64
+            asset_paths: |
+              dist/*-linux-*.AppImage
+              dist/*-linux-*.deb
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -29,14 +63,47 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Test
-        run: npm test
+      - name: Verify runner architecture
+        run: node -e "if (process.arch !== '${{ matrix.arch }}') { console.error('Expected ${{ matrix.arch }}, got ' + process.arch); process.exit(1) }"
 
       - name: Check tag matches package.json version
         run: node -e "const v=require('./package.json').version; const t=process.env.GITHUB_REF_NAME; if (t!=='v'+v) { console.error('tag', t, '!= v'+v); process.exit(1) }"
 
       - name: Package Windows
+        if: matrix.target == 'win'
         run: npm run build:win -- --x64 --publish never
+
+      - name: Package macOS
+        if: matrix.target == 'mac'
+        run: npm run build:mac -- dmg zip --${{ matrix.arch }} --publish never
+
+      - name: Package Linux
+        if: matrix.target == 'linux'
+        run: npm run build:linux -- AppImage deb --x64 --publish never
+
+      - name: Collect release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.target }}-${{ matrix.arch }}
+          path: ${{ matrix.asset_paths }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  publish-release:
+    needs: build-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
@@ -45,5 +112,11 @@ jobs:
           fail_on_unmatched_files: true
           overwrite_files: true
           files: |
-            dist/*-setup.exe
-            dist/*-portable.exe
+            release-assets/*-setup.exe
+            release-assets/*-portable.exe
+            release-assets/*-mac-arm64.dmg
+            release-assets/*-mac-arm64.zip
+            release-assets/*-mac-x64.dmg
+            release-assets/*-mac-x64.zip
+            release-assets/*-linux-x64.AppImage
+            release-assets/*-linux-x64.deb

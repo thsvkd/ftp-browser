@@ -49,11 +49,12 @@ describe('cross-platform CI workflow contract', () => {
     expect(body).toContain('branches: [main]')
   })
 
-  it('should test the native Windows x64, Linux x64 and macOS arm64 environments', () => {
+  it('should test every native OS and architecture distributed in releases', () => {
     expect(matrixRows(workflow)).toEqual([
       { os: 'windows-latest', target: 'win', arch: 'x64' },
       { os: 'ubuntu-latest', target: 'linux', arch: 'x64' },
-      { os: 'macos-15', target: 'mac', arch: 'arm64' }
+      { os: 'macos-15', target: 'mac', arch: 'arm64' },
+      { os: 'macos-15-intel', target: 'mac', arch: 'x64' }
     ])
     expect(body).toContain('runs-on: ${{ matrix.os }}')
     expect(body).not.toContain('continue-on-error: true')
@@ -98,11 +99,49 @@ describe('cross-platform CI workflow contract', () => {
 })
 
 describe('release verification contract', () => {
-  const workflow = activeLines(readRepoFile('.github/workflows/release.yml')).join('\n')
+  const source = readRepoFile('.github/workflows/release.yml')
+  const workflow = activeLines(source).join('\n')
 
   it('should wait for the reusable cross-platform verification workflow', () => {
     expect(workflow).toContain('uses: ./.github/workflows/ci.yml')
     expect(workflow).toContain('needs: verify')
+  })
+
+  it('should build every release artifact on its native OS and architecture', () => {
+    expect(matrixRows(source)).toEqual([
+      { os: 'windows-latest', target: 'win', arch: 'x64' },
+      { os: 'macos-15', target: 'mac', arch: 'arm64' },
+      { os: 'macos-15-intel', target: 'mac', arch: 'x64' },
+      { os: 'ubuntu-latest', target: 'linux', arch: 'x64' }
+    ])
+    expect(workflow).toContain('runs-on: ${{ matrix.os }}')
+    expect(workflow).not.toContain('continue-on-error: true')
+  })
+
+  it('should collect platform artifacts and publish them in one final job', () => {
+    expect(workflow).toContain('uses: actions/upload-artifact@v7')
+    expect(workflow).toContain('uses: actions/download-artifact@v8')
+    expect(workflow).toContain('merge-multiple: true')
+    expect(workflow.match(/uses: softprops\/action-gh-release@v3/g)).toHaveLength(1)
+    expect(source).toMatch(/publish-release:\s*\n\s+needs: build-release/)
+  })
+
+  it('should bind each release target to its native packaging command', () => {
+    expect(workflow).toContain(
+      "if: matrix.target == 'win'\nrun: npm run build:win -- --x64 --publish never"
+    )
+    expect(workflow).toContain(
+      "if: matrix.target == 'mac'\nrun: npm run build:mac -- dmg zip --${{ matrix.arch }} --publish never"
+    )
+    expect(workflow).toContain(
+      "if: matrix.target == 'linux'\nrun: npm run build:linux -- AppImage deb --x64 --publish never"
+    )
+    expect(workflow).toContain('if-no-files-found: error')
+  })
+
+  it('should serialize releases that target the same tag', () => {
+    expect(workflow).toContain('group: release-${{ github.ref }}')
+    expect(workflow).toContain('cancel-in-progress: false')
   })
 
   it('should use the supported release action and replace assets for a reused tag', () => {

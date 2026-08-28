@@ -220,55 +220,6 @@ function extractWorkflowRunLines(source: string): { index: number; text: string 
   return found
 }
 
-function indexOutsideQuotes(line: string, pattern: RegExp): number {
-  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`
-  const global = new RegExp(pattern.source, flags)
-  let match
-  while ((match = global.exec(line)) !== null) {
-    const before = line.slice(0, match.index)
-    const singles = (before.match(/'/g) ?? []).length
-    const doubles = (before.match(/"/g) ?? []).length
-    if (singles % 2 === 0 && doubles % 2 === 0) return match.index
-  }
-  return -1
-}
-
-function testCommandOffset(line: string): number {
-  const text = stripInlineComment(line)
-  if (isWriteOrEcho(text)) return -1
-  const npm = indexOutsideQuotes(text, /(?:^|[;&|]\s*)npm(?:\.cmd)?\s+test(?![:\w-])/)
-  if (npm >= 0) return npm
-  return indexOutsideQuotes(text, /(?:^|[;&|]\s*)(?:&\s*)?\.\\script\\test\.ps1(?:\s|;|$)/)
-}
-
-function packagingCommandOffset(line: string): number {
-  const text = stripInlineComment(line)
-  if (isWriteOrEcho(text)) return -1
-  const npm = indexOutsideQuotes(
-    text,
-    /(?:^|[;&|]\s*)(?:&\s*)?npm(?:\.cmd)?\s+run\s+build:win(?:\s|;|$)/
-  )
-  if (npm >= 0) return npm
-  return indexOutsideQuotes(
-    text,
-    /(?:^|[;&|]\s*)(?:npx\s+)?electron-builder(?!\.ya?ml\b)(?:\s|;|$)/
-  )
-}
-
-function firstRunCommandIndex(
-  lines: { index: number; text: string }[],
-  offsetOf: (line: string) => number
-): number {
-  let best = -1
-  for (const line of lines) {
-    const rel = offsetOf(line.text)
-    if (rel < 0) continue
-    const abs = line.index + rel
-    if (best < 0 || abs < best) best = abs
-  }
-  return best
-}
-
 function splitShellStatements(line: string): string[] {
   const statements: string[] = []
   let current = ''
@@ -314,7 +265,7 @@ function isPackagingStatement(statement: string): boolean {
   const text = stripInlineComment(statement).trim()
   if (!text || isWriteOrEcho(text)) return false
   const unprefixed = text.replace(/^(?:&|call)\s+/i, '')
-  if (/^npm(?:\.cmd)?\s+run\s+build:win(?:\s|$)/.test(unprefixed)) return true
+  if (/^npm(?:\.cmd)?\s+run\s+build:(?:win|mac|linux)(?:\s|$)/.test(unprefixed)) return true
   return /^(?:npx\s+)?electron-builder(?!\.ya?ml\b)(?:\s|$)/.test(unprefixed)
 }
 
@@ -531,6 +482,18 @@ describe('electron-builder.yml Windows release contract', () => {
     expect(patterns).toContain('**/node_modules/sharp/**/*')
     expect(patterns).toContain('**/node_modules/@img/**/*')
   })
+
+  it('should include the platform and architecture in macOS artifact names', () => {
+    const expected = '${name}-${version}-mac-${arch}.${ext}'
+    expect(yamlScalar(yamlBlock(yml, 'mac'), 'artifactName')).toBe(expected)
+    expect(yamlScalar(yamlBlock(yml, 'dmg'), 'artifactName')).toBe(expected)
+  })
+
+  it('should include the platform and architecture in published Linux artifact names', () => {
+    const expected = '${name}-${version}-linux-${arch}.${ext}'
+    expect(yamlScalar(yamlBlock(yml, 'appImage'), 'artifactName')).toBe(expected)
+    expect(yamlScalar(yamlBlock(yml, 'deb'), 'artifactName')).toBe(expected)
+  })
 })
 
 describe('.github/workflows/release.yml contract', () => {
@@ -547,25 +510,20 @@ describe('.github/workflows/release.yml contract', () => {
     expect(yamlListItems(pushBlock, 'tags')).toEqual(['v*'])
   })
 
-  it('should run only on windows-latest', () => {
-    // covers: Test-179
+  it('should build release artifacts on native Windows, Linux and macOS runners', () => {
     const workflow = readRepoFile('.github/workflows/release.yml')
     const body = uncommented(workflow)
-    const runners = yamlListItems(body, 'runs-on')
-    expect(runners.length).toBeGreaterThan(0)
-    expect(runners.every((runner) => runner === 'windows-latest')).toBe(true)
-    expect(body).not.toContain('macos-latest')
-    expect(body).not.toContain('ubuntu-latest')
+    for (const runner of ['windows-latest', 'macos-15', 'macos-15-intel', 'ubuntu-latest']) {
+      expect(body).toContain(`- os: ${runner}`)
+    }
+    expect(body).toContain('runs-on: ${{ matrix.os }}')
   })
 
-  it('should run a test step before the packaging step', () => {
-    // covers: Test-180
-    const runLines = extractWorkflowRunLines(readRepoFile('.github/workflows/release.yml'))
-    const testIdx = firstRunCommandIndex(runLines, testCommandOffset)
-    const pkgIdx = firstRunCommandIndex(runLines, packagingCommandOffset)
-    expect(testIdx).toBeGreaterThanOrEqual(0)
-    expect(pkgIdx).toBeGreaterThanOrEqual(0)
-    expect(testIdx).toBeLessThan(pkgIdx)
+  it('should verify all platforms before building and publish only after every build succeeds', () => {
+    const workflow = readRepoFile('.github/workflows/release.yml')
+    const jobs = yamlBlock(workflow, 'jobs')
+    expect(yamlScalar(yamlBlock(jobs, 'build-release'), 'needs')).toBe('verify')
+    expect(yamlScalar(yamlBlock(jobs, 'publish-release'), 'needs')).toBe('build-release')
   })
 
   it('should pass --publish never to the packaging command', () => {
@@ -589,10 +547,20 @@ describe('.github/workflows/release.yml contract', () => {
     expect(body).not.toMatch(/^\s*draft:\s*(?:true|"true"|'true')\b/m)
   })
 
-  it('should upload setup and portable exe globs and omit blockmaps', () => {
-    // covers: Test-183
+  it('should upload every supported platform artifact and omit blockmaps', () => {
     const lists = ghReleaseFileLists(readRepoFile('.github/workflows/release.yml'))
-    expect(lists.length).toBeGreaterThan(0)
+    expect(lists).toEqual([
+      [
+        'release-assets/*-setup.exe',
+        'release-assets/*-portable.exe',
+        'release-assets/*-mac-arm64.dmg',
+        'release-assets/*-mac-arm64.zip',
+        'release-assets/*-mac-x64.dmg',
+        'release-assets/*-mac-x64.zip',
+        'release-assets/*-linux-x64.AppImage',
+        'release-assets/*-linux-x64.deb'
+      ]
+    ])
     for (const globs of lists) {
       expect(globs.some(isSetupExeGlob)).toBe(true)
       expect(globs.some(isPortableExeGlob)).toBe(true)
