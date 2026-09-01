@@ -477,13 +477,17 @@ describe('electron-builder.yml Windows release contract', () => {
     expect(yml).not.toContain('example.com')
   })
 
-  it('should generate update metadata for the stable GitHub release URL', () => {
+  it('should generate update metadata against the versioned GitHub release', () => {
     // covers: Test-206
+    // generic provider는 파일을 releases/latest/download에서 찾는다. 그 경로에는 최신 버전
+    // 에셋만 있어 차등 업데이트가 필요로 하는 "이전 버전" blockmap이 404가 되고, 매번 전체
+    // 다운로드로 폴백한다. github provider는 releases/download/v을 쓰므로 두 버전이
+    // 모두 잡힌다.
     const publish = yamlBlock(yml, 'publish')
-    expect(yamlScalar(publish, 'provider')).toBe('generic')
-    expect(yamlScalar(publish, 'url')).toBe(
-      'https://github.com/thsvkd/ftp-browser/releases/latest/download'
-    )
+    expect(yamlScalar(publish, 'provider')).toBe('github')
+    expect(yamlScalar(publish, 'owner')).toBe('thsvkd')
+    expect(yamlScalar(publish, 'repo')).toBe('ftp-browser')
+    expect(publish).not.toContain('releases/latest/download')
     expect(yamlScalar(yamlBlock(yml, 'nsis'), 'differentialPackage')).toBe('true')
   })
 

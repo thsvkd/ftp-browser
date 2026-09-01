@@ -1,4 +1,4 @@
-import type { UpdateState } from '@shared/types/update'
+import type { UpdateState, UpdateStatus } from '@shared/types/update'
 
 interface UpdateInfo {
   version: string
@@ -11,7 +11,6 @@ interface DownloadProgress {
 export interface UpdateClient {
   autoDownload: boolean
   autoInstallOnAppQuit: boolean
-  previousBlockmapBaseUrlOverride: string | null
   on(event: 'error', listener: (error: Error) => void): unknown
   on(event: 'update-available', listener: (info: UpdateInfo) => void): unknown
   on(event: 'update-not-available', listener: (info: UpdateInfo) => void): unknown
@@ -21,6 +20,12 @@ export interface UpdateClient {
   downloadUpdate(): Promise<unknown>
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void
 }
+
+/**
+ * 이 상태에서는 재확인하지 않는다. checking·downloading은 이미 진행 중이고, ready는 다 받아 둔
+ * 업데이트를 available로 되돌려 사용자가 같은 파일을 다시 받게 만들기 때문이다.
+ */
+const CHECK_BLOCKING_STATUSES: readonly UpdateStatus[] = ['checking', 'downloading', 'ready']
 
 interface UpdateSupportOptions {
   isPackaged: boolean
@@ -58,7 +63,6 @@ export class UpdateManager {
 
     updater.autoDownload = false
     updater.autoInstallOnAppQuit = false
-    updater.previousBlockmapBaseUrlOverride = `https://github.com/thsvkd/ftp-browser/releases/download/v${currentVersion}`
     updater.on('update-available', (info) => {
       this.setState({
         status: 'available',
@@ -94,7 +98,7 @@ export class UpdateManager {
   }
 
   async check(): Promise<UpdateState> {
-    if (!this.updater || this.state.status === 'checking' || this.state.status === 'downloading') {
+    if (!this.updater || CHECK_BLOCKING_STATUSES.includes(this.state.status)) {
       return this.getState()
     }
 

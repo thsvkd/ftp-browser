@@ -1,8 +1,9 @@
 appId: com.ftp-browser.app
 productName: FTP Browser
 publish:
-  provider: generic
-  url: https://github.com/thsvkd/ftp-browser/releases/latest/download
+  provider: github
+  owner: thsvkd
+  repo: ftp-browser
 directories:
   buildResources: build
 files:

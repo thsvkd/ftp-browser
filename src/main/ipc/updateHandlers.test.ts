@@ -55,5 +55,7 @@ describe('registerUpdateHandlers', () => {
       success: true,
       data: undefined
     })
+    // 반환값만 보면 핸들러가 manager를 아예 부르지 않아도 통과한다.
+    expect(manager.install).toHaveBeenCalledTimes(1)
   })
 })

@@ -60,8 +60,16 @@ describe('preload api', () => {
     const invoke = api.invoke as (channel: string) => Promise<unknown>
     const on = api.on as (channel: string, callback: (...args: unknown[]) => void) => () => void
 
-    await invoke('update:check')
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith('update:check')
+    // 네 개를 모두 확인해야 화이트리스트가 실제로 선언한 만큼 열려 있는지 반증할 수 있다.
+    for (const channel of [
+      'update:getState',
+      'update:check',
+      'update:download',
+      'update:install'
+    ]) {
+      await invoke(channel)
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith(channel)
+    }
 
     const callback = vi.fn()
     const unsubscribe = on('update:stateChanged', callback)
