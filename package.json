@@ -1,6 +1,6 @@
 {
   "name": "ftp-browser",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "FTP server browser with image thumbnail preview",
   "main": "./out/main/index.js",
   "author": "thsvkd",
