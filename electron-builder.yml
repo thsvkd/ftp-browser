@@ -6,13 +6,18 @@ publish:
   repo: ftp-browser
 directories:
   buildResources: build
+# 허용 목록이다. 제외 목록으로 두면 루트에 새로 생기는 디렉터리를 계속 따라가야 하는데
+# 그건 완전할 수 없다 — .stryker-tmp(뮤테이션 샌드박스)가 통째로 들어가면서 중복
+# out/main/index.js가 asar에 섞여 패키징된 앱이 실행 즉시 죽은 적이 있다. CI는 fresh
+# checkout이라 그 실패가 드러나지 않는다. node_modules의 production 의존성은
+# electron-builder가 package.json을 보고 알아서 넣으므로 여기에 적지 않는다.
+#   out/**       main·preload·renderer 번들
+#   resources/** icon.png (asarUnpack 대상)
+#   package.json electron이 main 진입점을 읽는다
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - out/**
+  - resources/**
+  - package.json
 asarUnpack:
   - resources/**
   - '**/node_modules/sharp/**/*'

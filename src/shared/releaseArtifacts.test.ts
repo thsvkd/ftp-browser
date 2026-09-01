@@ -491,6 +491,22 @@ describe('electron-builder.yml Windows release contract', () => {
     expect(yamlScalar(yamlBlock(yml, 'nsis'), 'differentialPackage')).toBe('true')
   })
 
+  it('should package only the runtime files so working-directory artifacts cannot leak in', () => {
+    // covers: Test-230
+    // 제외 목록(`!...`)은 완전할 수 없다. 루트에 새 디렉터리가 하나 생기면 조용히 다시 샌다.
+    // 실제로 .stryker-tmp(뮤테이션 샌드박스 — 뮤턴트가 적용된 프로젝트 전체 복사본과 중복
+    // out/main/index.js를 포함한다)가 통째로 패키징돼 패키징된 앱이 실행 즉시 죽었다.
+    // CI는 fresh checkout이라 이 실패가 드러나지 않는다. 허용 목록이라야 기본이 '제외'가 된다.
+    const patterns = yamlListItems(yml, 'files')
+    expect(patterns).toEqual(['out/**', 'resources/**', 'package.json'])
+
+    // 허용 목록이 실제 진입점을 덮는지 교차 확인한다. package.json의 main이 허용 목록 밖으로
+    // 옮겨가면 여기서 깨진다 — 목록만 단언하면 그 경우를 놓친다.
+    const mainEntry = (JSON.parse(readRepoFile('package.json')) as { main: string }).main
+    const covered = patterns.some((p) => mainEntry.startsWith(`./${p.replace(/\/\*\*$/, '')}`))
+    expect(covered).toBe(true)
+  })
+
   it('should unpack sharp and its platform-specific native dependencies from ASAR', () => {
     const patterns = yamlListItems(yml, 'asarUnpack')
     expect(patterns).toContain('**/node_modules/sharp/**/*')
