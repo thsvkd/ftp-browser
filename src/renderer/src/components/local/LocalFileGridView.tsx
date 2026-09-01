@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useMemo, useEffect, useLayoutEffect } fr
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
+import { useContextMenuStore, CONTEXT_MENU_OWNERS } from '@renderer/stores/useContextMenuStore'
 import {
   useSettingsStore,
   GALLERY_CELL_PADDING,
@@ -27,6 +28,7 @@ const GRID_GAP = 14
 const GRID_PADDING_X = 8
 // Module-scoped so positions survive the remount that navigation triggers.
 const SCROLL_POSITIONS = new Map<string, number>()
+const MENU_OWNER = CONTEXT_MENU_OWNERS.localGrid
 
 function getFileIcon(entry: LocalFileEntry): string {
   if (entry.type === 'directory') return '\u{1F4C1}'
@@ -53,6 +55,10 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
   const [contextEntry, setContextEntry] = useState<LocalFileEntry | null>(null)
   const [contextPos, setContextPos] = useState<{ x: number; y: number } | null>(null)
   const [propertiesEntry, setPropertiesEntry] = useState<LocalFileEntry | null>(null)
+
+  const menuOwnerId = useContextMenuStore((s) => s.ownerId)
+  const claimMenu = useContextMenuStore((s) => s.open)
+  const releaseMenu = useContextMenuStore((s) => s.close)
 
   const showHidden = useSettingsStore((s) => s.showHidden)
   const galleryThumbSize = useSettingsStore((s) => s.galleryThumbSize)
@@ -138,6 +144,11 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
     return () => el.removeEventListener('wheel', onWheel)
   }, [gallery, adjustGalleryThumbSize])
 
+  // 소유권을 뺏기면 내 메뉴를 닫는다(함정 A: 반드시 !== MENU_OWNER)
+  useEffect(() => {
+    if (menuOwnerId !== MENU_OWNER) setContextPos(null)
+  }, [menuOwnerId])
+
   const handleClick = (e: React.MouseEvent, entry: LocalFileEntry): void => {
     if (e.shiftKey) {
       selectRange(entry.name, sortedNames)
@@ -160,6 +171,7 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
     if (entry && !selectedNames.has(entry.name)) {
       selectSingle(entry.name)
     }
+    claimMenu(MENU_OWNER)
     setContextEntry(entry)
     setContextPos({ x: e.clientX, y: e.clientY })
   }
@@ -316,7 +328,10 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
       <LocalFileContextMenu
         entry={contextEntry}
         position={contextPos}
-        onClose={() => setContextPos(null)}
+        onClose={() => {
+          setContextPos(null)
+          releaseMenu(MENU_OWNER)
+        }}
         onShowProperties={setPropertiesEntry}
       />
       {propertiesEntry && (

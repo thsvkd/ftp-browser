@@ -1,7 +1,8 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { useContextMenuStore, CONTEXT_MENU_OWNERS } from '@renderer/stores/useContextMenuStore'
 import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
 import { shouldDeferToNativeContextMenu } from '@renderer/lib/debugTools'
 import { currentPlatform, isToggleSelectModifier } from '@renderer/lib/platform'
@@ -13,6 +14,8 @@ import type { FtpFileEntry } from '@shared/types/ftp'
 
 // Module-scoped so positions survive the remount that navigation triggers.
 const SCROLL_POSITIONS = new Map<string, number>()
+
+const MENU_OWNER = CONTEXT_MENU_OWNERS.remoteList
 
 function getFileIcon(entry: FtpFileEntry): string {
   if (entry.type === 'directory') return '📁'
@@ -40,6 +43,10 @@ export function FileListView({ dragOverFolderPath }: FileListViewProps = {}): Re
   const [contextEntry, setContextEntry] = useState<FtpFileEntry | null>(null)
   const [contextPos, setContextPos] = useState<{ x: number; y: number } | null>(null)
   const [propertiesEntry, setPropertiesEntry] = useState<FtpFileEntry | null>(null)
+
+  const menuOwnerId = useContextMenuStore((s) => s.ownerId)
+  const claimMenu = useContextMenuStore((s) => s.open)
+  const releaseMenu = useContextMenuStore((s) => s.close)
 
   const showHidden = useSettingsStore((s) => s.showHidden)
   const host = useFtpStore((s) => s.host)
@@ -82,9 +89,16 @@ export function FileListView({ dragOverFolderPath }: FileListViewProps = {}): Re
     if (entry && !selectedNames.has(entry.name)) {
       selectSingle(entry.name)
     }
+    claimMenu(MENU_OWNER)
     setContextEntry(entry)
     setContextPos({ x: e.clientX, y: e.clientY })
   }
+
+  useEffect(() => {
+    // 소유권 이동은 다른 뷰가 만드는 외부 신호라 이 뷰의 렌더만으로는 알 수 없다.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (menuOwnerId !== MENU_OWNER) setContextPos(null)
+  }, [menuOwnerId])
 
   const handleDragStart = (e: React.DragEvent, entry: FtpFileEntry): void => {
     const sel = useSelectionStore.getState().selectedNames
@@ -200,7 +214,10 @@ export function FileListView({ dragOverFolderPath }: FileListViewProps = {}): Re
       <FileContextMenu
         entry={contextEntry}
         position={contextPos}
-        onClose={() => setContextPos(null)}
+        onClose={() => {
+          setContextPos(null)
+          releaseMenu(MENU_OWNER)
+        }}
         onShowProperties={setPropertiesEntry}
       />
       {propertiesEntry && (

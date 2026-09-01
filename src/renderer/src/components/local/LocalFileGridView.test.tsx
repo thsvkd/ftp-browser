@@ -1,8 +1,17 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, createEvent, cleanup, waitFor } from '@testing-library/react'
+import {
+  render,
+  screen,
+  fireEvent,
+  createEvent,
+  cleanup,
+  waitFor,
+  act
+} from '@testing-library/react'
 import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
+import { useContextMenuStore, CONTEXT_MENU_OWNERS } from '@renderer/stores/useContextMenuStore'
 import {
   useSettingsStore,
   GALLERY_THUMB_DEFAULT,
@@ -86,6 +95,8 @@ beforeEach(() => {
     refresh: mockRefresh
   })
   useLocalSelectionStore.setState({ selectedNames: new Set(), lastClickedName: null })
+  // 모듈 싱글턴이라 앞 테스트의 소유권이 남으면 실행 순서에 따라 결과가 갈린다.
+  useContextMenuStore.setState({ ownerId: null })
   useFtpStore.setState({ currentPath: REMOTE_DIR, connectionStatus: 'connected' })
   useSettingsStore.setState({ confirmBeforeDelete: false, showHidden: false })
 })
@@ -264,6 +275,42 @@ describe('LocalFileGridView — context menu self-conflict guard', () => {
     renderGrid()
 
     fireEvent.contextMenu(gridCell('a.txt'))
+
+    expect(queryMenu()).not.toBeNull()
+  })
+})
+
+// B절(핸드오프 함정 C): 스토어 단위 테스트만으로는 뷰가 그 스토어를 실제로 구독하는지
+// 알 수 없다. 배선을 통째로 빼먹어도 A절은 전부 통과한다.
+describe('LocalFileGridView — context menu ownership wiring', () => {
+  it('closes its menu when ownership moves to another view', () => {
+    // covers: Test-226
+    renderGrid()
+    fireEvent.contextMenu(gridCell('a.txt'))
+    expect(queryMenu()).not.toBeNull()
+    // 우클릭이 소유권을 실제로 주장해야 반대편 뷰가 자기 메뉴를 닫는다. 이 단언이 없으면
+    // 뷰에서 claimMenu 호출을 통째로 지워도 이 테스트가 통과한다 — ownerId가 계속 null이라
+    // 아래 소유권 이동이 여전히 "내 id가 아님"을 만들어 메뉴가 닫히기 때문이다.
+    expect(useContextMenuStore.getState().ownerId).toBe(CONTEXT_MENU_OWNERS.localGrid)
+
+    // 원격 뷰는 이 테스트 인프라로 띄울 수 없으므로 스토어의 open을 다른 id로 직접
+    // 불러 소유권 이동만 만든다. act로 감싸야 구독 중인 뷰가 리렌더된다.
+    act(() => {
+      useContextMenuStore.getState().open(CONTEXT_MENU_OWNERS.remoteGrid)
+    })
+
+    expect(queryMenu()).toBeNull()
+  })
+
+  it('keeps the menu open when the same view is right-clicked again', () => {
+    // covers: Test-227
+    // 함정 A: 소유권 감시 조건을 `ownerId !== null`로 잘못 쓰면 자기가 방금 주장한
+    // 소유권에도 반응해 메뉴가 열리자마자 닫힌다 — 우클릭이 통째로 먹통이 된다.
+    renderGrid()
+    fireEvent.contextMenu(gridCell('a.txt'))
+    expect(queryMenu()).not.toBeNull()
+
+    fireEvent.contextMenu(gridCell('b.txt'))
 
     expect(queryMenu()).not.toBeNull()
   })

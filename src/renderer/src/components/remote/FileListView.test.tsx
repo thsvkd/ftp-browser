@@ -1,11 +1,13 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { useContextMenuStore, CONTEXT_MENU_OWNERS } from '@renderer/stores/useContextMenuStore'
 import {
   makeApiMock,
+  queryMenu,
   remoteSelectedNames as selectedNames,
   type ApiMock
 } from '@renderer/test/rendererTestUtils'
@@ -49,6 +51,9 @@ beforeEach(() => {
 
   useFtpStore.setState({ connectionStatus: 'connected', host: 'example.org', port: 21 })
   useSettingsStore.setState({ confirmBeforeDelete: false, showHidden: false })
+  // 소유권 스토어는 모듈 싱글턴이라 앞 테스트가 남긴 ownerId가 다음 테스트의
+  // 마운트 직후 effect에 걸린다. 초기화하지 않으면 실행 순서에 따라 결과가 갈린다.
+  useContextMenuStore.setState({ ownerId: null })
 })
 
 afterEach(() => {
@@ -84,5 +89,29 @@ describe('FileListView — platform-aware selection modifiers', () => {
     // "항상 선택에 더하기만" 하는 구현도 통과한다.
     fireEvent.click(row, { metaKey: true })
     expect(selectedNames()).toEqual(['b.txt'])
+  })
+})
+
+// 소유권 배선(B절). 스토어 단위 테스트만으로는 뷰가 그 스토어를 실제로 쓰는지 알 수 없어
+// (함정 C) 배선을 통째로 빼먹어도 전부 통과한다. 원격 리스트는 로컬과 별개의 배선 코드를
+// 가지므로 여기서 따로 메운다.
+describe('FileListView — context menu ownership wiring', () => {
+  it('closes its menu when ownership moves to another view', () => {
+    // covers: Test-228
+    renderList()
+    fireEvent.contextMenu(screen.getByText('a.txt'))
+    expect(queryMenu()).not.toBeNull()
+    // 우클릭이 소유권을 실제로 주장해야 반대편 뷰가 자기 메뉴를 닫는다. 이 단언이 없으면
+    // 뷰에서 claimMenu 호출을 통째로 지워도 이 테스트가 통과한다 — ownerId가 계속 null이라
+    // 아래 소유권 이동이 여전히 "내 id가 아님"을 만들어 메뉴가 닫히기 때문이다.
+    expect(useContextMenuStore.getState().ownerId).toBe(CONTEXT_MENU_OWNERS.remoteList)
+
+    // 두 패널을 한 테스트에 함께 띄우는 경로는 없다(그건 E2E 몫). 소유권 이동만 필요하므로
+    // 스토어의 open을 다른 id로 직접 부른다. 로컬 뷰 자체의 배선은 Test-225가 따로 덮는다.
+    act(() => {
+      useContextMenuStore.getState().open(CONTEXT_MENU_OWNERS.localList)
+    })
+
+    expect(queryMenu()).toBeNull()
   })
 })

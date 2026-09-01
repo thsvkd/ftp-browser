@@ -17,6 +17,7 @@ import { itemIndicesInRect } from '@renderer/lib/gridGeometry'
 import { currentPlatform, isToggleSelectModifier, isZoomModifier } from '@renderer/lib/platform'
 import { joinRemotePath } from '@renderer/lib/remoteDrop'
 import { filterHidden } from '@renderer/lib/utils'
+import { useContextMenuStore, CONTEXT_MENU_OWNERS } from '@renderer/stores/useContextMenuStore'
 import { FileContextMenu } from './FileContextMenu'
 import { FilePropertiesDialog } from './FilePropertiesDialog'
 import type { FtpFileEntry } from '@shared/types/ftp'
@@ -28,6 +29,8 @@ const GRID_GAP = 14
 const GRID_PADDING_X = 8
 // Module-scoped so positions survive the remount that navigation triggers.
 const SCROLL_POSITIONS = new Map<string, number>()
+// 컨텍스트 메뉴 소유권 식별자. 이 뷰만의 고유 id.
+const MENU_OWNER = CONTEXT_MENU_OWNERS.remoteGrid
 
 function getFileIcon(entry: FtpFileEntry): string {
   if (entry.type === 'directory') return '\u{1F4C1}'
@@ -62,6 +65,10 @@ export function FileGridView({
   const showHidden = useSettingsStore((s) => s.showHidden)
   const galleryThumbSize = useSettingsStore((s) => s.galleryThumbSize)
   const adjustGalleryThumbSize = useSettingsStore((s) => s.adjustGalleryThumbSize)
+
+  const menuOwnerId = useContextMenuStore((s) => s.ownerId)
+  const claimMenu = useContextMenuStore((s) => s.open)
+  const releaseMenu = useContextMenuStore((s) => s.close)
 
   // Gallery mode is zoomable; grid mode keeps a fixed thumbnail size.
   const itemSize = gallery ? galleryThumbSize : GRID_ITEM_SIZE
@@ -148,6 +155,11 @@ export function FileGridView({
     return () => el.removeEventListener('wheel', onWheel)
   }, [gallery, adjustGalleryThumbSize])
 
+  // 소유권을 뺏기면 내 메뉴를 닫는다. 반드시 !== MENU_OWNER (함정 A).
+  useEffect(() => {
+    if (menuOwnerId !== MENU_OWNER) setContextPos(null)
+  }, [menuOwnerId])
+
   const handleClick = (e: React.MouseEvent, entry: FtpFileEntry): void => {
     if (e.shiftKey) {
       selectRange(entry.name, sortedNames)
@@ -173,6 +185,7 @@ export function FileGridView({
     if (entry && !selectedNames.has(entry.name)) {
       selectSingle(entry.name)
     }
+    claimMenu(MENU_OWNER)
     setContextEntry(entry)
     setContextPos({ x: e.clientX, y: e.clientY })
   }
@@ -346,7 +359,10 @@ export function FileGridView({
       <FileContextMenu
         entry={contextEntry}
         position={contextPos}
-        onClose={() => setContextPos(null)}
+        onClose={() => {
+          setContextPos(null)
+          releaseMenu(MENU_OWNER)
+        }}
         onShowProperties={setPropertiesEntry}
       />
       {propertiesEntry && (
