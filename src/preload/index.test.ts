@@ -9,7 +9,7 @@ vi.mock('electron', () => ({
 }))
 vi.mock('@electron-toolkit/preload', () => ({ electronAPI: {} }))
 
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 
 /** 실제 값과 겹치지 않는 값이어야 "그대로 흘려보내는지"가 반증 가능해진다. */
 const SENTINEL_PLATFORM = 'sentinel-platform'
@@ -52,5 +52,27 @@ describe('preload api', () => {
     const api = await loadExposedApi()
 
     expect(api.platform).toBe(SENTINEL_PLATFORM)
+  })
+
+  it('should allow only the declared update commands and state event', async () => {
+    // covers: Test-208
+    const api = await loadExposedApi()
+    const invoke = api.invoke as (channel: string) => Promise<unknown>
+    const on = api.on as (channel: string, callback: (...args: unknown[]) => void) => () => void
+
+    await invoke('update:check')
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('update:check')
+
+    const callback = vi.fn()
+    const unsubscribe = on('update:stateChanged', callback)
+    const listener = vi.mocked(ipcRenderer.on).mock.calls.at(-1)?.[1]
+    expect(ipcRenderer.on).toHaveBeenCalledWith('update:stateChanged', expect.any(Function))
+
+    listener?.({} as Electron.IpcRendererEvent, { status: 'idle' })
+    expect(callback).toHaveBeenCalledWith({ status: 'idle' })
+
+    unsubscribe()
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith('update:stateChanged', listener)
+    await expect(invoke('update:notAllowed')).rejects.toThrow('IPC channel not allowed')
   })
 })

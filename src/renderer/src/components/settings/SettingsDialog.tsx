@@ -6,7 +6,10 @@ import {
   GALLERY_THUMB_MAX
 } from '@renderer/stores/useSettingsStore'
 import { formatBytes } from '@renderer/lib/utils'
+import { useTransferStore } from '@renderer/stores/useTransferStore'
+import { useOperationStore } from '@renderer/stores/useOperationStore'
 import type { IpcResult } from '@shared/types/ipc'
+import type { UpdateState } from '@shared/types/update'
 
 interface SettingsDialogProps {
   open: boolean
@@ -25,9 +28,16 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   const setShowHidden = useSettingsStore((s) => s.setShowHidden)
   const confirmBeforeDelete = useSettingsStore((s) => s.confirmBeforeDelete)
   const setConfirmBeforeDelete = useSettingsStore((s) => s.setConfirmBeforeDelete)
+  const hasActiveTransfers = useTransferStore((s) =>
+    s.jobs.some((job) => job.status === 'pending' || job.status === 'active')
+  )
+  const hasActiveOperations = useOperationStore((s) =>
+    s.jobs.some((job) => job.status === 'active')
+  )
 
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
   const [clearing, setClearing] = useState(false)
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null)
 
   const fetchCacheStats = useCallback(async () => {
     const result = await window.api.invoke<IpcResult<CacheStats>>('cache:getStats')
@@ -36,9 +46,19 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
     }
   }, [])
 
+  const fetchUpdateState = useCallback(async () => {
+    const result = await window.api.invoke<IpcResult<UpdateState>>('update:getState')
+    if (result.success) setUpdateState(result.data)
+  }, [])
+
   useEffect(() => {
-    if (open) fetchCacheStats()
-  }, [open, fetchCacheStats])
+    if (!open) return
+    void fetchCacheStats()
+    void fetchUpdateState()
+    return window.api.on('update:stateChanged', (...args: unknown[]) => {
+      setUpdateState(args[0] as UpdateState)
+    })
+  }, [open, fetchCacheStats, fetchUpdateState])
 
   if (!open) return null
 
@@ -49,6 +69,43 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
       await fetchCacheStats()
     } finally {
       setClearing(false)
+    }
+  }
+
+  const runUpdateCommand = async (channel: 'update:check' | 'update:download'): Promise<void> => {
+    const result = await window.api.invoke<IpcResult<UpdateState>>(channel)
+    if (result.success) setUpdateState(result.data)
+  }
+
+  const installUpdate = (): void => {
+    if (
+      (hasActiveTransfers || hasActiveOperations) &&
+      !window.confirm('A file operation is still running. Restart and interrupt it?')
+    ) {
+      return
+    }
+    void window.api.invoke('update:install')
+  }
+
+  const updateDescription = (): string => {
+    if (!updateState) return 'Loading...'
+    switch (updateState.status) {
+      case 'unsupported':
+        return updateState.message ?? 'Automatic updates are not available for this build.'
+      case 'checking':
+        return 'Checking for updates...'
+      case 'available':
+        return `Version ${updateState.availableVersion} is available.`
+      case 'downloading':
+        return `Downloading ${Math.round(updateState.progressPercent ?? 0)}%`
+      case 'ready':
+        return `Version ${updateState.availableVersion} is ready to install.`
+      case 'up-to-date':
+        return 'You are using the latest version.'
+      case 'error':
+        return updateState.message ?? 'Update check failed.'
+      default:
+        return 'Updates are checked when the app starts.'
     }
   }
 
@@ -150,6 +207,52 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 <Trash2 size={14} />
                 {clearing ? 'Clearing...' : 'Clear cache'}
               </button>
+            </div>
+          </section>
+
+          {/* Updates */}
+          <section>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+              Updates
+            </h3>
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-sm text-gray-700">
+                  {updateState ? `Version ${updateState.currentVersion}` : 'Version'}
+                </div>
+                <p className="mt-0.5 text-xs text-gray-400">{updateDescription()}</p>
+              </div>
+              {updateState?.status === 'available' ? (
+                <button
+                  onClick={() => void runUpdateCommand('update:download')}
+                  className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Download {updateState.availableVersion}
+                </button>
+              ) : updateState?.status === 'ready' ? (
+                <button
+                  onClick={installUpdate}
+                  className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  Restart and update
+                </button>
+              ) : updateState?.status !== 'unsupported' ? (
+                <button
+                  onClick={() => void runUpdateCommand('update:check')}
+                  disabled={
+                    !updateState ||
+                    updateState.status === 'checking' ||
+                    updateState.status === 'downloading'
+                  }
+                  className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {updateState?.status === 'checking'
+                    ? 'Checking...'
+                    : updateState?.status === 'downloading'
+                      ? `Downloading ${Math.round(updateState.progressPercent ?? 0)}%`
+                      : 'Check for updates'}
+                </button>
+              ) : null}
             </div>
           </section>
         </div>

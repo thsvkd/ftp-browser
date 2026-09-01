@@ -128,13 +128,13 @@ describe('release verification contract', () => {
 
   it('should bind each release target to its native packaging command', () => {
     expect(workflow).toContain(
-      "if: matrix.target == 'win'\nrun: npm run build:win -- --x64 --publish never"
+      "if: matrix.target == 'win'\nrun: |\nnpm run build\nnpx electron-builder --win --x64 --publish never"
     )
     expect(workflow).toContain(
-      "if: matrix.target == 'mac'\nrun: npm run build:mac -- dmg zip --${{ matrix.arch }} --publish never"
+      "if: matrix.target == 'mac'\nrun: |\nnpm run build\nnpx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never"
     )
     expect(workflow).toContain(
-      "if: matrix.target == 'linux'\nrun: npm run build:linux -- AppImage deb --x64 --publish never"
+      "if: matrix.target == 'linux'\nrun: |\nnpm run build\nnpx electron-builder --linux AppImage deb --x64 --publish never"
     )
     expect(workflow).toContain('if-no-files-found: error')
   })

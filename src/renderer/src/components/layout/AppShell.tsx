@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { Toolbar } from './Toolbar'
 import { StatusBar } from './StatusBar'
@@ -10,20 +10,20 @@ import { ConnectDialog } from '@renderer/components/server/ConnectDialog'
 import { SettingsDialog } from '@renderer/components/settings/SettingsDialog'
 import { useThumbnailListener } from '@renderer/hooks/useThumbnailListener'
 import { useLocalThumbnailListener } from '@renderer/hooks/useLocalThumbnailListener'
+import { useUpdateListener } from '@renderer/hooks/useUpdateListener'
 
 export function AppShell(): React.JSX.Element {
   const [connectOpen, setConnectOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const openSettings = useCallback(() => setSettingsOpen(true), [])
 
   useThumbnailListener()
   useLocalThumbnailListener()
+  useUpdateListener(openSettings)
 
   return (
     <div className="flex h-full flex-col">
-      <Toolbar
-        onConnectClick={() => setConnectOpen(true)}
-        onSettingsClick={() => setSettingsOpen(true)}
-      />
+      <Toolbar onConnectClick={() => setConnectOpen(true)} onSettingsClick={openSettings} />
       <div className="flex-1 overflow-hidden">
         <Group orientation="horizontal">
           <Panel defaultSize="50%" minSize="25%">

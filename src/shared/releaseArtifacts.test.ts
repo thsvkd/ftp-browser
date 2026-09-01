@@ -477,6 +477,16 @@ describe('electron-builder.yml Windows release contract', () => {
     expect(yml).not.toContain('example.com')
   })
 
+  it('should generate update metadata for the stable GitHub release URL', () => {
+    // covers: Test-206
+    const publish = yamlBlock(yml, 'publish')
+    expect(yamlScalar(publish, 'provider')).toBe('generic')
+    expect(yamlScalar(publish, 'url')).toBe(
+      'https://github.com/thsvkd/ftp-browser/releases/latest/download'
+    )
+    expect(yamlScalar(yamlBlock(yml, 'nsis'), 'differentialPackage')).toBe('true')
+  })
+
   it('should unpack sharp and its platform-specific native dependencies from ASAR', () => {
     const patterns = yamlListItems(yml, 'asarUnpack')
     expect(patterns).toContain('**/node_modules/sharp/**/*')
@@ -547,12 +557,15 @@ describe('.github/workflows/release.yml contract', () => {
     expect(body).not.toMatch(/^\s*draft:\s*(?:true|"true"|'true')\b/m)
   })
 
-  it('should upload every supported platform artifact and omit blockmaps', () => {
+  it('should upload every supported platform artifact and Windows update metadata', () => {
+    // covers: Test-207
     const lists = ghReleaseFileLists(readRepoFile('.github/workflows/release.yml'))
     expect(lists).toEqual([
       [
         'release-assets/*-setup.exe',
+        'release-assets/*-setup.exe.blockmap',
         'release-assets/*-portable.exe',
+        'release-assets/latest.yml',
         'release-assets/*-mac-arm64.dmg',
         'release-assets/*-mac-arm64.zip',
         'release-assets/*-mac-x64.dmg',
@@ -564,7 +577,7 @@ describe('.github/workflows/release.yml contract', () => {
     for (const globs of lists) {
       expect(globs.some(isSetupExeGlob)).toBe(true)
       expect(globs.some(isPortableExeGlob)).toBe(true)
-      expect(globs.some(canMatchExeBlockmap)).toBe(false)
+      expect(globs.some(canMatchExeBlockmap)).toBe(true)
       const broad = globs.filter(isOverlyBroadUploadGlob)
       const unexcludedDoubleStar = broad.some((glob) => glob.includes('**'))
       expect(unexcludedDoubleStar && !hasBlockmapExclusion(globs)).toBe(false)

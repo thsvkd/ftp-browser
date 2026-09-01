@@ -27,7 +27,9 @@ jobs:
             arch: x64
             asset_paths: |
               dist/*-setup.exe
+              dist/*-setup.exe.blockmap
               dist/*-portable.exe
+              dist/latest.yml
           - os: macos-15
             target: mac
             arch: arm64
@@ -71,15 +73,21 @@ jobs:
 
       - name: Package Windows
         if: matrix.target == 'win'
-        run: npm run build:win -- --x64 --publish never
+        run: |
+          npm run build
+          npx electron-builder --win --x64 --publish never
 
       - name: Package macOS
         if: matrix.target == 'mac'
-        run: npm run build:mac -- dmg zip --${{ matrix.arch }} --publish never
+        run: |
+          npm run build
+          npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never
 
       - name: Package Linux
         if: matrix.target == 'linux'
-        run: npm run build:linux -- AppImage deb --x64 --publish never
+        run: |
+          npm run build
+          npx electron-builder --linux AppImage deb --x64 --publish never
 
       - name: Collect release artifacts
         uses: actions/upload-artifact@v7
@@ -113,7 +121,9 @@ jobs:
           overwrite_files: true
           files: |
             release-assets/*-setup.exe
+            release-assets/*-setup.exe.blockmap
             release-assets/*-portable.exe
+            release-assets/latest.yml
             release-assets/*-mac-arm64.dmg
             release-assets/*-mac-arm64.zip
             release-assets/*-mac-x64.dmg

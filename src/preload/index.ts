@@ -50,7 +50,12 @@ const INVOKE_CHANNELS = [
   'gallery:localFolderPreview',
   'gallery:cancelAll',
   'localThumbnail:request',
-  'localThumbnail:clear'
+  'localThumbnail:clear',
+  // Application updates
+  'update:getState',
+  'update:check',
+  'update:download',
+  'update:install'
 ] as const
 
 const EVENT_CHANNELS = [
@@ -62,7 +67,8 @@ const EVENT_CHANNELS = [
   'thumbnail:ready',
   'thumbnail:error',
   'localThumbnail:ready',
-  'localThumbnail:error'
+  'localThumbnail:error',
+  'update:stateChanged'
 ] as const
 
 type InvokeChannel = (typeof INVOKE_CHANNELS)[number]

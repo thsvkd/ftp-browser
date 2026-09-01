@@ -10,8 +10,11 @@ import { registerThumbnailHandlers } from './ipc/thumbnailHandlers'
 import { registerPreviewHandlers } from './ipc/previewHandlers'
 import { registerDragHandlers } from './ipc/dragHandlers'
 import { registerGalleryHandlers } from './ipc/galleryHandlers'
+import { registerUpdateHandlers } from './ipc/updateHandlers'
 import { registerDevtools } from './debug/devtools'
 import { applyApplicationMenu } from './menu/appMenu'
+import { UpdateManager, isAutomaticUpdateSupported } from './update/UpdateManager'
+import { autoUpdater } from 'electron-updater'
 import {
   PACKAGED_SMOKE_USER_DATA_ENV,
   isPackagedSmokeTest,
@@ -114,6 +117,26 @@ app.whenReady().then(() => {
   registerPreviewHandlers(db, manager)
   registerDragHandlers(manager)
   registerGalleryHandlers(win, db, manager)
+
+  const automaticUpdateSupported = isAutomaticUpdateSupported({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    isPortable: process.env.PORTABLE_EXECUTABLE_FILE !== undefined,
+    isSmokeTest: smokeTestEnabled
+  })
+  const updateManager = new UpdateManager(
+    app.getVersion(),
+    automaticUpdateSupported ? autoUpdater : null,
+    (state) => {
+      if (!win.isDestroyed()) win.webContents.send('update:stateChanged', state)
+    }
+  )
+  registerUpdateHandlers(updateManager)
+  if (automaticUpdateSupported) {
+    win.webContents.once('did-finish-load', () => {
+      void updateManager.check()
+    })
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

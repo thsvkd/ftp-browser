@@ -41,6 +41,10 @@ type InvokeChannel =
   | 'gallery:cancelAll'
   | 'localThumbnail:request'
   | 'localThumbnail:clear'
+  | 'update:getState'
+  | 'update:check'
+  | 'update:download'
+  | 'update:install'
 
 type EventChannel =
   | 'ftp:connectionStatus'
@@ -52,6 +56,7 @@ type EventChannel =
   | 'thumbnail:error'
   | 'localThumbnail:ready'
   | 'localThumbnail:error'
+  | 'update:stateChanged'
 
 interface FtpBrowserAPI {
   invoke: <T>(channel: InvokeChannel, ...args: unknown[]) => Promise<T>

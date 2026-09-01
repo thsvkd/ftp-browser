@@ -1,5 +1,8 @@
 appId: com.ftp-browser.app
 productName: FTP Browser
+publish:
+  provider: generic
+  url: https://github.com/thsvkd/ftp-browser/releases/latest/download
 directories:
   buildResources: build
 files:
@@ -30,6 +33,7 @@ nsis:
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+  differentialPackage: true
 portable:
   artifactName: ${name}-${version}-portable.${ext}
 mac:
