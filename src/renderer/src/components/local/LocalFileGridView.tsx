@@ -12,6 +12,7 @@ import { LocalThumbnailImage } from '@renderer/components/thumbnail/LocalThumbna
 import { LocalFolderThumbnail } from '@renderer/components/thumbnail/LocalFolderThumbnail'
 import { useMarqueeSelection, type MarqueeRect } from '@renderer/hooks/useMarqueeSelection'
 import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
+import { useElementWidth } from '@renderer/hooks/useElementWidth'
 import { shouldDeferToNativeContextMenu } from '@renderer/lib/debugTools'
 import { itemIndicesInRect } from '@renderer/lib/gridGeometry'
 import { isRootPath } from '@renderer/lib/localPath'
@@ -85,13 +86,14 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
   const hasParentRow = !isRootPath(currentPath)
   const items: Array<LocalFileEntry | 'parent'> = hasParentRow ? ['parent', ...sorted] : sorted
 
-  const getColumnCount = useCallback((): number => {
-    if (!parentRef.current) return 4
-    const available = parentRef.current.clientWidth - 2 * GRID_PADDING_X
-    return Math.max(1, Math.floor((available + GRID_GAP) / (cellSize + GRID_GAP)))
-  }, [cellSize])
-
-  const columnCount = parentRef.current ? getColumnCount() : 4
+  const containerWidth = useElementWidth(parentRef)
+  const columnCount =
+    containerWidth === null
+      ? 4
+      : Math.max(
+          1,
+          Math.floor((containerWidth - 2 * GRID_PADDING_X + GRID_GAP) / (cellSize + GRID_GAP))
+        )
   const rowCount = Math.ceil(items.length / columnCount)
 
   const virtualizer = useVirtualizer({

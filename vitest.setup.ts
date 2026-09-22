@@ -36,3 +36,12 @@ if (typeof window !== 'undefined' && !globalThis.localStorage) {
     value: memoryStorage
   })
 }
+
+/** jsdom에는 ResizeObserver가 없다. 크기 변화가 없는 환경이므로 no-op이면 충분하다. */
+if (typeof window !== 'undefined' && !globalThis.ResizeObserver) {
+  globalThis.ResizeObserver = class {
+    observe = (): void => undefined
+    unobserve = (): void => undefined
+    disconnect = (): void => undefined
+  }
+}
