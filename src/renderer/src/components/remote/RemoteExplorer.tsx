@@ -7,7 +7,10 @@ import { RemoteBreadcrumb } from './RemoteBreadcrumb'
 import { FileListView } from './FileListView'
 import { FileGridView } from './FileGridView'
 import { ViewModeToggle } from '@renderer/components/common/ViewModeToggle'
-import { performRemoteDrop } from '@renderer/lib/remoteDrop'
+import { useTypeAhead } from '@renderer/hooks/useTypeAhead'
+import { sortForDisplay } from '@renderer/lib/typeAhead'
+import { filterHidden } from '@renderer/lib/utils'
+import { performRemoteDrop, joinRemotePath } from '@renderer/lib/remoteDrop'
 import { toast } from 'sonner'
 import type { FtpConnectionState } from '@shared/types/ftp'
 import type { DeleteTarget } from '@shared/types/operation'
@@ -58,8 +61,20 @@ export function RemoteExplorer(): React.JSX.Element {
     }
   }
 
+  const typeAhead = useTypeAhead(
+    () => {
+      const entries = useFtpStore.getState().entries
+      const shown =
+        viewMode === 'gallery'
+          ? entries.filter((e) => e.type === 'directory' || e.isImage)
+          : entries
+      const showHidden = useSettingsStore.getState().showHidden
+      return sortForDisplay(filterHidden(shown, showHidden)).map((e) => e.name)
+    },
+    (name) => useSelectionStore.getState().selectSingle(name)
+  )
+
   const handleKeyDown = async (e: React.KeyboardEvent): Promise<void> => {
-    if (e.key !== 'Delete') return
     if (
       e.target instanceof HTMLInputElement ||
       e.target instanceof HTMLTextAreaElement ||
@@ -67,6 +82,22 @@ export function RemoteExplorer(): React.JSX.Element {
     ) {
       return
     }
+    if (typeAhead(e)) return
+    if (e.key === 'Enter') {
+      // Enter opens the folder when exactly one folder is selected, like a double-click.
+      const sel = useSelectionStore.getState().selectedNames
+      const [name] = sel
+      const entry =
+        sel.size === 1 ? useFtpStore.getState().entries.find((en) => en.name === name) : undefined
+      if (entry?.type === 'directory') {
+        e.preventDefault()
+        useFtpStore
+          .getState()
+          .navigateTo(joinRemotePath(useFtpStore.getState().currentPath, entry.name))
+      }
+      return
+    }
+    if (e.key !== 'Delete') return
     e.preventDefault()
     e.stopPropagation()
 

@@ -12,6 +12,9 @@ import { LocalBreadcrumb } from './LocalBreadcrumb'
 import { LocalFileList } from './LocalFileList'
 import { LocalFileGridView } from './LocalFileGridView'
 import { ViewModeToggle } from '@renderer/components/common/ViewModeToggle'
+import { useTypeAhead } from '@renderer/hooks/useTypeAhead'
+import { sortForDisplay } from '@renderer/lib/typeAhead'
+import { filterHidden } from '@renderer/lib/utils'
 
 export function LocalExplorer(): React.JSX.Element {
   const init = useLocalFsStore((s) => s.init)
@@ -52,8 +55,20 @@ export function LocalExplorer(): React.JSX.Element {
     }
   }
 
+  const typeAhead = useTypeAhead(
+    () => {
+      const entries = useLocalFsStore.getState().entries
+      const shown =
+        viewMode === 'gallery'
+          ? entries.filter((e) => e.type === 'directory' || e.isImage)
+          : entries
+      const showHidden = useSettingsStore.getState().showHidden
+      return sortForDisplay(filterHidden(shown, showHidden)).map((e) => e.name)
+    },
+    (name) => useLocalSelectionStore.getState().selectSingle(name)
+  )
+
   const handleKeyDown = async (e: React.KeyboardEvent): Promise<void> => {
-    if (e.key !== 'Delete') return
     if (
       e.target instanceof HTMLInputElement ||
       e.target instanceof HTMLTextAreaElement ||
@@ -61,6 +76,22 @@ export function LocalExplorer(): React.JSX.Element {
     ) {
       return
     }
+    if (typeAhead(e)) return
+    if (e.key === 'Enter') {
+      // Enter opens the folder when exactly one folder is selected, like a double-click.
+      const sel = useLocalSelectionStore.getState().selectedNames
+      const [name] = sel
+      const entry =
+        sel.size === 1
+          ? useLocalFsStore.getState().entries.find((en) => en.name === name)
+          : undefined
+      if (entry?.type === 'directory') {
+        e.preventDefault()
+        useLocalFsStore.getState().navigateTo(entry.path)
+      }
+      return
+    }
+    if (e.key !== 'Delete') return
     e.preventDefault()
     e.stopPropagation()
 

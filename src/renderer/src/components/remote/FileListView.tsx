@@ -37,6 +37,7 @@ export function FileListView({ dragOverFolderPath }: FileListViewProps = {}): Re
 
   const selectedNames = useSelectionStore((s) => s.selectedNames)
   const selectSingle = useSelectionStore((s) => s.selectSingle)
+  const lastClickedName = useSelectionStore((s) => s.lastClickedName)
   const toggleSelect = useSelectionStore((s) => s.toggleSelect)
   const selectRange = useSelectionStore((s) => s.selectRange)
 
@@ -65,6 +66,15 @@ export function FileListView({ dragOverFolderPath }: FileListViewProps = {}): Re
   )
 
   const sortedNames = useMemo(() => sorted.map((e) => e.name), [sorted])
+
+  // Keep the anchor row visible when it changes from the keyboard (type-ahead).
+  useEffect(() => {
+    if (!lastClickedName) return
+    scrollRef.current
+      ?.querySelector(`[data-name="${CSS.escape(lastClickedName)}"]`)
+      // jsdom has no scrollIntoView
+      ?.scrollIntoView?.({ block: 'nearest' })
+  }, [lastClickedName])
 
   const handleClick = (e: React.MouseEvent, entry: FtpFileEntry): void => {
     if (e.shiftKey) {
@@ -168,8 +178,9 @@ export function FileListView({ dragOverFolderPath }: FileListViewProps = {}): Re
             return (
               <tr
                 key={entry.name}
+                data-name={entry.name}
                 data-folder-path={folderPath ?? undefined}
-                className={`cursor-pointer ${
+                className={`scroll-mt-8 cursor-pointer ${
                   isDropTarget
                     ? 'bg-blue-200 ring-1 ring-inset ring-blue-400'
                     : selectedNames.has(entry.name)

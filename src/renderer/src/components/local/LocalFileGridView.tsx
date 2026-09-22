@@ -48,6 +48,7 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
 
   const selectedNames = useLocalSelectionStore((s) => s.selectedNames)
   const selectSingle = useLocalSelectionStore((s) => s.selectSingle)
+  const lastClickedName = useLocalSelectionStore((s) => s.lastClickedName)
   const toggleSelect = useLocalSelectionStore((s) => s.toggleSelect)
   const selectRange = useLocalSelectionStore((s) => s.selectRange)
   const selectAll = useLocalSelectionStore((s) => s.selectAll)
@@ -99,6 +100,16 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
     estimateSize: () => cellSize + GRID_GAP,
     overscan: 2
   })
+
+  // Keep the anchor cell visible when it changes from the keyboard (type-ahead).
+  // Only reacts to the anchor itself so a refresh or zoom never yanks the scroll back.
+  useEffect(() => {
+    if (!lastClickedName) return
+    const idx = sortedNames.indexOf(lastClickedName)
+    if (idx < 0) return
+    virtualizer.scrollToIndex(Math.floor((idx + (hasParentRow ? 1 : 0)) / columnCount))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastClickedName])
 
   // Marquee (rubber-band) selection over empty space in the grid.
   const namesInRect = useCallback(

@@ -31,6 +31,7 @@ export function LocalFileList(): React.JSX.Element {
 
   const selectedNames = useLocalSelectionStore((s) => s.selectedNames)
   const selectSingle = useLocalSelectionStore((s) => s.selectSingle)
+  const lastClickedName = useLocalSelectionStore((s) => s.lastClickedName)
   const toggleSelect = useLocalSelectionStore((s) => s.toggleSelect)
   const selectRange = useLocalSelectionStore((s) => s.selectRange)
 
@@ -57,6 +58,15 @@ export function LocalFileList(): React.JSX.Element {
   )
 
   const sortedNames = useMemo(() => sorted.map((e) => e.name), [sorted])
+
+  // Keep the anchor row visible when it changes from the keyboard (type-ahead).
+  useEffect(() => {
+    if (!lastClickedName) return
+    scrollRef.current
+      ?.querySelector(`[data-name="${CSS.escape(lastClickedName)}"]`)
+      // jsdom has no scrollIntoView
+      ?.scrollIntoView?.({ block: 'nearest' })
+  }, [lastClickedName])
 
   // 소유권을 뺏기면 내 메뉴를 닫는다 (함정 A: 반드시 !== MENU_OWNER)
   useEffect(() => {
@@ -153,7 +163,8 @@ export function LocalFileList(): React.JSX.Element {
           {sorted.map((entry) => (
             <tr
               key={entry.name}
-              className={`cursor-pointer ${
+              data-name={entry.name}
+              className={`scroll-mt-8 cursor-pointer ${
                 selectedNames.has(entry.name) ? 'bg-blue-100' : 'hover:bg-blue-50'
               }`}
               draggable={entry.type === 'file'}
