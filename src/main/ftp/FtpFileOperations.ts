@@ -31,6 +31,33 @@ export async function ensureRemoteDir(client: Client, remotePath: string): Promi
   }
 }
 
+/**
+ * Delete a remote directory and everything under it, addressing every entry by absolute path.
+ *
+ * basic-ftp's `removeDir` walks the tree with relative `CWD name` / `CDUP` / `LIST` (no path).
+ * On the same servers `ensureRemoteDir` works around, that walk leaves children behind and the
+ * final `RMD` fails with `550 Directory not empty` — typically as soon as a folder holds a
+ * subfolder. Listing by absolute path is exactly what the explorer already does successfully,
+ * so the delete reuses it and never changes the working directory.
+ *
+ * Symbolic links are removed with `DELE`, never followed.
+ */
+export async function removeRemoteDirRecursive(client: Client, remotePath: string): Promise<void> {
+  const base = remotePath.replace(/\/+$/, '')
+  for (const entry of await client.list(remotePath)) {
+    if (entry.name === '.' || entry.name === '..') continue
+    const child = `${base}/${entry.name}`
+    // LIST/MLSD가 심링크로 표시한 항목만 따라가지 않는다. 심링크를 그냥 dir로 보고하는 서버라면
+    // 구분할 방법이 없어 따라 들어간다(basic-ftp removeDir도 같다).
+    if (entry.isDirectory && !entry.isSymbolicLink && !entry.link) {
+      await removeRemoteDirRecursive(client, child)
+    } else {
+      await client.remove(child)
+    }
+  }
+  await client.removeEmptyDir(remotePath)
+}
+
 export class FtpFileOperations {
   constructor(private manager: FtpConnectionManager) {}
 
@@ -79,8 +106,12 @@ export class FtpFileOperations {
   }
 
   async deleteDirectory(remotePath: string): Promise<void> {
-    await this.manager.runOnMainClient((client) => client.removeDir(remotePath))
-    this.manager.emit('mutation', { kind: 'delete', remotePath })
+    try {
+      await this.manager.runOnMainClient((client) => removeRemoteDirRecursive(client, remotePath))
+    } finally {
+      // 중간에 실패해도 하위 항목 일부는 이미 지워졌으므로 캐시는 무효화해야 한다.
+      this.manager.emit('mutation', { kind: 'delete', remotePath })
+    }
   }
 
   async rename(oldPath: string, newPath: string): Promise<void> {

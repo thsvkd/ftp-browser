@@ -6,7 +6,8 @@ interface MockClient {
   uploadFrom: ReturnType<typeof vi.fn>
   downloadTo: ReturnType<typeof vi.fn>
   remove: ReturnType<typeof vi.fn>
-  removeDir: ReturnType<typeof vi.fn>
+  list: ReturnType<typeof vi.fn>
+  removeEmptyDir: ReturnType<typeof vi.fn>
   rename: ReturnType<typeof vi.fn>
   sendIgnoringError: ReturnType<typeof vi.fn>
   trackProgress: ReturnType<typeof vi.fn>
@@ -21,7 +22,8 @@ function createMockManager(): {
     uploadFrom: vi.fn().mockResolvedValue(undefined),
     downloadTo: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
-    removeDir: vi.fn().mockResolvedValue(undefined),
+    list: vi.fn().mockResolvedValue([]),
+    removeEmptyDir: vi.fn().mockResolvedValue(undefined),
     rename: vi.fn().mockResolvedValue(undefined),
     sendIgnoringError: vi.fn().mockResolvedValue({ code: 257, message: '257 OK' }),
     trackProgress: vi.fn()
@@ -104,9 +106,34 @@ describe('FtpFileOperations', () => {
   })
 
   describe('deleteDirectory', () => {
-    it('should call removeDir on the client', async () => {
+    it('empties nested folders depth-first by absolute path, then removes the folder', async () => {
+      const tree: Record<string, Array<{ name: string; isDirectory: boolean }>> = {
+        '/remote/dir': [
+          { name: '.', isDirectory: true },
+          { name: '..', isDirectory: true },
+          { name: 'a.jpg', isDirectory: false },
+          { name: 'sub (1)', isDirectory: true }
+        ],
+        '/remote/dir/sub (1)': [
+          { name: 'b.jpg', isDirectory: false },
+          { name: 'deeper', isDirectory: true }
+        ],
+        '/remote/dir/sub (1)/deeper': []
+      }
+      const calls: string[] = []
+      mockClient.list.mockImplementation(async (p: string) => tree[p])
+      mockClient.remove.mockImplementation(async (p: string) => calls.push(`DELE ${p}`))
+      mockClient.removeEmptyDir.mockImplementation(async (p: string) => calls.push(`RMD ${p}`))
+
       await ops.deleteDirectory('/remote/dir')
-      expect(mockClient.removeDir).toHaveBeenCalledWith('/remote/dir')
+
+      expect(calls).toEqual([
+        'DELE /remote/dir/a.jpg',
+        'DELE /remote/dir/sub (1)/b.jpg',
+        'RMD /remote/dir/sub (1)/deeper',
+        'RMD /remote/dir/sub (1)',
+        'RMD /remote/dir'
+      ])
     })
   })
 
@@ -178,10 +205,11 @@ describe('FtpFileOperations', () => {
       expect(lastMutation()).toBeUndefined()
     })
 
-    it('does NOT emit a mutation when deleteDirectory fails', async () => {
-      mockClient.removeDir.mockRejectedValueOnce(new Error('perm denied'))
+    it('still emits a mutation when a recursive delete fails midway', async () => {
+      // 하위 항목 일부는 이미 지워졌으므로 캐시를 무효화해야 한다.
+      mockClient.removeEmptyDir.mockRejectedValueOnce(new Error('perm denied'))
       await expect(ops.deleteDirectory('/remote/dir')).rejects.toThrow('perm denied')
-      expect(lastMutation()).toBeUndefined()
+      expect(lastMutation()).toEqual({ kind: 'delete', remotePath: '/remote/dir' })
     })
 
     it('does NOT emit a mutation when rename fails', async () => {
