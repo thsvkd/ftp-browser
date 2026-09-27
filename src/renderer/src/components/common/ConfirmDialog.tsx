@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useConfirmStore } from '@renderer/stores/useConfirmStore'
 import { useT } from '@renderer/i18n'
+import { useEscapeKey } from '@renderer/hooks/useEscapeKey'
 
 export function ConfirmDialog(): React.JSX.Element | null {
   const request = useConfirmStore((s) => s.request)
@@ -15,6 +16,13 @@ export function ConfirmDialog(): React.JSX.Element | null {
     confirmRef.current?.focus()
     return () => previous?.focus()
   }, [request])
+
+  useEscapeKey(() => {
+    const current = useConfirmStore.getState().request
+    if (!current) return
+    useConfirmStore.setState({ request: null })
+    current.resolve(false)
+  }, request !== null)
 
   if (!request) return null
 
@@ -40,7 +48,6 @@ export function ConfirmDialog(): React.JSX.Element | null {
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           e.stopPropagation()
-          if (e.key === 'Escape') settle(false)
           // 포커스가 뒤의 패널로 빠져나가 확인 대기 중에 다른 작업을 하지 않도록 두 버튼 사이에 가둔다.
           if (e.key === 'Tab') {
             e.preventDefault()

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEscapeKey } from '@renderer/hooks/useEscapeKey'
 import { X } from 'lucide-react'
 import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { InfoRow } from '@renderer/components/common/InfoRow'
@@ -28,13 +28,7 @@ export function LocalFilePropertiesDialog({
   const currentPath = useLocalFsStore((s) => s.currentPath)
   const t = useT()
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  useEscapeKey(onClose)
 
   return (
     <div

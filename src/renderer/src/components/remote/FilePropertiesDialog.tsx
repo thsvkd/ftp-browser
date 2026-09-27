@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEscapeKey } from '@renderer/hooks/useEscapeKey'
 import { X } from 'lucide-react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { InfoRow } from '@renderer/components/common/InfoRow'
@@ -41,13 +41,7 @@ export function FilePropertiesDialog({
   const remotePath = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`
   const t = useT()
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  useEscapeKey(onClose)
 
   return (
     <div

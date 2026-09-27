@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useEscapeKey } from '@renderer/hooks/useEscapeKey'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
@@ -33,13 +34,7 @@ export function ImagePreviewModal({ entry, onClose }: ImagePreviewModalProps): R
   const fullImageUrl = !loading ? (result?.url ?? null) : null
   const error = !loading ? (result?.error ?? null) : null
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  useEscapeKey(onClose)
 
   useEffect(() => {
     let aborted = false

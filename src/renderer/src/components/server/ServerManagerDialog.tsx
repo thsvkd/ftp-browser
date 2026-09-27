@@ -21,6 +21,7 @@ import type { FtpServer, RecentPath } from '@shared/types/ftp'
 import { ServerForm } from './ServerForm'
 import { ErrorNote, ServerAvatar, Spinner, TlsBadge } from './serverUi'
 import { STROKE, arrowIndex, btn, inputCls, onEnterEsc, selectedCls } from './styles'
+import { useEscapeKey } from '@renderer/hooks/useEscapeKey'
 
 /**
  * Site manager: saved servers on the left, the selected one's form on the right.
@@ -42,6 +43,7 @@ export function ServerManagerDialog({
   const connectingId = useServerStore((s) => s.draft.id)
   const connectError = useServerStore((s) => s.error)
   const { connect, cancel, save, remove, clearError } = useServerStore.getState()
+  useEscapeKey(() => (connecting ? cancel() : onClose()))
   const t = useT()
   const locale = useLocale()
 
@@ -225,10 +227,7 @@ export function ServerManagerDialog({
         className="relative flex h-[580px] max-h-full w-[840px] max-w-full flex-col overflow-hidden rounded-lg bg-white shadow-2xl outline-none ring-1 ring-black/5 motion-safe:animate-pop"
         onKeyDown={(e) => {
           trapTab(e)
-          onEnterEsc({
-            enter: () => void handleConnect(),
-            esc: () => (connecting ? cancel() : onClose())
-          })(e)
+          onEnterEsc({ enter: () => void handleConnect() })(e)
         }}
       >
         <header className="flex h-12 shrink-0 items-center gap-2 border-b border-gray-200 px-4">

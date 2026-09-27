@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useEscapeKey } from '@renderer/hooks/useEscapeKey'
 import { X, Database, Trash2 } from 'lucide-react'
 import {
   useSettingsStore,
@@ -36,6 +37,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
   const [clearing, setClearing] = useState(false)
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
+  // 톱니 버튼으로 열면 포커스가 창 밖에 남으므로, 포커스와 관계없이 Esc로 닫는다.
+  useEscapeKey(onClose, open)
 
   const fetchCacheStats = useCallback(async () => {
     const result = await window.api.invoke<IpcResult<CacheStats>>('cache:getStats')
@@ -111,10 +114,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent): void => {
-    if (e.key === 'Escape') onClose()
-  }
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
@@ -123,7 +122,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
       <div
         className="w-[480px] rounded-lg bg-white p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{t('settings.title')}</h2>

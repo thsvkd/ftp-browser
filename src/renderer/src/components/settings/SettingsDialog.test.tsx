@@ -248,3 +248,42 @@ describe('SettingsDialog localization', () => {
     ).not.toBeNull()
   })
 })
+
+describe('SettingsDialog Escape', () => {
+  it('closes with Esc even when focus stayed on the button that opened it', async () => {
+    const onClose = vi.fn()
+    const user = userEvent.setup()
+    render(<SettingsDialog open={true} onClose={onClose} />)
+    await screen.findByRole('button', { name: 'Check for updates' })
+
+    // 톱니 버튼으로 열면 포커스는 창 밖(body)에 있다.
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await user.keyboard('{Escape}')
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets Esc close only the confirm dialog stacked on top of it', async () => {
+    const onClose = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <>
+        <SettingsDialog open={true} onClose={onClose} />
+        <ConfirmDialog />
+      </>
+    )
+    await screen.findByRole('button', { name: 'Check for updates' })
+    const { confirmDialog } = await import('@renderer/stores/useConfirmStore')
+    let answer: Promise<boolean> | undefined
+    act(() => {
+      answer = confirmDialog({ title: 'Sure?', confirmLabel: 'OK' })
+    })
+    await screen.findByRole('alertdialog')
+
+    await user.keyboard('{Escape}')
+
+    await expect(answer).resolves.toBe(false)
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+})
