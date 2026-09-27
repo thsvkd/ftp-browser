@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { formatBytes } from '@renderer/lib/utils'
+import { useT } from '@renderer/i18n'
 import type { TransferJob, TransferProgress } from '@shared/types/transfer'
 
 interface TransferGroup {
@@ -81,6 +82,7 @@ function JobRow({
   cancel: (id: string) => Promise<void>
 }): React.JSX.Element {
   const jobPercent = percent(job.transferredBytes, job.totalBytes)
+  const t = useT()
 
   return (
     <div className={`flex items-center gap-2 py-1.5 pr-3 text-xs ${nested ? 'pl-7' : 'pl-3'}`}>
@@ -90,7 +92,10 @@ function JobRow({
       </span>
       {job.status === 'active' && (
         <div className="flex w-32 items-center gap-1">
-          <ProgressBar label={`${job.fileName} progress`} value={jobPercent} />
+          <ProgressBar
+            label={t('transfer.fileProgress', { name: job.fileName })}
+            value={jobPercent}
+          />
           <span className="w-8 text-right text-gray-500">{jobPercent}%</span>
         </div>
       )}
@@ -99,11 +104,11 @@ function JobRow({
           {formatBytes(job.transferredBytes)} / {formatBytes(job.totalBytes)}
         </span>
       )}
-      <span className={statusColor(job.status)}>{job.status}</span>
+      <span className={statusColor(job.status)}>{t(`job.${job.status}`)}</span>
       {(job.status === 'pending' || job.status === 'active') && (
         <button
           type="button"
-          aria-label={`Cancel ${job.fileName}`}
+          aria-label={t('transfer.cancelFile', { name: job.fileName })}
           className="text-gray-400 hover:text-red-500"
           onClick={() => void cancel(job.id)}
         >
@@ -139,17 +144,18 @@ function BatchRows({
   const currentJob = jobs.find((job) => job.status === 'active')
   const isLive = status === 'active' || status === 'pending'
   const direction = jobs[0].direction
+  const t = useT()
 
   return (
     <div>
       <div className="flex items-center gap-2 px-3 py-1.5 text-xs">
         <span className="text-gray-400">{direction === 'upload' ? '↑' : '↓'}</span>
         <span className="min-w-0 flex-1 truncate">
-          Overall ({completedCount}/{jobs.length} files)
+          {t('transfer.overall', { completed: completedCount, count: jobs.length })}
         </span>
         {isLive && (
           <div className="flex w-32 items-center gap-1">
-            <ProgressBar label="Overall transfer progress" value={overallPercent} />
+            <ProgressBar label={t('transfer.overallProgress')} value={overallPercent} />
             <span className="w-8 text-right text-gray-500">{overallPercent}%</span>
           </div>
         )}
@@ -158,11 +164,11 @@ function BatchRows({
             {formatBytes(transferredBytes)} / {formatBytes(totalBytes)}
           </span>
         )}
-        <span className={statusColor(status)}>{status}</span>
+        <span className={statusColor(status)}>{t(`job.${status}`)}</span>
         {isLive && (
           <button
             type="button"
-            aria-label="Cancel transfer batch"
+            aria-label={t('transfer.cancelBatch')}
             className="text-gray-400 hover:text-red-500"
             onClick={() => {
               for (const job of jobs) {
@@ -187,6 +193,7 @@ export function TransferPanel(): React.JSX.Element {
   const cancel = useTransferStore((s) => s.cancel)
   const [collapsed, setCollapsed] = useState(true)
   const prevActiveCount = useRef(0)
+  const t = useT()
 
   useEffect(() => {
     const unsubUpdated = window.api.on('transfer:updated', (...args: unknown[]) => {
@@ -223,7 +230,9 @@ export function TransferPanel(): React.JSX.Element {
         onClick={() => setCollapsed(!collapsed)}
       >
         <span className="font-medium text-gray-600">
-          Transfers {activeCount > 0 && `(${activeCount} active)`}
+          {activeCount > 0
+            ? t('transfer.titleActive', { number: activeCount })
+            : t('transfer.title')}
         </span>
         <div className="flex items-center gap-2">
           {jobs.some(
@@ -238,7 +247,7 @@ export function TransferPanel(): React.JSX.Element {
                 void clearCompleted()
               }}
             >
-              Clear
+              {t('common.clear')}
             </button>
           )}
           <span className="text-gray-400">{collapsed ? '▲' : '▼'}</span>
@@ -259,7 +268,7 @@ export function TransferPanel(): React.JSX.Element {
 
       {!collapsed && jobs.length === 0 && (
         <div className="border-t border-gray-100 px-3 py-3 text-center text-xs text-gray-400">
-          No transfers
+          {t('transfer.empty')}
         </div>
       )}
     </div>

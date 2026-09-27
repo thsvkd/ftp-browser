@@ -4,6 +4,8 @@ import {
   buildLocalThumbnailKey
 } from '@renderer/stores/useLocalThumbnailStore'
 
+import { useT } from '@renderer/i18n'
+
 interface LocalThumbnailImageProps {
   localPath: string
   fileSize: number
@@ -21,6 +23,7 @@ export function LocalThumbnailImage({
   const thumbnailData = useLocalThumbnailStore((s) => s.thumbnails[cacheKey])
   const thumbnailError = useLocalThumbnailStore((s) => s.errors[cacheKey])
   const clearError = useLocalThumbnailStore((s) => s.clearError)
+  const t = useT()
   const ref = useRef<HTMLDivElement>(null)
   const requestedRef = useRef(false)
 
@@ -77,7 +80,7 @@ export function LocalThumbnailImage({
           requestedRef.current = false
           requestThumbnail()
         }}
-        title={`Error: ${thumbnailError}\nClick to retry`}
+        title={t('thumbnail.retry', { reason: thumbnailError })}
       >
         ↻
       </div>

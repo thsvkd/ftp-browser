@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
+import { useT } from '@renderer/i18n'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 
 export function RemoteBreadcrumb(): React.JSX.Element {
@@ -14,6 +15,7 @@ export function RemoteBreadcrumb(): React.JSX.Element {
   const [editing, setEditing] = useState(false)
   const [inputValue, setInputValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const t = useT()
 
   const canGoBack = historyIndex > 0
   const canGoForward = historyIndex < history.length - 1
@@ -38,7 +40,7 @@ export function RemoteBreadcrumb(): React.JSX.Element {
     await navigateTo(normalizedPath)
     const error = useFtpStore.getState().error
     if (error) {
-      toast.error(`Failed to navigate to "${normalizedPath}"`, { description: error })
+      toast.error(t('toast.navigateFailed', { path: normalizedPath }), { description: error })
     }
   }
 
@@ -79,7 +81,7 @@ export function RemoteBreadcrumb(): React.JSX.Element {
         onClick={goBack}
         disabled={!canGoBack}
         className={`rounded p-0.5 ${canGoBack ? 'text-gray-600 hover:bg-gray-200 hover:text-gray-900' : 'text-gray-300'}`}
-        title="Back"
+        title={t('explorer.back')}
       >
         <ChevronLeft size={14} />
       </button>
@@ -87,7 +89,7 @@ export function RemoteBreadcrumb(): React.JSX.Element {
         onClick={goForward}
         disabled={!canGoForward}
         className={`mr-1 rounded p-0.5 ${canGoForward ? 'text-gray-600 hover:bg-gray-200 hover:text-gray-900' : 'text-gray-300'}`}
-        title="Forward"
+        title={t('explorer.forward')}
       >
         <ChevronRight size={14} />
       </button>

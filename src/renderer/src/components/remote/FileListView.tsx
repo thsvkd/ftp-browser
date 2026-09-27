@@ -10,6 +10,7 @@ import { joinRemotePath } from '@renderer/lib/remoteDrop'
 import { FileContextMenu } from './FileContextMenu'
 import { FilePropertiesDialog } from './FilePropertiesDialog'
 import { formatBytes, formatDate, filterHidden } from '@renderer/lib/utils'
+import { useT } from '@renderer/i18n'
 import type { FtpFileEntry } from '@shared/types/ftp'
 
 // Module-scoped so positions survive the remount that navigation triggers.
@@ -50,6 +51,7 @@ export function FileListView({ dragOverFolderPath }: FileListViewProps = {}): Re
   const releaseMenu = useContextMenuStore((s) => s.close)
 
   const showHidden = useSettingsStore((s) => s.showHidden)
+  const t = useT()
   const host = useFtpStore((s) => s.host)
   const port = useFtpStore((s) => s.port)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -155,9 +157,9 @@ export function FileListView({ dragOverFolderPath }: FileListViewProps = {}): Re
       <table className="w-full text-left text-sm">
         <thead className="sticky top-0 bg-gray-100 text-xs text-gray-500">
           <tr>
-            <th className="px-3 py-2 font-medium">Name</th>
-            <th className="w-24 px-3 py-2 text-right font-medium">Size</th>
-            <th className="w-44 px-3 py-2 font-medium">Modified</th>
+            <th className="px-3 py-2 font-medium">{t('file.name')}</th>
+            <th className="w-24 px-3 py-2 text-right font-medium">{t('file.size')}</th>
+            <th className="w-44 px-3 py-2 font-medium">{t('file.modified')}</th>
           </tr>
         </thead>
         <tbody>
@@ -216,7 +218,7 @@ export function FileListView({ dragOverFolderPath }: FileListViewProps = {}): Re
           {sorted.length === 0 && (
             <tr>
               <td colSpan={3} className="px-3 py-8 text-center text-gray-400">
-                Empty directory
+                {t('explorer.empty')}
               </td>
             </tr>
           )}

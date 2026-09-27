@@ -9,6 +9,7 @@ type InvokeChannel =
   | 'ftp:getRecentServers'
   | 'ftp:getRecentPaths'
   | 'ftp:deleteServer'
+  | 'ftp:saveServer'
   | 'ftp:downloadPreview'
   | 'ftp:deleteBatch'
   | 'ftp:rename'
@@ -44,6 +45,7 @@ type InvokeChannel =
   | 'update:getState'
   | 'update:check'
   | 'update:download'
+  | 'update:setAutoUpdate'
   | 'update:install'
 
 type EventChannel =

@@ -1,22 +1,30 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { getLocale, t } from '@renderer/i18n'
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs))
 }
 
+const SIZE_KEYS = ['size.b', 'size.kb', 'size.mb', 'size.gb', 'size.tb'] as const
+
+/** 1024-based size. The number follows the locale; the unit label comes from the catalog (fr "Mo", ru "МБ"). */
 export function formatBytes(bytes: number, decimals = 1): string {
-  if (bytes === 0) return '0 B'
   const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(decimals))} ${sizes[i]}`
+  const i =
+    !Number.isFinite(bytes) || bytes < 1
+      ? 0
+      : Math.min(SIZE_KEYS.length - 1, Math.floor(Math.log(bytes) / Math.log(k)))
+  const value = new Intl.NumberFormat(getLocale(), { maximumFractionDigits: decimals }).format(
+    bytes / Math.pow(k, i)
+  )
+  return t(SIZE_KEYS[i], { value })
 }
 
 export function formatDate(isoString: string): string {
   if (!isoString) return ''
   const date = new Date(isoString)
-  return date.toLocaleString()
+  return date.toLocaleString(getLocale())
 }
 
 /** Lower-cased extension including the leading dot, or '' when there is none. */

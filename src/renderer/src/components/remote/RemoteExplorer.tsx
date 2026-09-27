@@ -7,6 +7,7 @@ import { RemoteBreadcrumb } from './RemoteBreadcrumb'
 import { FileListView } from './FileListView'
 import { FileGridView } from './FileGridView'
 import { ViewModeToggle } from '@renderer/components/common/ViewModeToggle'
+import { NotConnectedPane } from '@renderer/components/server/NotConnectedPane'
 import { useTypeAhead } from '@renderer/hooks/useTypeAhead'
 import { sortForDisplay } from '@renderer/lib/typeAhead'
 import { filterHidden } from '@renderer/lib/utils'
@@ -15,6 +16,8 @@ import { toast } from 'sonner'
 import type { FtpConnectionState } from '@shared/types/ftp'
 import type { DeleteTarget } from '@shared/types/operation'
 import type { IpcResult } from '@shared/types/ipc'
+import { confirmDelete } from '@renderer/stores/useConfirmStore'
+import { useT } from '@renderer/i18n'
 
 export function RemoteExplorer(): React.JSX.Element {
   const connectionStatus = useFtpStore((s) => s.connectionStatus)
@@ -29,6 +32,7 @@ export function RemoteExplorer(): React.JSX.Element {
   const setViewMode = useSettingsStore((s) => s.setRemoteViewMode)
   const clearSelection = useSelectionStore((s) => s.clearSelection)
   const clearRemoteFolderPreviews = useGalleryStore((s) => s.clearRemote)
+  const t = useT()
 
   const [isDragOver, setIsDragOver] = useState(false)
   // Remote folder path currently hovered during a drag (drop lands inside it).
@@ -107,23 +111,21 @@ export function RemoteExplorer(): React.JSX.Element {
     const targets = allEntries.filter((en) => sel.has(en.name))
     if (targets.length === 0) return
 
-    const confirmBeforeDelete = useSettingsStore.getState().confirmBeforeDelete
-    const msg =
-      targets.length === 1 ? `Delete "${targets[0].name}"?` : `Delete ${targets.length} items?`
-    if (confirmBeforeDelete && !window.confirm(msg)) return
-
+    // 확인을 기다리는 동안 폴더를 옮겨 다닐 수 있으므로, 대상 이름을 고른 시점의 경로로 고정한다.
     const path = useFtpStore.getState().currentPath
-    const deleteTargets: DeleteTarget[] = targets.map((t) => ({
-      path: path === '/' ? `/${t.name}` : `${path}/${t.name}`,
-      isDirectory: t.type === 'directory'
+    if (!(await confirmDelete(targets))) return
+
+    const deleteTargets: DeleteTarget[] = targets.map((target) => ({
+      path: path === '/' ? `/${target.name}` : `${path}/${target.name}`,
+      isDirectory: target.type === 'directory'
     }))
     try {
       const result = await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', deleteTargets)
       if (!result.success) {
-        toast.error('Failed to delete', { description: result.error })
+        toast.error(t('toast.deleteFailed'), { description: result.error })
       }
     } catch (err) {
-      toast.error('Failed to delete', {
+      toast.error(t('toast.deleteFailed'), {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -189,7 +191,7 @@ export function RemoteExplorer(): React.JSX.Element {
     try {
       await performRemoteDrop(e.dataTransfer, targetPath)
     } catch (err) {
-      toast.error('Failed to handle drop', {
+      toast.error(t('toast.dropFailed'), {
         description: err instanceof Error ? err.message : String(err)
       })
     }
@@ -206,17 +208,10 @@ export function RemoteExplorer(): React.JSX.Element {
   if (connectionStatus !== 'connected') {
     return (
       <div className="flex h-full flex-col">
-        <div className="flex items-center border-b border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium text-gray-500">
-          REMOTE
+        <div className="flex items-center border-b border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium uppercase text-gray-500">
+          {t('explorer.remote')}
         </div>
-        <div className="flex flex-1 items-center justify-center text-gray-400">
-          <div className="text-center">
-            <p className="text-sm">Not connected</p>
-            <p className="mt-1 text-xs text-gray-300">
-              Click &quot;Connect&quot; to connect to an FTP server
-            </p>
-          </div>
-        </div>
+        <NotConnectedPane />
       </div>
     )
   }
@@ -234,7 +229,7 @@ export function RemoteExplorer(): React.JSX.Element {
       onDrop={handleDrop}
     >
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-100 px-3 py-1">
-        <span className="text-xs font-medium text-gray-500">REMOTE</span>
+        <span className="text-xs font-medium uppercase text-gray-500">{t('explorer.remote')}</span>
         <ViewModeToggle mode={viewMode} onChange={setViewMode} />
       </div>
       <RemoteBreadcrumb />
@@ -242,13 +237,13 @@ export function RemoteExplorer(): React.JSX.Element {
       {isDragOver && (
         <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-blue-50/50">
           <div className="rounded-lg bg-blue-100 px-6 py-4 text-sm font-medium text-blue-700 shadow">
-            Drop files here to upload
+            {t('explorer.dropToUpload')}
           </div>
         </div>
       )}
       {loading ? (
         <div className="flex flex-1 items-center justify-center">
-          <div className="text-sm text-gray-400">Loading...</div>
+          <div className="text-sm text-gray-400">{t('common.loading')}</div>
         </div>
       ) : viewMode === 'list' ? (
         <FileListView dragOverFolderPath={dragOverFolderPath} />

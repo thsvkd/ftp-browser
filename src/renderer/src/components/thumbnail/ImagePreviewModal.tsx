@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
+import { useT } from '@renderer/i18n'
 import type { FtpFileEntry } from '@shared/types/ftp'
 import type { IpcResult } from '@shared/types/ipc'
 
@@ -23,6 +24,7 @@ export function ImagePreviewModal({ entry, onClose }: ImagePreviewModalProps): R
   const remotePath = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`
   const cacheKey = generateCacheKeyRenderer(host, port, remotePath, entry.size, entry.modifiedAt)
   const thumbnailData = useThumbnailStore((s) => s.thumbnails[cacheKey])
+  const t = useT()
 
   const requestKey = `${remotePath}|${entry.size}|${entry.modifiedAt}`
   const [result, setResult] = useState<FetchResult | null>(null)
@@ -99,14 +101,18 @@ export function ImagePreviewModal({ entry, onClose }: ImagePreviewModalProps): R
               {loading && !fullImageUrl && (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="rounded-full bg-black/50 px-3 py-1 text-sm text-white">
-                    Loading...
+                    {t('common.loading')}
                   </div>
                 </div>
               )}
             </div>
           ) : (
             <div className="flex h-64 w-64 items-center justify-center text-gray-400">
-              {loading ? 'Loading...' : error ? `Error: ${error}` : 'No preview available'}
+              {loading
+                ? t('common.loading')
+                : error
+                  ? t('preview.failed', { reason: error })
+                  : t('preview.none')}
             </div>
           )}
           <div className="mt-2 text-sm text-gray-600">

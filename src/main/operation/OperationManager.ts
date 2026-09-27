@@ -23,11 +23,16 @@ export class OperationManager extends EventEmitter {
   private jobs: OperationJob[] = []
   private cancelled = new Set<string>()
 
-  create(kind: OperationKind, label: string, unit: OperationUnit, total: number): OperationJob {
+  create(
+    kind: OperationKind,
+    items: Pick<OperationJob, 'itemCount' | 'itemName'>,
+    unit: OperationUnit,
+    total: number
+  ): OperationJob {
     const job: OperationJob = {
       id: randomUUID(),
       kind,
-      label,
+      ...items,
       unit,
       total,
       completed: 0,

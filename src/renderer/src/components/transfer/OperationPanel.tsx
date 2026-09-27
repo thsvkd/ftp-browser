@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Copy, FolderInput, Trash2, X } from 'lucide-react'
 import { useOperationStore } from '@renderer/stores/useOperationStore'
 import { formatBytes } from '@renderer/lib/utils'
+import { useT } from '@renderer/i18n'
 import type { OperationJob, OperationProgress, OperationKind } from '@shared/types/operation'
 
 function kindIcon(kind: OperationKind): React.JSX.Element {
@@ -28,11 +29,26 @@ function statusColor(status: OperationJob['status']): string {
   }
 }
 
-function detail(job: OperationJob): string {
+type T = ReturnType<typeof useT>
+
+function summary(job: OperationJob, t: T): string {
+  const name = job.itemName
+  const count = job.itemCount
+  switch (job.kind) {
+    case 'copy':
+      return name ? t('operation.copyingNamed', { name }) : t('operation.copying', { count })
+    case 'move':
+      return name ? t('operation.movingNamed', { name }) : t('operation.moving', { count })
+    case 'delete':
+      return name ? t('operation.deletingNamed', { name }) : t('operation.deleting', { count })
+  }
+}
+
+function detail(job: OperationJob, t: T): string {
   if (job.unit === 'bytes') {
     return `${formatBytes(job.completed)} / ${formatBytes(job.total)}`
   }
-  return `${job.completed} / ${job.total} files`
+  return t('operation.fileProgress', { completed: job.completed, count: job.total })
 }
 
 export function OperationPanel(): React.JSX.Element | null {
@@ -41,6 +57,7 @@ export function OperationPanel(): React.JSX.Element | null {
   const updateProgress = useOperationStore((s) => s.updateProgress)
   const cancel = useOperationStore((s) => s.cancel)
   const clearFinished = useOperationStore((s) => s.clearFinished)
+  const t = useT()
 
   useEffect(() => {
     const unsubUpdated = window.api.on('operation:updated', (...args: unknown[]) => {
@@ -62,10 +79,10 @@ export function OperationPanel(): React.JSX.Element | null {
   return (
     <div className="border-t border-gray-200 bg-white">
       <div className="flex items-center justify-between px-3 py-1.5 text-xs">
-        <span className="font-medium text-gray-600">File operations</span>
+        <span className="font-medium text-gray-600">{t('operation.title')}</span>
         {hasFinished && (
           <button className="text-gray-400 hover:text-gray-600" onClick={() => clearFinished()}>
-            Clear
+            {t('common.clear')}
           </button>
         )}
       </div>
@@ -73,12 +90,13 @@ export function OperationPanel(): React.JSX.Element | null {
       <div className="max-h-40 overflow-auto border-t border-gray-100">
         {jobs.map((job) => {
           const percent = job.total > 0 ? Math.round((job.completed / job.total) * 100) : 0
+          const label = summary(job, t)
 
           return (
             <div key={job.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
               {kindIcon(job.kind)}
-              <span className="min-w-0 flex-1 truncate" title={job.currentItem ?? job.label}>
-                {job.label}
+              <span className="min-w-0 flex-1 truncate" title={job.currentItem ?? label}>
+                {label}
                 {job.status === 'active' && job.currentItem && (
                   <span className="ml-1 text-gray-400">— {job.currentItem}</span>
                 )}
@@ -97,10 +115,10 @@ export function OperationPanel(): React.JSX.Element | null {
                     </div>
                     <span className="w-8 text-right text-gray-500">{percent}%</span>
                   </div>
-                  <span className="text-gray-400">{detail(job)}</span>
+                  <span className="text-gray-400">{detail(job, t)}</span>
                 </>
               )}
-              <span className={statusColor(job.status)}>{job.status}</span>
+              <span className={statusColor(job.status)}>{t(`job.${job.status}`)}</span>
               {job.status === 'active' && (
                 <button className="text-gray-400 hover:text-red-500" onClick={() => cancel(job.id)}>
                   <X size={12} />

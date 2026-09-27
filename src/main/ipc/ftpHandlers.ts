@@ -3,6 +3,7 @@ import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
 import { OperationManager } from '../operation/OperationManager'
 import { getDatabase } from '../db/database'
+import { listServers, recordConnection, saveServer, ServerSaveError } from '../db/servers'
 import { ipcError } from '../utils/errorClassifier'
 import type {
   FtpConnectPayload,
@@ -47,23 +48,7 @@ export function registerFtpHandlers(
         if (result.success) {
           // UPSERT server info (keyed on host+port)
           try {
-            const db = getDatabase()
-            db.prepare(
-              `INSERT INTO servers (name, host, port, username, password_enc, secure, last_connected)
-               VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-               ON CONFLICT(host, port) DO UPDATE SET
-                 username = excluded.username,
-                 password_enc = excluded.password_enc,
-                 secure = excluded.secure,
-                 last_connected = datetime('now')`
-            ).run(
-              payload.host,
-              payload.host,
-              payload.port,
-              payload.user,
-              payload.password,
-              payload.secure ? 1 : 0
-            )
+            recordConnection(getDatabase(), payload)
           } catch (dbErr) {
             // Non-critical: don't fail the connection if DB save fails
             console.warn('[ftpHandlers] Failed to persist server info:', dbErr)
@@ -107,34 +92,21 @@ export function registerFtpHandlers(
 
   ipcMain.handle('ftp:getRecentServers', (): IpcResult<FtpServer[]> => {
     try {
-      const db = getDatabase()
-      const rows = db
-        .prepare(
-          'SELECT id, host, port, username, password_enc, secure, last_connected FROM servers ORDER BY last_connected DESC LIMIT 20'
-        )
-        .all() as Array<{
-        id: number
-        host: string
-        port: number
-        username: string
-        password_enc: string
-        secure: number
-        last_connected: string
-      }>
-      const servers: FtpServer[] = rows.map((r) => ({
-        id: r.id,
-        name: r.host,
-        host: r.host,
-        port: r.port,
-        username: r.username || '',
-        password: r.password_enc || '',
-        secure: r.secure === 1,
-        lastConnected: r.last_connected
-      }))
-      return { success: true, data: servers }
+      return { success: true, data: listServers(getDatabase()) }
     } catch (err) {
       console.warn('[ftpHandlers] Failed to load recent servers:', err)
       return { success: true, data: [] }
+    }
+  })
+
+  ipcMain.handle('ftp:saveServer', (_event, server: FtpServer): IpcResult<FtpServer> => {
+    try {
+      return { success: true, data: saveServer(getDatabase(), server) }
+    } catch (err) {
+      if (err instanceof ServerSaveError) {
+        return { success: false, error: err.message, code: err.code }
+      }
+      return ipcError(err)
     }
   })
 
@@ -242,11 +214,11 @@ export function registerFtpHandlers(
   ipcMain.handle(
     'ftp:deleteBatch',
     async (_event, targets: DeleteTarget[]): Promise<IpcResult<void>> => {
-      const label =
-        targets.length === 1
-          ? `Deleting ${remoteBasename(targets[0].path)}`
-          : `Deleting ${targets.length} items`
-      const job = operationManager.create('delete', label, 'files', targets.length)
+      const items = {
+        itemCount: targets.length,
+        itemName: targets.length === 1 ? remoteBasename(targets[0].path) : undefined
+      }
+      const job = operationManager.create('delete', items, 'files', targets.length)
 
       try {
         for (let i = 0; i < targets.length; i++) {

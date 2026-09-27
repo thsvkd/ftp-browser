@@ -1,4 +1,5 @@
 import { toast } from 'sonner'
+import { t } from '@renderer/i18n'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import type { UploadFileEntry } from '@shared/types/local'
@@ -65,7 +66,9 @@ async function moveRemoteFiles(items: RemoteFileDragItem[], targetPath: string):
     }
   }
   if (errors.length > 0) {
-    toast.error(`Failed to move ${errors.length} item(s)`, { description: errors.join('\n') })
+    toast.error(t('toast.moveFailed', { count: errors.length }), {
+      description: errors.join('\n')
+    })
   }
   if (moved > 0) {
     useFtpStore.getState().refresh()
@@ -85,7 +88,7 @@ async function uploadLocalPaths(localPaths: string[], targetPath: string): Promi
     localPaths
   )
   if (!expanded.success) {
-    toast.error('Failed to read dropped items', { description: expanded.error })
+    toast.error(t('toast.readDropFailed'), { description: expanded.error })
     return
   }
   const entries = expanded.data

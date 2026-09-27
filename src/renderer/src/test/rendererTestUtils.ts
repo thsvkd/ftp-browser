@@ -47,7 +47,7 @@ export function invokeCalls(invoke: Mock, channel: string): unknown[][] {
  * (계약 §6 라벨 표) 이 버튼의 존재를 메뉴의 존재로 삼는다.
  */
 export function queryMenu(): HTMLElement | null {
-  return screen.queryByRole('button', { name: 'New Folder' })
+  return screen.queryByRole('button', { name: 'New folder…' })
 }
 
 /**

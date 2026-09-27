@@ -8,7 +8,7 @@ import { ipcMain } from 'electron'
 import { registerUpdateHandlers } from './updateHandlers'
 import type { UpdateManager } from '../update/UpdateManager'
 
-type Handler = (event: unknown) => unknown
+type Handler = (event: unknown, ...args: unknown[]) => unknown
 
 describe('registerUpdateHandlers', () => {
   let handlers: Map<string, Handler>
@@ -28,16 +28,19 @@ describe('registerUpdateHandlers', () => {
       getState: vi.fn(() => state),
       check: vi.fn(async () => state),
       download: vi.fn(async () => state),
-      install: vi.fn()
+      install: vi.fn(),
+      setAutoUpdate: vi.fn(async () => state)
     } as unknown as UpdateManager
+    const persistAutoUpdate = vi.fn()
 
-    registerUpdateHandlers(manager)
+    registerUpdateHandlers(manager, persistAutoUpdate)
 
     expect([...handlers.keys()].sort()).toEqual([
       'update:check',
       'update:download',
       'update:getState',
-      'update:install'
+      'update:install',
+      'update:setAutoUpdate'
     ])
     await expect(handlers.get('update:getState')?.(null)).resolves.toEqual({
       success: true,
@@ -55,6 +58,13 @@ describe('registerUpdateHandlers', () => {
       success: true,
       data: undefined
     })
+    await expect(handlers.get('update:setAutoUpdate')?.(null, false)).resolves.toEqual({
+      success: true,
+      data: state
+    })
+    // 저장하지 않으면 재시작 때 다시 켜진다.
+    expect(persistAutoUpdate).toHaveBeenCalledWith(false)
+    expect(manager.setAutoUpdate).toHaveBeenCalledWith(false)
     // 반환값만 보면 핸들러가 manager를 아예 부르지 않아도 통과한다.
     expect(manager.install).toHaveBeenCalledTimes(1)
   })

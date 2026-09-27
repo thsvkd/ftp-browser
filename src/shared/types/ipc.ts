@@ -32,6 +32,11 @@ export const ErrorCode = {
   FS_DISK_FULL: 'FS_DISK_FULL',
   FS_ALREADY_EXISTS: 'FS_ALREADY_EXISTS',
 
+  // Saved servers
+  SERVER_EXISTS: 'SERVER_EXISTS',
+  SERVER_NOT_FOUND: 'SERVER_NOT_FOUND',
+  INVALID_PORT: 'INVALID_PORT',
+
   // General
   UNKNOWN: 'UNKNOWN'
 } as const

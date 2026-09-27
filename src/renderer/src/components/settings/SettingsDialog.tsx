@@ -6,8 +6,8 @@ import {
   GALLERY_THUMB_MAX
 } from '@renderer/stores/useSettingsStore'
 import { formatBytes } from '@renderer/lib/utils'
-import { useTransferStore } from '@renderer/stores/useTransferStore'
-import { useOperationStore } from '@renderer/stores/useOperationStore'
+import { installUpdate } from '@renderer/lib/installUpdate'
+import { LOCALES, useLocale, useT, type LanguageSetting } from '@renderer/i18n'
 import type { IpcResult } from '@shared/types/ipc'
 import type { UpdateState } from '@shared/types/update'
 
@@ -27,13 +27,11 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   const showHidden = useSettingsStore((s) => s.showHidden)
   const setShowHidden = useSettingsStore((s) => s.setShowHidden)
   const confirmBeforeDelete = useSettingsStore((s) => s.confirmBeforeDelete)
+  const language = useSettingsStore((s) => s.language)
+  const setLanguage = useSettingsStore((s) => s.setLanguage)
+  const t = useT()
+  const locale = useLocale()
   const setConfirmBeforeDelete = useSettingsStore((s) => s.setConfirmBeforeDelete)
-  const hasActiveTransfers = useTransferStore((s) =>
-    s.jobs.some((job) => job.status === 'pending' || job.status === 'active')
-  )
-  const hasActiveOperations = useOperationStore((s) =>
-    s.jobs.some((job) => job.status === 'active')
-  )
 
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
   const [clearing, setClearing] = useState(false)
@@ -77,35 +75,39 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
     if (result.success) setUpdateState(result.data)
   }
 
-  const installUpdate = (): void => {
-    if (
-      (hasActiveTransfers || hasActiveOperations) &&
-      !window.confirm('A file operation is still running. Restart and interrupt it?')
-    ) {
-      return
-    }
-    void window.api.invoke('update:install')
+  const setAutoUpdate = async (enabled: boolean): Promise<void> => {
+    const result = await window.api.invoke<IpcResult<UpdateState>>('update:setAutoUpdate', enabled)
+    if (result.success) setUpdateState(result.data)
   }
 
+  const downloadingLabel = (percent = 0): string =>
+    t('update.downloading', {
+      percent: new Intl.NumberFormat(locale, { style: 'percent' }).format(Math.round(percent) / 100)
+    })
+
   const updateDescription = (): string => {
-    if (!updateState) return 'Loading...'
+    if (!updateState) return t('common.loading')
+    const version = updateState.availableVersion ?? ''
     switch (updateState.status) {
       case 'unsupported':
-        return updateState.message ?? 'Automatic updates are not available for this build.'
+        // main의 message는 영어 고정 문장이라 보여 주지 않고 번역 키로 대신한다.
+        return t('update.unsupported')
       case 'checking':
-        return 'Checking for updates...'
+        return t('update.checking')
       case 'available':
-        return `Version ${updateState.availableVersion} is available.`
+        return t('update.available', { version })
       case 'downloading':
-        return `Downloading ${Math.round(updateState.progressPercent ?? 0)}%`
+        return downloadingLabel(updateState.progressPercent)
       case 'ready':
-        return `Version ${updateState.availableVersion} is ready to install.`
+        return t('update.ready', { version })
       case 'up-to-date':
-        return 'You are using the latest version.'
+        return t('update.upToDate')
       case 'error':
-        return updateState.message ?? 'Update check failed.'
+        return updateState.message
+          ? t('update.failedWithReason', { reason: updateState.message })
+          : t('update.failed')
       default:
-        return 'Updates are checked when the app starts.'
+        return t('update.idle')
     }
   }
 
@@ -124,25 +126,43 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
         onKeyDown={handleKeyDown}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Settings</h2>
+          <h2 className="text-lg font-semibold">{t('settings.title')}</h2>
           <button
             onClick={onClose}
             className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-            aria-label="Close settings"
+            aria-label={t('settings.close')}
           >
             <X size={18} />
           </button>
         </div>
 
         <div className="space-y-6">
+          <section>
+            <label className="flex items-center justify-between">
+              <span className="text-sm text-gray-700">{t('settings.language')}</span>
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value as LanguageSetting)}
+                className="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700 focus:border-blue-500 focus:outline-none"
+              >
+                <option value="system">{t('settings.languageSystem')}</option>
+                {LOCALES.map((l) => (
+                  <option key={l.code} value={l.code} lang={l.code}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </section>
+
           {/* Gallery */}
           <section>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Gallery
+              {t('settings.gallery')}
             </h3>
             <div className="flex items-center justify-between">
               <label htmlFor="thumb-size" className="text-sm text-gray-700">
-                Thumbnail size
+                {t('settings.thumbnailSize')}
               </label>
               <span className="text-sm tabular-nums text-gray-500">{galleryThumbSize}px</span>
             </div>
@@ -155,18 +175,16 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
               onChange={(e) => setGalleryThumbSize(Number(e.target.value))}
               className="mt-2 w-full accent-blue-600"
             />
-            <p className="mt-1 text-xs text-gray-400">
-              Tip: hold Ctrl and scroll inside a gallery to zoom.
-            </p>
+            <p className="mt-1 text-xs text-gray-400">{t('settings.zoomTip')}</p>
           </section>
 
           {/* Browsing */}
           <section>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Browsing
+              {t('settings.browsing')}
             </h3>
             <label className="flex cursor-pointer items-center justify-between py-1">
-              <span className="text-sm text-gray-700">Show hidden files (dotfiles)</span>
+              <span className="text-sm text-gray-700">{t('settings.showHidden')}</span>
               <input
                 type="checkbox"
                 checked={showHidden}
@@ -175,7 +193,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
               />
             </label>
             <label className="flex cursor-pointer items-center justify-between py-1">
-              <span className="text-sm text-gray-700">Confirm before deleting</span>
+              <span className="text-sm text-gray-700">{t('settings.confirmDelete')}</span>
               <input
                 type="checkbox"
                 checked={confirmBeforeDelete}
@@ -188,15 +206,18 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
           {/* Cache */}
           <section>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Cache
+              {t('settings.cache')}
             </h3>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm text-gray-700">
                 <Database size={14} className="text-gray-400" />
                 <span>
                   {cacheStats
-                    ? `${cacheStats.totalCount} items (${formatBytes(cacheStats.totalBytes)})`
-                    : 'Loading...'}
+                    ? t('settings.cacheSummary', {
+                        count: cacheStats.totalCount,
+                        size: formatBytes(cacheStats.totalBytes)
+                      })
+                    : t('common.loading')}
                 </span>
               </div>
               <button
@@ -205,7 +226,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Trash2 size={14} />
-                {clearing ? 'Clearing...' : 'Clear cache'}
+                {clearing ? t('settings.clearingCache') : t('settings.clearCache')}
               </button>
             </div>
           </section>
@@ -213,12 +234,14 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
           {/* Updates */}
           <section>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Updates
+              {t('settings.updates')}
             </h3>
             <div className="flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <div className="text-sm text-gray-700">
-                  {updateState ? `Version ${updateState.currentVersion}` : 'Version'}
+                  {updateState
+                    ? t('update.version', { version: updateState.currentVersion })
+                    : t('update.versionUnknown')}
                 </div>
                 <p className="mt-0.5 text-xs text-gray-400">{updateDescription()}</p>
               </div>
@@ -227,14 +250,14 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                   onClick={() => void runUpdateCommand('update:download')}
                   className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
                 >
-                  Download {updateState.availableVersion}
+                  {t('update.download', { version: updateState.availableVersion ?? '' })}
                 </button>
               ) : updateState?.status === 'ready' ? (
                 <button
-                  onClick={installUpdate}
+                  onClick={() => void installUpdate()}
                   className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
                 >
-                  Restart and update
+                  {t('update.restartAndUpdate')}
                 </button>
               ) : updateState?.status !== 'unsupported' ? (
                 <button
@@ -247,13 +270,26 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                   className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {updateState?.status === 'checking'
-                    ? 'Checking...'
+                    ? t('update.checkingButton')
                     : updateState?.status === 'downloading'
-                      ? `Downloading ${Math.round(updateState.progressPercent ?? 0)}%`
-                      : 'Check for updates'}
+                      ? downloadingLabel(updateState.progressPercent)
+                      : t('update.check')}
                 </button>
               ) : null}
             </div>
+            <label className="mt-2 flex cursor-pointer items-center justify-between py-1">
+              <span className="text-sm text-gray-700">
+                {t('update.auto')}
+                <span className="block text-xs text-gray-400">{t('update.autoDescription')}</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={updateState?.autoUpdate ?? false}
+                disabled={!updateState || updateState.status === 'unsupported'}
+                onChange={(e) => void setAutoUpdate(e.target.checked)}
+                className="h-4 w-4 shrink-0 rounded accent-blue-600 disabled:cursor-not-allowed"
+              />
+            </label>
           </section>
         </div>
 
@@ -262,7 +298,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
             onClick={onClose}
             className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
           >
-            Done
+            {t('common.done')}
           </button>
         </div>
       </div>

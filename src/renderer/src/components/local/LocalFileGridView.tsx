@@ -18,6 +18,7 @@ import { itemIndicesInRect } from '@renderer/lib/gridGeometry'
 import { isRootPath } from '@renderer/lib/localPath'
 import { currentPlatform, isToggleSelectModifier, isZoomModifier } from '@renderer/lib/platform'
 import { filterHidden } from '@renderer/lib/utils'
+import { useT } from '@renderer/i18n'
 import { LocalFileContextMenu } from './LocalFileContextMenu'
 import { LocalFilePropertiesDialog } from './LocalFilePropertiesDialog'
 import type { LocalFileEntry } from '@shared/types/local'
@@ -63,6 +64,7 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
   const releaseMenu = useContextMenuStore((s) => s.close)
 
   const showHidden = useSettingsStore((s) => s.showHidden)
+  const t = useT()
   const galleryThumbSize = useSettingsStore((s) => s.galleryThumbSize)
   const adjustGalleryThumbSize = useSettingsStore((s) => s.adjustGalleryThumbSize)
 
@@ -334,7 +336,7 @@ export function LocalFileGridView({ gallery = false }: LocalFileGridViewProps): 
 
       {sorted.length === 0 && !hasParentRow && (
         <div className="flex items-center justify-center py-8 text-sm text-gray-400">
-          Empty directory
+          {t('explorer.empty')}
         </div>
       )}
 

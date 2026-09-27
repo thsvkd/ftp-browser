@@ -4,6 +4,7 @@ import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
 import { FolderCountBadge } from './FolderCountBadge'
+import { useT } from '@renderer/i18n'
 import type { IpcResult } from '@shared/types/ipc'
 import type { RemoteFolderPreview } from '@shared/types/gallery'
 
@@ -109,6 +110,7 @@ function RemoteFolderPreviewImage({
   const innerPath = folderPath === '/' ? `/${preview.name}` : `${folderPath}/${preview.name}`
   const cacheKey = generateCacheKeyRenderer(host, port, innerPath, preview.size, preview.modifiedAt)
   const thumbnailData = useThumbnailStore((s) => s.thumbnails[cacheKey])
+  const t = useT()
   const requestedRef = useRef(false)
 
   useEffect(() => {
@@ -132,7 +134,7 @@ function RemoteFolderPreviewImage({
       <div className="relative flex h-full w-full items-center justify-center">
         <img
           src={thumbnailData.dataUrl}
-          alt={`${folderPath} preview`}
+          alt={t('preview.folderAlt', { path: folderPath })}
           className="h-full w-full rounded object-contain"
           loading="lazy"
         />

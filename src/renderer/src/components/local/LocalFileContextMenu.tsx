@@ -3,15 +3,16 @@ import { toast } from 'sonner'
 import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
-import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { joinLocalPath } from '@renderer/lib/localPath'
 import { joinRemotePath } from '@renderer/lib/remoteDrop'
 import { clampMenuPosition, type MenuPlacement } from '@renderer/lib/menuPosition'
-import { isSafeLocalName, INVALID_LOCAL_NAME_MESSAGE } from '@shared/entryName'
+import { isSafeLocalName } from '@shared/entryName'
+import { useT } from '@renderer/i18n'
 import type { LocalFileEntry } from '@shared/types/local'
 import type { DeleteTarget } from '@shared/types/operation'
 import type { IpcResult } from '@shared/types/ipc'
+import { confirmDelete } from '@renderer/stores/useConfirmStore'
 
 interface Position {
   x: number
@@ -45,6 +46,7 @@ export function LocalFileContextMenu({
   const [draftName, setDraftName] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
   const [placement, setPlacement] = useState<MenuPlacement | null>(null)
+  const t = useT()
 
   const handleClose = useCallback(() => {
     setEditing(null)
@@ -149,7 +151,7 @@ export function LocalFileContextMenu({
         }))
       )
     } catch (err) {
-      toast.error('Failed to enqueue upload', {
+      toast.error(t('toast.uploadFailed'), {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -159,11 +161,7 @@ export function LocalFileContextMenu({
 
   const handleDelete = async (): Promise<void> => {
     if (selectedEntries.length === 0) return
-    const confirmBeforeDelete = useSettingsStore.getState().confirmBeforeDelete
-    const msg = isMulti
-      ? `Delete ${selectedEntries.length} items?`
-      : `Delete "${selectedEntries[0].name}"?`
-    if (confirmBeforeDelete && !window.confirm(msg)) {
+    if (!(await confirmDelete(selectedEntries))) {
       handleClose()
       return
     }
@@ -176,10 +174,10 @@ export function LocalFileContextMenu({
     try {
       const result = await window.api.invoke<IpcResult<void>>('local:deleteBatch', deleteTargets)
       if (!result.success) {
-        toast.error('Failed to delete', { description: result.error })
+        toast.error(t('toast.deleteFailed'), { description: result.error })
       }
     } catch (err) {
-      toast.error('Failed to delete', {
+      toast.error(t('toast.deleteFailed'), {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -207,7 +205,7 @@ export function LocalFileContextMenu({
       return
     }
     if (!isSafeLocalName(name)) {
-      toast.error('Invalid name', { description: INVALID_LOCAL_NAME_MESSAGE })
+      toast.error(t('toast.invalidName'), { description: t('name.invalidLocal') })
       handleClose()
       return
     }
@@ -220,10 +218,10 @@ export function LocalFileContextMenu({
         joinLocalPath(currentPath, name)
       )
       if (!result.success) {
-        toast.error('Failed to rename', { description: result.error })
+        toast.error(t('toast.renameFailed'), { description: result.error })
       }
     } catch (err) {
-      toast.error('Failed to rename', {
+      toast.error(t('toast.renameFailed'), {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -239,7 +237,7 @@ export function LocalFileContextMenu({
       return
     }
     if (!isSafeLocalName(name)) {
-      toast.error('Invalid name', { description: INVALID_LOCAL_NAME_MESSAGE })
+      toast.error(t('toast.invalidName'), { description: t('name.invalidLocal') })
       handleClose()
       return
     }
@@ -249,10 +247,10 @@ export function LocalFileContextMenu({
         joinLocalPath(currentPath, name)
       )
       if (!result.success) {
-        toast.error('Failed to create folder', { description: result.error })
+        toast.error(t('toast.createFolderFailed'), { description: result.error })
       }
     } catch (err) {
-      toast.error('Failed to create folder', {
+      toast.error(t('toast.createFolderFailed'), {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -284,8 +282,8 @@ export function LocalFileContextMenu({
           <input
             type="text"
             value={draftName}
-            aria-label={editing === 'rename' ? 'New name' : 'New folder name'}
-            placeholder={editing === 'newFolder' ? 'New folder name' : undefined}
+            aria-label={editing === 'rename' ? t('menu.newName') : t('menu.newFolderName')}
+            placeholder={editing === 'newFolder' ? t('menu.newFolderName') : undefined}
             onChange={(e) => setDraftName(e.target.value)}
             // D8: Escape 분기는 document keydown 리스너로 통합했다. keydown은 버블링되므로
             // 입력창에서 누른 Escape도 그 리스너에 도달한다.
@@ -305,7 +303,7 @@ export function LocalFileContextMenu({
                   className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
                   onClick={handleUpload}
                 >
-                  {isMulti ? `Upload (${files.length})` : 'Upload'}
+                  {isMulti ? t('menu.uploadMany', { number: files.length }) : t('menu.upload')}
                 </button>
               )}
               {!isMulti && (
@@ -313,14 +311,16 @@ export function LocalFileContextMenu({
                   className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
                   onClick={startRename}
                 >
-                  Rename
+                  {t('menu.rename')}
                 </button>
               )}
               <button
                 className="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
                 onClick={handleDelete}
               >
-                {isMulti ? `Delete (${selectedEntries.length})` : 'Delete'}
+                {isMulti
+                  ? t('menu.deleteMany', { number: selectedEntries.length })
+                  : t('common.delete')}
               </button>
               <div className="my-1 border-t border-gray-100" />
             </>
@@ -329,7 +329,7 @@ export function LocalFileContextMenu({
             className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
             onClick={startNewFolder}
           >
-            New Folder
+            {t('menu.newFolder')}
           </button>
           {!isMulti && entry && onShowProperties && (
             <>
@@ -341,7 +341,7 @@ export function LocalFileContextMenu({
                   handleClose()
                 }}
               >
-                Properties
+                {t('menu.properties')}
               </button>
             </>
           )}

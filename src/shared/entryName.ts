@@ -1,9 +1,5 @@
-/**
- * Rejection reasons shown to the user. Each lives next to its rule so the two
- * cannot drift — a message that omits one of the rejected shapes reads as a bug.
- */
-export const INVALID_LOCAL_NAME_MESSAGE = 'A name cannot contain \\ / or :, or be "." or "..".'
-export const INVALID_REMOTE_NAME_MESSAGE = 'A name cannot contain /, or be "." or "..".'
+// 거부 사유 문구는 renderer 카탈로그의 name.invalidLocal / name.invalidRemote에 있다.
+// 아래 규칙을 바꾸면 그 문구도 함께 고칠 것 — 거부 형태 하나를 빠뜨린 안내는 버그로 읽힌다.
 
 /** Shapes that escape the current directory on any filesystem. */
 function escapesDirectory(trimmed: string): boolean {

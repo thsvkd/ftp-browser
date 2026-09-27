@@ -18,6 +18,7 @@ import { itemIndicesInRect } from '@renderer/lib/gridGeometry'
 import { currentPlatform, isToggleSelectModifier, isZoomModifier } from '@renderer/lib/platform'
 import { joinRemotePath } from '@renderer/lib/remoteDrop'
 import { filterHidden } from '@renderer/lib/utils'
+import { useT } from '@renderer/i18n'
 import { useContextMenuStore, CONTEXT_MENU_OWNERS } from '@renderer/stores/useContextMenuStore'
 import { FileContextMenu } from './FileContextMenu'
 import { FilePropertiesDialog } from './FilePropertiesDialog'
@@ -65,6 +66,7 @@ export function FileGridView({
   const selectAll = useSelectionStore((s) => s.selectAll)
 
   const showHidden = useSettingsStore((s) => s.showHidden)
+  const t = useT()
   const galleryThumbSize = useSettingsStore((s) => s.galleryThumbSize)
   const adjustGalleryThumbSize = useSettingsStore((s) => s.adjustGalleryThumbSize)
 
@@ -365,7 +367,7 @@ export function FileGridView({
 
       {sorted.length === 0 && !hasParentRow && (
         <div className="flex items-center justify-center py-8 text-sm text-gray-400">
-          Empty directory
+          {t('explorer.empty')}
         </div>
       )}
 

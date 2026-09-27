@@ -11,6 +11,7 @@ const INVOKE_CHANNELS = [
   'ftp:getLastServer',
   'ftp:getRecentServers',
   'ftp:deleteServer',
+  'ftp:saveServer',
   'ftp:getRecentPaths',
   'ftp:downloadPreview',
   'ftp:deleteBatch',
@@ -55,6 +56,7 @@ const INVOKE_CHANNELS = [
   'update:getState',
   'update:check',
   'update:download',
+  'update:setAutoUpdate',
   'update:install'
 ] as const
 

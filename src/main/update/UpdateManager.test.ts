@@ -70,7 +70,6 @@ describe('UpdateManager', () => {
     await check
 
     expect(updater.autoDownload).toBe(false)
-    expect(updater.autoInstallOnAppQuit).toBe(false)
     expect(manager.getState()).toMatchObject({
       status: 'available',
       currentVersion: '1.0.5',
@@ -78,6 +77,43 @@ describe('UpdateManager', () => {
     })
     expect(states).toContain('checking')
     expect(states).toContain('available')
+  })
+
+  it('lets electron-updater download and install on quit when automatic updates are on', async () => {
+    const updater = new FakeUpdater()
+    const manager = new UpdateManager('1.0.5', updater, vi.fn(), true)
+
+    expect(updater.autoDownload).toBe(true)
+    expect(manager.getState().autoUpdate).toBe(true)
+    manager.beforeQuit()
+    expect(updater.autoInstallOnAppQuit).toBe(true)
+
+    await manager.setAutoUpdate(false)
+    expect(updater.autoDownload).toBe(false)
+    expect(manager.getState().autoUpdate).toBe(false)
+    manager.beforeQuit()
+    expect(updater.autoInstallOnAppQuit).toBe(false)
+  })
+
+  it('keeps the install-on-quit handler armed so turning auto-update on later still installs', () => {
+    // electron-updater는 다운로드 완료 시점에 이 값이 true여야만 종료 핸들러를 등록한다.
+    const updater = new FakeUpdater()
+    updater.autoInstallOnAppQuit = false
+    const manager = new UpdateManager('1.0.5', updater, vi.fn(), false)
+    expect(updater.autoInstallOnAppQuit).toBe(true)
+    manager.beforeQuit()
+    expect(updater.autoInstallOnAppQuit).toBe(false)
+  })
+
+  it('starts downloading an already-found update when automatic updates are turned on', async () => {
+    const updater = new FakeUpdater()
+    const manager = new UpdateManager('1.0.5', updater, vi.fn())
+    updater.emit('update-available', { version: '1.0.6' })
+
+    await manager.setAutoUpdate(true)
+
+    expect(updater.downloadUpdate).toHaveBeenCalled()
+    expect(manager.getState()).toMatchObject({ status: 'downloading', autoUpdate: true })
   })
 
   it('reports that the current version is up to date', async () => {
@@ -127,6 +163,7 @@ describe('UpdateManager', () => {
     expect(manager.getState()).toEqual({
       status: 'unsupported',
       currentVersion: '1.0.5',
+      autoUpdate: false,
       message: 'Automatic updates are available in the installed Windows version.'
     })
     await expect(manager.check()).resolves.toMatchObject({ status: 'unsupported' })

@@ -5,6 +5,8 @@ import userEvent from '@testing-library/user-event'
 import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useOperationStore } from '@renderer/stores/useOperationStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { ConfirmDialog } from '@renderer/components/common/ConfirmDialog'
 import { SettingsDialog } from './SettingsDialog'
 
 const mockInvoke = vi.fn()
@@ -105,13 +107,19 @@ describe('SettingsDialog updates', () => {
         }
       ]
     })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const user = userEvent.setup()
-    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+    render(
+      <>
+        <SettingsDialog open={true} onClose={vi.fn()} />
+        <ConfirmDialog />
+      </>
+    )
 
     await user.click(await screen.findByRole('button', { name: 'Restart and update' }))
+    await screen.findByRole('alertdialog')
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    expect(confirm).toHaveBeenCalled()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(invokeCalls(mockInvoke, 'update:install')).toHaveLength(0)
   })
 
@@ -136,7 +144,7 @@ describe('SettingsDialog updates', () => {
         {
           id: 'active-copy',
           kind: 'copy',
-          label: 'Copying 3 files',
+          itemCount: 3,
           unit: 'files',
           total: 3,
           completed: 1,
@@ -144,13 +152,19 @@ describe('SettingsDialog updates', () => {
         }
       ]
     })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const user = userEvent.setup()
-    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+    render(
+      <>
+        <SettingsDialog open={true} onClose={vi.fn()} />
+        <ConfirmDialog />
+      </>
+    )
 
     await user.click(await screen.findByRole('button', { name: 'Restart and update' }))
+    await screen.findByRole('alertdialog')
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    expect(confirm).toHaveBeenCalled()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(invokeCalls(mockInvoke, 'update:install')).toHaveLength(0)
   })
 
@@ -180,15 +194,25 @@ describe('SettingsDialog updates', () => {
   // 어떤 단언도 닿지 않는다.
   it.each([
     [{ status: 'idle' }, 'Updates are checked when the app starts.'],
-    [{ status: 'checking' }, 'Checking for updates...'],
+    [{ status: 'checking' }, 'Checking for updates…'],
     [{ status: 'available', availableVersion: '1.0.6' }, 'Version 1.0.6 is available.'],
     [{ status: 'downloading', progressPercent: 42.4 }, 'Downloading 42%'],
     [{ status: 'ready', availableVersion: '1.0.6' }, 'Version 1.0.6 is ready to install.'],
     [{ status: 'up-to-date' }, 'You are using the latest version.'],
-    [{ status: 'error', message: 'network unavailable' }, 'network unavailable'],
-    [{ status: 'error' }, 'Update check failed.'],
-    [{ status: 'unsupported', message: 'Only on Windows.' }, 'Only on Windows.'],
-    [{ status: 'unsupported' }, 'Automatic updates are not available for this build.']
+    [
+      { status: 'error', message: 'network unavailable' },
+      "Couldn't check for updates. network unavailable"
+    ],
+    [{ status: 'error' }, "Couldn't check for updates."],
+    // main이 보내는 영어 message 대신 번역된 문구를 보여 준다.
+    [
+      { status: 'unsupported', message: 'Only on Windows.' },
+      'Automatic updates are available only in the installed Windows version.'
+    ],
+    [
+      { status: 'unsupported' },
+      'Automatic updates are available only in the installed Windows version.'
+    ]
   ])('describes the %o updater state to the user', async (state, expected) => {
     mockInvoke.mockImplementation((channel: string) => {
       if (channel === 'cache:getStats') {
@@ -204,5 +228,23 @@ describe('SettingsDialog updates', () => {
     // downloading은 설명과 버튼이 같은 문자열을 쓴다. selector로 설명 문단만 겨냥해야
     // updateDescription이 빈 문자열을 돌려줘도 버튼 쪽 텍스트에 가려지지 않는다.
     expect(await screen.findByText(expected, { selector: 'p' })).not.toBeNull()
+  })
+})
+
+describe('SettingsDialog localization', () => {
+  afterEach(() => {
+    useSettingsStore.setState({ language: 'system' })
+  })
+
+  it('renders in Korean when the language setting is ko', async () => {
+    useSettingsStore.setState({ language: 'ko' })
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    expect(await screen.findByText('버전 1.0.5')).not.toBeNull()
+    expect(screen.getByRole('heading', { name: '설정' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: '업데이트 확인' })).not.toBeNull()
+    expect(
+      screen.getByText('앱을 시작할 때 업데이트를 확인합니다.', { selector: 'p' })
+    ).not.toBeNull()
   })
 })

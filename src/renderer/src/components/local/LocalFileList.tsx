@@ -10,6 +10,7 @@ import { currentPlatform, isToggleSelectModifier } from '@renderer/lib/platform'
 import { LocalFileContextMenu } from './LocalFileContextMenu'
 import { LocalFilePropertiesDialog } from './LocalFilePropertiesDialog'
 import { formatBytes, formatDate, filterHidden } from '@renderer/lib/utils'
+import { useT } from '@renderer/i18n'
 import type { LocalFileEntry } from '@shared/types/local'
 
 // Module-scoped so positions survive the remount that navigation triggers.
@@ -44,6 +45,7 @@ export function LocalFileList(): React.JSX.Element {
   const releaseMenu = useContextMenuStore((s) => s.close)
 
   const showHidden = useSettingsStore((s) => s.showHidden)
+  const t = useT()
   const scrollRef = useRef<HTMLDivElement>(null)
   useScrollRestoration(scrollRef, currentPath, SCROLL_POSITIONS)
 
@@ -144,9 +146,9 @@ export function LocalFileList(): React.JSX.Element {
       <table className="w-full text-left text-sm">
         <thead className="sticky top-0 bg-gray-100 text-xs text-gray-500">
           <tr>
-            <th className="px-3 py-2 font-medium">Name</th>
-            <th className="w-24 px-3 py-2 text-right font-medium">Size</th>
-            <th className="w-44 px-3 py-2 font-medium">Modified</th>
+            <th className="px-3 py-2 font-medium">{t('file.name')}</th>
+            <th className="w-24 px-3 py-2 text-right font-medium">{t('file.size')}</th>
+            <th className="w-44 px-3 py-2 font-medium">{t('file.modified')}</th>
           </tr>
         </thead>
         <tbody>
@@ -195,7 +197,7 @@ export function LocalFileList(): React.JSX.Element {
           {sorted.length === 0 && (
             <tr>
               <td colSpan={3} className="px-3 py-8 text-center text-gray-400">
-                Empty directory
+                {t('explorer.empty')}
               </td>
             </tr>
           )}

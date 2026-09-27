@@ -114,7 +114,7 @@ describe('LocalFilePropertiesDialog — fields', () => {
     }
 
     // 대소문자 규칙 같은 계약 밖 세부에는 결합하지 않고 의미만 단언한다.
-    expect(labels.directory).toMatch(/director/i)
+    expect(labels.directory).toMatch(/folder/i)
     expect(labels.image).toMatch(/image/i)
     expect(labels.image).toMatch(/png/i)
     expect(labels.extension).toMatch(/txt/i)
@@ -142,7 +142,7 @@ describe('LocalFilePropertiesDialog — fields', () => {
     expect(screen.queryByText('Size')).toBeNull()
     // 대조군: 다이얼로그는 떠 있고 다른 행은 그대로다. 렌더 실패로 인한 통과가 아니다.
     expect(propertyValue('Name')).toBe('docs')
-    expect(propertyValue('Type')).toMatch(/director/i)
+    expect(propertyValue('Type')).toMatch(/folder/i)
 
     // 파일에는 Size가 나온다 — 조건이 통째로 참이 되거나 거짓이 되는 변형을 함께 잡는다.
     cleanup()

@@ -5,8 +5,10 @@ export type OperationUnit = 'files' | 'bytes'
 export interface OperationJob {
   id: string
   kind: OperationKind
-  /** Human-readable summary, e.g. "Copying 3 files" or "Deleting photo.jpg". */
-  label: string
+  /** How many top-level items the user acted on; the renderer builds the localized summary from it. */
+  itemCount: number
+  /** Name of the single item when {@link itemCount} is 1 (e.g. "Deleting photo.jpg"). */
+  itemName?: string
   /** Whether {@link total}/{@link completed} are measured in files or bytes. */
   unit: OperationUnit
   total: number

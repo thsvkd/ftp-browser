@@ -65,6 +65,7 @@ describe('preload api', () => {
       'update:getState',
       'update:check',
       'update:download',
+      'update:setAutoUpdate',
       'update:install'
     ]) {
       await invoke(channel)
@@ -82,5 +83,15 @@ describe('preload api', () => {
     unsubscribe()
     expect(ipcRenderer.removeListener).toHaveBeenCalledWith('update:stateChanged', listener)
     await expect(invoke('update:notAllowed')).rejects.toThrow('IPC channel not allowed')
+  })
+
+  it('should allow saving a server without connecting', async () => {
+    const api = await loadExposedApi()
+    const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>
+    const server = { name: 'NAS', host: 'nas.local', port: 21 }
+
+    await invoke('ftp:saveServer', server)
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('ftp:saveServer', server)
   })
 })

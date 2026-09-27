@@ -15,6 +15,8 @@ import { ViewModeToggle } from '@renderer/components/common/ViewModeToggle'
 import { useTypeAhead } from '@renderer/hooks/useTypeAhead'
 import { sortForDisplay } from '@renderer/lib/typeAhead'
 import { filterHidden } from '@renderer/lib/utils'
+import { confirmDelete } from '@renderer/stores/useConfirmStore'
+import { useT } from '@renderer/i18n'
 
 export function LocalExplorer(): React.JSX.Element {
   const init = useLocalFsStore((s) => s.init)
@@ -29,6 +31,7 @@ export function LocalExplorer(): React.JSX.Element {
   const viewMode = useSettingsStore((s) => s.localViewMode)
   const setViewMode = useSettingsStore((s) => s.setLocalViewMode)
   const clearLocalFolderPreviews = useGalleryStore((s) => s.clearLocal)
+  const t = useT()
 
   const [isDragOver, setIsDragOver] = useState(false)
   const dragCounterRef = useRef(0)
@@ -101,22 +104,19 @@ export function LocalExplorer(): React.JSX.Element {
     const targets = allEntries.filter((en) => sel.has(en.name))
     if (targets.length === 0) return
 
-    const confirmBeforeDelete = useSettingsStore.getState().confirmBeforeDelete
-    const msg =
-      targets.length === 1 ? `Delete "${targets[0].name}"?` : `Delete ${targets.length} items?`
-    if (confirmBeforeDelete && !window.confirm(msg)) return
+    if (!(await confirmDelete(targets))) return
 
-    const deleteTargets: DeleteTarget[] = targets.map((t) => ({
-      path: t.path,
-      isDirectory: t.type === 'directory'
+    const deleteTargets: DeleteTarget[] = targets.map((target) => ({
+      path: target.path,
+      isDirectory: target.type === 'directory'
     }))
     try {
       const result = await window.api.invoke<IpcResult<void>>('local:deleteBatch', deleteTargets)
       if (!result.success) {
-        toast.error('Failed to delete', { description: result.error })
+        toast.error(t('toast.deleteFailed'), { description: result.error })
       }
     } catch (err) {
-      toast.error('Failed to delete', {
+      toast.error(t('toast.deleteFailed'), {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -198,7 +198,7 @@ export function LocalExplorer(): React.JSX.Element {
         }
       }
     } catch (err) {
-      toast.error('Failed to enqueue download', {
+      toast.error(t('toast.downloadFailed'), {
         description: err instanceof Error ? err.message : String(err)
       })
     }
@@ -216,7 +216,7 @@ export function LocalExplorer(): React.JSX.Element {
       onDrop={handleDrop}
     >
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-100 px-3 py-1">
-        <span className="text-xs font-medium text-gray-500">LOCAL</span>
+        <span className="text-xs font-medium uppercase text-gray-500">{t('explorer.local')}</span>
         <ViewModeToggle mode={viewMode} onChange={setViewMode} />
       </div>
       {currentPath && <LocalBreadcrumb />}
@@ -224,13 +224,13 @@ export function LocalExplorer(): React.JSX.Element {
       {isDragOver && (
         <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-blue-50/50">
           <div className="rounded-lg bg-blue-100 px-6 py-4 text-sm font-medium text-blue-700 shadow">
-            Drop files here to save
+            {t('explorer.dropToSave')}
           </div>
         </div>
       )}
       {loading ? (
         <div className="flex flex-1 items-center justify-center">
-          <div className="text-sm text-gray-400">Loading...</div>
+          <div className="text-sm text-gray-400">{t('common.loading')}</div>
         </div>
       ) : viewMode === 'list' ? (
         <LocalFileList />

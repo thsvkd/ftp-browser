@@ -5,6 +5,7 @@ import {
   buildLocalThumbnailKey
 } from '@renderer/stores/useLocalThumbnailStore'
 import { FolderCountBadge } from './FolderCountBadge'
+import { useT } from '@renderer/i18n'
 import type { IpcResult } from '@shared/types/ipc'
 import type { LocalFolderPreview } from '@shared/types/gallery'
 
@@ -97,6 +98,7 @@ function LocalFolderPreviewImage({
 }: PreviewImageProps): React.JSX.Element {
   const cacheKey = buildLocalThumbnailKey(preview.path, preview.size, preview.modifiedAt)
   const thumbnailData = useLocalThumbnailStore((s) => s.thumbnails[cacheKey])
+  const t = useT()
   const requestedRef = useRef(false)
 
   useEffect(() => {
@@ -118,7 +120,7 @@ function LocalFolderPreviewImage({
       <div className="relative flex h-full w-full items-center justify-center">
         <img
           src={thumbnailData.dataUrl}
-          alt={`${folderPath} preview`}
+          alt={t('preview.folderAlt', { path: folderPath })}
           className="h-full w-full rounded object-contain"
           loading="lazy"
         />

@@ -3,12 +3,13 @@ import { toast } from 'sonner'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
-import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { clampMenuPosition, type MenuPlacement } from '@renderer/lib/menuPosition'
-import { isSafeRemoteName, INVALID_REMOTE_NAME_MESSAGE } from '@shared/entryName'
+import { isSafeRemoteName } from '@shared/entryName'
+import { useT } from '@renderer/i18n'
 import type { FtpFileEntry } from '@shared/types/ftp'
 import type { DeleteTarget } from '@shared/types/operation'
 import type { IpcResult } from '@shared/types/ipc'
+import { confirmDelete } from '@renderer/stores/useConfirmStore'
 
 interface Position {
   x: number
@@ -38,6 +39,7 @@ export function FileContextMenu({
   const [newName, setNewName] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
   const [placement, setPlacement] = useState<MenuPlacement | null>(null)
+  const t = useT()
 
   const handleClose = useCallback(() => {
     setEditing(null)
@@ -149,18 +151,17 @@ export function FileContextMenu({
 
   const handleDelete = async (): Promise<void> => {
     if (selectedEntries.length === 0) return
-    const confirmBeforeDelete = useSettingsStore.getState().confirmBeforeDelete
-    const msg = isMulti
-      ? `Delete ${selectedEntries.length} items?`
-      : `Delete "${selectedEntries[0].name}"?`
-    if (confirmBeforeDelete && !window.confirm(msg)) return
+    if (!(await confirmDelete(selectedEntries))) {
+      handleClose()
+      return
+    }
     const deleteTargets: DeleteTarget[] = selectedEntries.map((e) => ({
       path: buildRemotePath(e.name),
       isDirectory: e.type === 'directory'
     }))
     const result = await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', deleteTargets)
     if (!result.success) {
-      toast.error('Failed to delete', { description: result.error })
+      toast.error(t('toast.deleteFailed'), { description: result.error })
     }
     clearSelection()
     refresh()
@@ -185,7 +186,7 @@ export function FileContextMenu({
       return
     }
     if (!isSafeRemoteName(name)) {
-      toast.error('Invalid name', { description: INVALID_REMOTE_NAME_MESSAGE })
+      toast.error(t('toast.invalidName'), { description: t('name.invalidRemote') })
       handleClose()
       return
     }
@@ -198,10 +199,10 @@ export function FileContextMenu({
         buildRemotePath(name)
       )
       if (!result.success) {
-        toast.error('Failed to rename', { description: result.error })
+        toast.error(t('toast.renameFailed'), { description: result.error })
       }
     } catch (err) {
-      toast.error('Failed to rename', {
+      toast.error(t('toast.renameFailed'), {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -217,17 +218,17 @@ export function FileContextMenu({
       return
     }
     if (!isSafeRemoteName(name)) {
-      toast.error('Invalid name', { description: INVALID_REMOTE_NAME_MESSAGE })
+      toast.error(t('toast.invalidName'), { description: t('name.invalidRemote') })
       handleClose()
       return
     }
     try {
       const result = await window.api.invoke<IpcResult<void>>('ftp:mkdir', buildRemotePath(name))
       if (!result.success) {
-        toast.error('Failed to create folder', { description: result.error })
+        toast.error(t('toast.createFolderFailed'), { description: result.error })
       }
     } catch (err) {
-      toast.error('Failed to create folder', {
+      toast.error(t('toast.createFolderFailed'), {
         description: err instanceof Error ? err.message : String(err)
       })
     } finally {
@@ -259,8 +260,8 @@ export function FileContextMenu({
           <input
             type="text"
             value={newName}
-            aria-label={editing === 'rename' ? 'New name' : 'New folder name'}
-            placeholder={editing === 'newFolder' ? 'New folder name' : undefined}
+            aria-label={editing === 'rename' ? t('menu.newName') : t('menu.newFolderName')}
+            placeholder={editing === 'newFolder' ? t('menu.newFolderName') : undefined}
             onChange={(e) => setNewName(e.target.value)}
             // D8: Escape 분기는 document keydown 리스너로 통합했다. keydown은 버블링되므로
             // 입력창에서 누른 Escape도 그 리스너에 도달한다.
@@ -281,8 +282,10 @@ export function FileContextMenu({
                   onClick={handleDownload}
                 >
                   {isMulti
-                    ? `Download (${selectedEntries.filter((e) => e.type === 'file').length})`
-                    : 'Download'}
+                    ? t('menu.downloadMany', {
+                        number: selectedEntries.filter((e) => e.type === 'file').length
+                      })
+                    : t('menu.download')}
                 </button>
               )}
               {!isMulti && (
@@ -290,14 +293,16 @@ export function FileContextMenu({
                   className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
                   onClick={handleRename}
                 >
-                  Rename
+                  {t('menu.rename')}
                 </button>
               )}
               <button
                 className="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
                 onClick={handleDelete}
               >
-                {isMulti ? `Delete (${selectedEntries.length})` : 'Delete'}
+                {isMulti
+                  ? t('menu.deleteMany', { number: selectedEntries.length })
+                  : t('common.delete')}
               </button>
               <div className="my-1 border-t border-gray-100" />
             </>
@@ -306,7 +311,7 @@ export function FileContextMenu({
             className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
             onClick={startNewFolder}
           >
-            New Folder
+            {t('menu.newFolder')}
           </button>
           {!isMulti && entry && onShowProperties && (
             <>
@@ -318,7 +323,7 @@ export function FileContextMenu({
                   handleClose()
                 }}
               >
-                Properties
+                {t('menu.properties')}
               </button>
             </>
           )}

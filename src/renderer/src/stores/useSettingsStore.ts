@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { THUMBNAIL_SIZE } from '@shared/constants'
+import type { LanguageSetting } from '@renderer/i18n'
 
 export type ViewMode = 'list' | 'grid' | 'gallery'
 
@@ -25,6 +26,7 @@ interface SettingsStore {
   galleryThumbSize: number
   showHidden: boolean
   confirmBeforeDelete: boolean
+  language: LanguageSetting
 
   setRemoteViewMode: (mode: ViewMode) => void
   setLocalViewMode: (mode: ViewMode) => void
@@ -32,6 +34,7 @@ interface SettingsStore {
   adjustGalleryThumbSize: (delta: number) => void
   setShowHidden: (show: boolean) => void
   setConfirmBeforeDelete: (confirm: boolean) => void
+  setLanguage: (language: LanguageSetting) => void
 }
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -42,6 +45,7 @@ export const useSettingsStore = create<SettingsStore>()(
       galleryThumbSize: GALLERY_THUMB_DEFAULT,
       showHidden: false,
       confirmBeforeDelete: true,
+      language: 'system',
 
       setRemoteViewMode: (mode) => set({ remoteViewMode: mode }),
       setLocalViewMode: (mode) => set({ localViewMode: mode }),
@@ -49,7 +53,8 @@ export const useSettingsStore = create<SettingsStore>()(
       adjustGalleryThumbSize: (delta) =>
         set((s) => ({ galleryThumbSize: clampThumbSize(s.galleryThumbSize + delta) })),
       setShowHidden: (show) => set({ showHidden: show }),
-      setConfirmBeforeDelete: (confirm) => set({ confirmBeforeDelete: confirm })
+      setConfirmBeforeDelete: (confirm) => set({ confirmBeforeDelete: confirm }),
+      setLanguage: (language) => set({ language })
     }),
     {
       name: 'ftp-browser-settings',

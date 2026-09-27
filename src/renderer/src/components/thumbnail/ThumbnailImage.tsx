@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
+import { useT } from '@renderer/i18n'
 import type { FtpFileEntry } from '@shared/types/ftp'
 
 interface ThumbnailImageProps {
@@ -18,6 +19,7 @@ export function ThumbnailImage({ entry }: ThumbnailImageProps): React.JSX.Elemen
   const thumbnailData = useThumbnailStore((s) => s.thumbnails[cacheKey])
   const thumbnailError = useThumbnailStore((s) => s.errors[cacheKey])
   const clearError = useThumbnailStore((s) => s.clearError)
+  const t = useT()
   const ref = useRef<HTMLDivElement>(null)
   const requestedRef = useRef(false)
 
@@ -79,7 +81,7 @@ export function ThumbnailImage({ entry }: ThumbnailImageProps): React.JSX.Elemen
           requestedRef.current = false
           requestThumbnail()
         }}
-        title={`Error: ${thumbnailError}\nClick to retry`}
+        title={t('thumbnail.retry', { reason: thumbnailError })}
       >
         ↻
       </div>

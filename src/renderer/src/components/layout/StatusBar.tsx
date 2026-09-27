@@ -3,6 +3,7 @@ import { Database, Trash2 } from 'lucide-react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { formatBytes, filterHidden } from '@renderer/lib/utils'
+import { useT } from '@renderer/i18n'
 import type { IpcResult } from '@shared/types/ipc'
 
 interface CacheStats {
@@ -15,6 +16,7 @@ export function StatusBar(): React.JSX.Element {
   const entries = useFtpStore((s) => s.entries)
   const currentPath = useFtpStore((s) => s.currentPath)
   const showHidden = useSettingsStore((s) => s.showHidden)
+  const t = useT()
 
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
   const [clearing, setClearing] = useState(false)
@@ -52,7 +54,11 @@ export function StatusBar(): React.JSX.Element {
       <div>
         {connectionStatus === 'connected' && (
           <span>
-            {currentPath} — {dirCount} directories, {fileCount} files
+            {t('status.location', {
+              path: currentPath,
+              folders: t('status.folderCount', { count: dirCount }),
+              files: t('status.fileCount', { count: fileCount })
+            })}
           </span>
         )}
       </div>
@@ -61,21 +67,24 @@ export function StatusBar(): React.JSX.Element {
           <div className="flex items-center gap-1.5">
             <Database size={12} className="text-gray-400" />
             <span>
-              Cache: {cacheStats.totalCount} items ({formatBytes(cacheStats.totalBytes)})
+              {t('status.cache', {
+                count: cacheStats.totalCount,
+                size: formatBytes(cacheStats.totalBytes)
+              })}
             </span>
             {cacheStats.totalCount > 0 && (
               <button
                 onClick={handleClearCache}
                 disabled={clearing}
                 className="ml-0.5 rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-red-500 disabled:opacity-50"
-                title="Clear thumbnail cache"
+                title={t('status.clearCache')}
               >
                 <Trash2 size={12} />
               </button>
             )}
           </div>
         )}
-        <span className="capitalize">{connectionStatus}</span>
+        <span>{t(`status.${connectionStatus}`)}</span>
       </div>
     </div>
   )

@@ -49,29 +49,31 @@ export class UpdateManager {
   constructor(
     currentVersion: string,
     private readonly updater: UpdateClient | null,
-    private readonly emitState: (state: UpdateState) => void
+    private readonly emitState: (state: UpdateState) => void,
+    private autoUpdate = false
   ) {
     this.state = updater
-      ? { status: 'idle', currentVersion }
+      ? { status: 'idle', currentVersion, autoUpdate }
       : {
           status: 'unsupported',
           currentVersion,
+          autoUpdate,
           message: 'Automatic updates are available in the installed Windows version.'
         }
 
     if (!updater) return
 
-    updater.autoDownload = false
-    updater.autoInstallOnAppQuit = false
+    this.applyAutoUpdate()
     updater.on('update-available', (info) => {
       this.setState({
         status: 'available',
         currentVersion,
+        autoUpdate: this.autoUpdate,
         availableVersion: info.version
       })
     })
     updater.on('update-not-available', () => {
-      this.setState({ status: 'up-to-date', currentVersion })
+      this.setState({ status: 'up-to-date', currentVersion, autoUpdate: this.autoUpdate })
     })
     updater.on('download-progress', (progress) => {
       this.setState({
@@ -84,6 +86,7 @@ export class UpdateManager {
       this.setState({
         status: 'ready',
         currentVersion,
+        autoUpdate: this.autoUpdate,
         availableVersion: info.version,
         progressPercent: 100
       })
@@ -102,9 +105,17 @@ export class UpdateManager {
       return this.getState()
     }
 
-    this.setState({ status: 'checking', currentVersion: this.state.currentVersion })
+    this.setState({
+      status: 'checking',
+      currentVersion: this.state.currentVersion,
+      autoUpdate: this.autoUpdate
+    })
     try {
-      await this.updater.checkForUpdates()
+      const result = (await this.updater.checkForUpdates()) as {
+        downloadPromise?: Promise<unknown>
+      } | null
+      // 자동 다운로드 실패는 'error' 이벤트로 이미 알리므로, 같은 실패의 promise는 삼킨다.
+      result?.downloadPromise?.catch(() => undefined)
     } catch (error) {
       this.setError(error)
     }
@@ -123,15 +134,46 @@ export class UpdateManager {
     return this.getState()
   }
 
+  /**
+   * On: electron-updater downloads a found update by itself and installs it on quit, so the
+   * next launch is already the new version. Turning it on while an update is only
+   * `available` starts that download now.
+   */
+  async setAutoUpdate(enabled: boolean): Promise<UpdateState> {
+    this.autoUpdate = enabled
+    this.applyAutoUpdate()
+    this.setState({ ...this.state, autoUpdate: enabled })
+    if (enabled) return this.download()
+    return this.getState()
+  }
+
   install(): void {
     if (!this.updater || this.state.status !== 'ready') return
     this.updater.quitAndInstall(false, true)
+  }
+
+  /**
+   * electron-updater registers its install-on-quit handler only if `autoInstallOnAppQuit` is
+   * true when a download finishes, then re-reads the flag at quit. So the flag stays true here
+   * (the handler always exists) and {@link beforeQuit} sets the real choice just before quitting —
+   * otherwise an update downloaded before auto-update was turned on would never install.
+   */
+  private applyAutoUpdate(): void {
+    if (!this.updater) return
+    this.updater.autoDownload = this.autoUpdate
+    this.updater.autoInstallOnAppQuit = true
+  }
+
+  /** Call from `app.on('before-quit')`. */
+  beforeQuit(): void {
+    if (this.updater) this.updater.autoInstallOnAppQuit = this.autoUpdate
   }
 
   private setError(error: unknown): void {
     this.setState({
       status: 'error',
       currentVersion: this.state.currentVersion,
+      autoUpdate: this.autoUpdate,
       message: error instanceof Error ? error.message : String(error)
     })
   }

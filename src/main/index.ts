@@ -24,6 +24,7 @@ import { isDebugEnabled, debugRendererArgs, DEVTOOLS_FLAG } from '@shared/debug'
 import { APP_NAME } from '@shared/constants'
 
 const isDev = !app.isPackaged
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 const debugEnabled = isDebugEnabled(process.argv)
 const smokeTestEnabled = isPackagedSmokeTest(process.argv, app.isPackaged)
 const smokeUserDataPath = process.env[PACKAGED_SMOKE_USER_DATA_ENV]
@@ -124,18 +125,29 @@ app.whenReady().then(() => {
     isPortable: process.env.PORTABLE_EXECUTABLE_FILE !== undefined,
     isSmokeTest: smokeTestEnabled
   })
+  const autoUpdateRow = db.prepare("SELECT value FROM settings WHERE key = 'autoUpdate'").get() as
+    | { value: string }
+    | undefined
   const updateManager = new UpdateManager(
     app.getVersion(),
     automaticUpdateSupported ? autoUpdater : null,
     (state) => {
       if (!win.isDestroyed()) win.webContents.send('update:stateChanged', state)
-    }
+    },
+    autoUpdateRow?.value !== '0'
   )
-  registerUpdateHandlers(updateManager)
+  registerUpdateHandlers(updateManager, (enabled) => {
+    db.prepare(
+      "INSERT INTO settings (key, value) VALUES ('autoUpdate', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).run(enabled ? '1' : '0')
+  })
   if (automaticUpdateSupported) {
     win.webContents.once('did-finish-load', () => {
       void updateManager.check()
     })
+    app.on('before-quit', () => updateManager.beforeQuit())
+    // 오래 켜 두는 앱이라 시작 시 한 번만 확인하면 며칠씩 뒤처질 수 있다.
+    setInterval(() => void updateManager.check(), UPDATE_CHECK_INTERVAL_MS)
   }
 
   app.on('activate', () => {

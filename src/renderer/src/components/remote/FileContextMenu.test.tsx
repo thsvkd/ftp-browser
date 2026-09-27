@@ -12,7 +12,7 @@ import {
   menuRoot,
   stubMenuViewport
 } from '@renderer/test/rendererTestUtils'
-import { INVALID_REMOTE_NAME_MESSAGE } from '@shared/entryName'
+import { en } from '@renderer/i18n/locales/en'
 import type { FtpFileEntry } from '@shared/types/ftp'
 import { FileContextMenu } from './FileContextMenu'
 
@@ -80,7 +80,7 @@ function renderMenu(
 /** 메뉴를 열고 인라인 입력에 이름을 넣어 Enter로 제출한다. */
 async function submitInlineName(
   user: ReturnType<typeof userEvent.setup>,
-  trigger: 'Rename' | 'New Folder',
+  trigger: 'Rename…' | 'New folder…',
   name: string
 ): Promise<void> {
   await user.click(screen.getByRole('button', { name: trigger }))
@@ -112,7 +112,7 @@ describe('FileContextMenu — inline name input', () => {
     const user = userEvent.setup()
     renderMenu(null)
 
-    await submitInlineName(user, 'New Folder', 'New Docs')
+    await submitInlineName(user, 'New folder…', 'New Docs')
 
     await waitFor(() => {
       expect(calls('ftp:mkdir')).toEqual([['/remote/dir/New Docs']])
@@ -124,7 +124,7 @@ describe('FileContextMenu — inline name input', () => {
     const user = userEvent.setup()
     renderMenu(ftpFile('a.txt'))
 
-    await submitInlineName(user, 'Rename', 'renamed.txt')
+    await submitInlineName(user, 'Rename…', 'renamed.txt')
 
     await waitFor(() => {
       expect(calls('ftp:rename')).toEqual([['/remote/dir/a.txt', '/remote/dir/renamed.txt']])
@@ -139,19 +139,19 @@ describe('FileContextMenu — inline name input', () => {
     // 여기 목록에 넣으면 안 된다(로컬 Test-82/83과 갈리는 지점).
     for (const unsafe of ['sub/child', '../escape']) {
       renderMenu(ftpFile('a.txt'))
-      await submitInlineName(user, 'Rename', unsafe)
+      await submitInlineName(user, 'Rename…', unsafe)
       expect(calls('ftp:rename')).toEqual([])
       // §6: 위반 시 toast.error로 표면화한다. "거부"는 IPC 미호출과 표면화 둘 다다.
       expect(toastError).toHaveBeenCalledWith('Invalid name', {
-        description: INVALID_REMOTE_NAME_MESSAGE
+        description: en['name.invalidRemote']
       })
       cleanup()
 
       renderMenu(null)
-      await submitInlineName(user, 'New Folder', unsafe)
+      await submitInlineName(user, 'New folder…', unsafe)
       expect(calls('ftp:mkdir')).toEqual([])
       expect(toastError).toHaveBeenCalledWith('Invalid name', {
-        description: INVALID_REMOTE_NAME_MESSAGE
+        description: en['name.invalidRemote']
       })
       cleanup()
     }
@@ -159,7 +159,7 @@ describe('FileContextMenu — inline name input', () => {
     // 대조군: 구분자가 없는 이름은 정상 호출된다. 검증이 통째로 사라지거나
     // 반대로 모든 이름을 거부해도 이 대비에서 잡힌다.
     renderMenu(null)
-    await submitInlineName(user, 'New Folder', 'New Docs')
+    await submitInlineName(user, 'New folder…', 'New Docs')
 
     await waitFor(() => {
       expect(calls('ftp:mkdir')).toEqual([['/remote/dir/New Docs']])
@@ -181,12 +181,12 @@ describe('FileContextMenu — inline input affordances', () => {
     const user = userEvent.setup()
 
     renderMenu(ftpFile('a.txt'))
-    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    await user.click(screen.getByRole('button', { name: 'Rename…' }))
     const renameLabel = textboxLabel()
     cleanup()
 
     renderMenu(null)
-    await user.click(screen.getByRole('button', { name: 'New Folder' }))
+    await user.click(screen.getByRole('button', { name: 'New folder…' }))
     const newFolderLabel = textboxLabel()
 
     expect(renameLabel).not.toBe('')
@@ -201,7 +201,7 @@ describe('FileContextMenu — inline input affordances', () => {
     const user = userEvent.setup()
 
     const { onClose } = renderMenu(null)
-    await user.click(screen.getByRole('button', { name: 'New Folder' }))
+    await user.click(screen.getByRole('button', { name: 'New folder…' }))
     await user.type(screen.getByRole('textbox'), 'New Docs{Escape}')
 
     expect(calls('ftp:mkdir')).toEqual([])
@@ -212,7 +212,7 @@ describe('FileContextMenu — inline input affordances', () => {
     // 대조군: 같은 이름을 Enter로 내면 호출된다. "항상 취소" 변형을 잡는다.
     cleanup()
     renderMenu(null)
-    await user.click(screen.getByRole('button', { name: 'New Folder' }))
+    await user.click(screen.getByRole('button', { name: 'New folder…' }))
     await user.type(screen.getByRole('textbox'), 'New Docs{Enter}')
 
     await waitFor(() => {
@@ -227,14 +227,14 @@ describe('FileContextMenu — inline input affordances', () => {
 
     // 1) 그대로 제출
     renderMenu(a)
-    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    await user.click(screen.getByRole('button', { name: 'Rename…' }))
     await user.type(screen.getByRole('textbox'), '{Enter}')
     expect(calls('ftp:rename')).toEqual([])
 
     // 2) 비운 뒤 제출. no-op 제출 후의 잔여 상태에 기대지 않도록 새로 렌더한다.
     cleanup()
     renderMenu(a)
-    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    await user.click(screen.getByRole('button', { name: 'Rename…' }))
     const input = screen.getByRole('textbox')
     await user.clear(input)
     await user.type(input, '{Enter}')
@@ -252,7 +252,7 @@ describe('FileContextMenu — failed IPC results surface as toasts', () => {
     mockInvoke.mockResolvedValue({ success: false, error: '550 Permission denied' })
     renderMenu(ftpFile('a.txt'))
 
-    await submitInlineName(user, 'Rename', 'renamed.txt')
+    await submitInlineName(user, 'Rename…', 'renamed.txt')
 
     await waitFor(() => {
       expect(toastError).toHaveBeenCalledWith('Failed to rename', {
@@ -267,7 +267,7 @@ describe('FileContextMenu — failed IPC results surface as toasts', () => {
     mockInvoke.mockResolvedValue({ success: false, error: '553 Name not allowed' })
     renderMenu(null)
 
-    await submitInlineName(user, 'New Folder', 'New Docs')
+    await submitInlineName(user, 'New folder…', 'New Docs')
 
     await waitFor(() => {
       expect(toastError).toHaveBeenCalledWith('Failed to create folder', {
@@ -324,7 +324,7 @@ describe('FileContextMenu — viewport clamping', () => {
     expect(root.style.top).toBe('500px')
 
     viewportStub.setMenuSize({ width: 160, height: 60 })
-    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    await user.click(screen.getByRole('button', { name: 'Rename…' }))
 
     expect(screen.getByRole('textbox')).not.toBeNull()
     expect(root.style.top).toBe('500px')

@@ -195,7 +195,7 @@ describe('LocalFileList — context menu wiring', () => {
 
     const panel = getPropertiesPanel('C:\\work\\photo.png')
     expect(propertyValue(panel, 'Name')).toBe('photo.png')
-    expect(propertyValue(panel, 'Full Path')).toBe('C:\\work\\photo.png')
+    expect(propertyValue(panel, 'Full path')).toBe('C:\\work\\photo.png')
     expect(propertyValue(panel, 'Size')).toContain(formatBytes(2048))
     expect(propertyValue(panel, 'Modified')).toBe(formatDate(MODIFIED_AT))
   })

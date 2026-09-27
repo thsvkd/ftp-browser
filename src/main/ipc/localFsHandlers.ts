@@ -140,11 +140,11 @@ export function registerLocalFsHandlers(
       }
 
       const totalBytes = work.reduce((sum, w) => sum + w.size, 0)
-      const label =
-        sourcePaths.length === 1
-          ? `Copying ${basename(sourcePaths[0])}`
-          : `Copying ${sourcePaths.length} items`
-      const job = operationManager.create('copy', label, 'bytes', totalBytes)
+      const items = {
+        itemCount: sourcePaths.length,
+        itemName: sourcePaths.length === 1 ? basename(sourcePaths[0]) : undefined
+      }
+      const job = operationManager.create('copy', items, 'bytes', totalBytes)
 
       let copiedBytes = 0
       try {
@@ -180,11 +180,11 @@ export function registerLocalFsHandlers(
   ipcMain.handle(
     'local:deleteBatch',
     async (_event, targets: DeleteTarget[]): Promise<IpcResult<void>> => {
-      const label =
-        targets.length === 1
-          ? `Deleting ${basename(targets[0].path)}`
-          : `Deleting ${targets.length} items`
-      const job = operationManager.create('delete', label, 'files', targets.length)
+      const items = {
+        itemCount: targets.length,
+        itemName: targets.length === 1 ? basename(targets[0].path) : undefined
+      }
+      const job = operationManager.create('delete', items, 'files', targets.length)
 
       try {
         for (let i = 0; i < targets.length; i++) {
