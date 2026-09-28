@@ -44,6 +44,16 @@ portable:
   artifactName: ${name}-${version}-portable.${ext}
 mac:
   artifactName: ${name}-${version}-mac-${arch}.${ext}
+  # No Developer ID yet. Without an identity electron-builder skips signing and
+  # the bundle keeps Electron's linker-only signature with no sealed resources,
+  # which Gatekeeper reports as "damaged" with no way to open it. `-` signs ad hoc
+  # so the seal is valid and users get the normal "Open Anyway" path.
+  identity: '-'
+  # Hardened runtime turns on library validation, and an ad hoc signature has no
+  # Team ID to validate against: dyld refuses to load Electron Framework and the
+  # app aborts at launch. It only matters for notarization, which needs a real
+  # Developer ID anyway — enable it together with one.
+  hardenedRuntime: false
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.

@@ -519,6 +519,15 @@ describe('electron-builder.yml Windows release contract', () => {
     expect(yamlScalar(yamlBlock(yml, 'dmg'), 'artifactName')).toBe(expected)
   })
 
+  it('should sign macOS builds ad hoc without hardened runtime', () => {
+    // identity가 없으면 electron-builder가 서명을 건너뛰어, 받은 앱이 Gatekeeper에서
+    // "손상됨"으로 떠 열 수 없다. ad hoc에 hardened runtime을 켜면 라이브러리 검증이
+    // Electron Framework 로드를 거부해 실행 즉시 중단된다(패키지 앱에서 실측).
+    const mac = yamlBlock(yml, 'mac')
+    expect(yamlScalar(mac, 'identity')).toBe('-')
+    expect(yamlScalar(mac, 'hardenedRuntime')).toBe('false')
+  })
+
   it('should include the platform and architecture in published Linux artifact names', () => {
     const expected = '${name}-${version}-linux-${arch}.${ext}'
     expect(yamlScalar(yamlBlock(yml, 'appImage'), 'artifactName')).toBe(expected)
