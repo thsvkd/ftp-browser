@@ -1,5 +1,7 @@
+import { rename, rm } from 'fs/promises'
 import type { Client } from 'basic-ftp'
 import { FtpConnectionManager } from './FtpConnectionManager'
+import { partialPathFor } from '../utils/partialFile'
 
 export interface ProgressInfo {
   bytes: number
@@ -108,23 +110,36 @@ export class FtpFileOperations {
     this.manager.emit('mutation', { kind: 'upload', remotePath })
   }
 
+  /**
+   * basic-ftp opens the local file with `w` before `RETR` is even sent, and
+   * unlinks it when nothing arrived — so downloading straight to `localPath`
+   * truncates or deletes an existing file when the transfer fails. Download to a
+   * sibling `.part` file and only move it into place once it is complete.
+   */
   async download(
     remotePath: string,
     localPath: string,
     onProgress?: ProgressCallback
   ): Promise<void> {
-    await this.manager.runOnMainClient(async (client) => {
-      if (onProgress) {
-        client.trackProgress((info) => {
-          onProgress({ bytes: info.bytes, bytesOverall: info.bytesOverall })
-        })
-      }
-      try {
-        await client.downloadTo(localPath, remotePath)
-      } finally {
-        client.trackProgress()
-      }
-    })
+    const partPath = partialPathFor(localPath)
+    try {
+      await this.manager.runOnMainClient(async (client) => {
+        if (onProgress) {
+          client.trackProgress((info) => {
+            onProgress({ bytes: info.bytes, bytesOverall: info.bytesOverall })
+          })
+        }
+        try {
+          await client.downloadTo(partPath, remotePath)
+        } finally {
+          client.trackProgress()
+        }
+      })
+      await rename(partPath, localPath)
+    } catch (err) {
+      await rm(partPath, { force: true }).catch(() => undefined)
+      throw err
+    }
   }
 
   async deleteFile(remotePath: string): Promise<void> {

@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import fs from 'fs/promises'
+import os from 'os'
+import path from 'path'
 import { FtpFileOperations } from './FtpFileOperations'
 import type { FtpConnectionManager, FtpMutationEvent } from './FtpConnectionManager'
 
@@ -20,7 +23,8 @@ function createMockManager(): {
 } {
   const mockClient: MockClient = {
     uploadFrom: vi.fn().mockResolvedValue(undefined),
-    downloadTo: vi.fn().mockResolvedValue(undefined),
+    // Like basic-ftp, write the remote bytes to whatever local path it is given.
+    downloadTo: vi.fn(async (localPath: string) => fs.writeFile(localPath, 'remote data')),
     remove: vi.fn().mockResolvedValue(undefined),
     list: vi.fn().mockResolvedValue([]),
     removeEmptyDir: vi.fn().mockResolvedValue(undefined),
@@ -45,13 +49,19 @@ describe('FtpFileOperations', () => {
   let ops: FtpFileOperations
   let mockClient: ReturnType<typeof createMockManager>['client']
   let emit: ReturnType<typeof createMockManager>['emit']
+  let tmpDir: string
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ftp-ops-test-'))
     const mock = createMockManager()
     mockClient = mock.client
     emit = mock.emit
     ops = new FtpFileOperations(mock.manager)
+  })
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true })
   })
 
   describe('upload', () => {
@@ -82,17 +92,45 @@ describe('FtpFileOperations', () => {
   })
 
   describe('download', () => {
-    it('should call downloadTo on the client', async () => {
-      await ops.download('/remote/file.jpg', '/local/file.jpg')
-      expect(mockClient.downloadTo).toHaveBeenCalledWith('/local/file.jpg', '/remote/file.jpg')
+    it('writes the remote file to the local path', async () => {
+      const localPath = path.join(tmpDir, 'file.jpg')
+
+      await ops.download('/remote/file.jpg', localPath)
+
+      expect(mockClient.downloadTo).toHaveBeenCalledWith(expect.any(String), '/remote/file.jpg')
+      expect(await fs.readFile(localPath, 'utf8')).toBe('remote data')
+      expect(await fs.readdir(tmpDir)).toEqual(['file.jpg'])
+    })
+
+    it('replaces an existing local file once the download completes', async () => {
+      const localPath = path.join(tmpDir, 'file.jpg')
+      await fs.writeFile(localPath, 'old')
+
+      await ops.download('/remote/file.jpg', localPath)
+
+      expect(await fs.readFile(localPath, 'utf8')).toBe('remote data')
+    })
+
+    it('keeps an existing local file and leaves no partial file when the download fails', async () => {
+      const localPath = path.join(tmpDir, 'file.jpg')
+      await fs.writeFile(localPath, 'precious')
+      mockClient.downloadTo.mockImplementationOnce(async (partPath: string) => {
+        await fs.writeFile(partPath, 'half')
+        throw new Error('426 Connection closed; transfer aborted')
+      })
+
+      await expect(ops.download('/remote/file.jpg', localPath)).rejects.toThrow('426')
+
+      expect(await fs.readFile(localPath, 'utf8')).toBe('precious')
+      expect(await fs.readdir(tmpDir)).toEqual(['file.jpg'])
     })
 
     it('should clean up progress tracking on error', async () => {
       mockClient.downloadTo.mockRejectedValueOnce(new Error('Download failed'))
 
-      await expect(ops.download('/remote/file.jpg', '/local/file.jpg', vi.fn())).rejects.toThrow(
-        'Download failed'
-      )
+      await expect(
+        ops.download('/remote/file.jpg', path.join(tmpDir, 'file.jpg'), vi.fn())
+      ).rejects.toThrow('Download failed')
 
       expect(mockClient.trackProgress).toHaveBeenLastCalledWith()
     })
@@ -230,7 +268,7 @@ describe('FtpFileOperations', () => {
     })
 
     it('does NOT emit a mutation for download (read-only)', async () => {
-      await ops.download('/remote/a.txt', '/local/a.txt')
+      await ops.download('/remote/a.txt', path.join(tmpDir, 'a.txt'))
       expect(lastMutation()).toBeUndefined()
     })
 
