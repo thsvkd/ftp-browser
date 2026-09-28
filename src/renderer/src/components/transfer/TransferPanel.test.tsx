@@ -69,6 +69,21 @@ describe('TransferPanel batch progress', () => {
     expect(screen.queryByText('c.jpg')).toBeNull()
   })
 
+  it('keeps the second row while a live batch has no active file', async () => {
+    // 파일 사이 간격, 재시도 대기, 앞 배치를 기다리는 배치 모두 active job이 없다.
+    useTransferStore.setState({
+      jobs: [
+        job({ id: 'done', batchId: 'b', fileName: 'a.jpg', status: 'completed' }),
+        job({ id: 'next', batchId: 'b', fileName: 'b.jpg', status: 'pending' })
+      ]
+    })
+
+    render(<TransferPanel />)
+    await userEvent.setup().click(screen.getByText(/Transfers/))
+
+    expect(screen.getByText('b.jpg')).toBeTruthy()
+  })
+
   it('keeps a single-file transfer as one progress row', async () => {
     useTransferStore.setState({
       jobs: [job({ id: 'single', fileName: 'only.jpg', status: 'active', transferredBytes: 40 })]

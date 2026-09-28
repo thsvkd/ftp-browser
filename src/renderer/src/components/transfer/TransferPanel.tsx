@@ -141,8 +141,12 @@ function BatchRows({
       ? percent(transferredBytes, totalBytes)
       : percent(jobs.filter((job) => job.status === 'completed').length, jobs.length)
   const completedCount = jobs.filter((job) => job.status === 'completed').length
-  const currentJob = jobs.find((job) => job.status === 'active')
   const isLive = status === 'active' || status === 'pending'
+  // 파일과 파일 사이(다음 파일 시작 전, 재시도 대기 중)나 대기 중인 배치에서도 두 번째 줄을
+  // 유지해야 한다. 줄이 사라졌다 나타나면 전송 패널 높이가 떨린다.
+  const currentJob = isLive
+    ? (jobs.find((job) => job.status === 'active') ?? jobs.find((job) => job.status === 'pending'))
+    : undefined
   const direction = jobs[0].direction
   const t = useT()
 
