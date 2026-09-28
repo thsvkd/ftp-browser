@@ -1,5 +1,5 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
-import { stat, mkdir } from 'fs/promises'
+import { stat, mkdir, realpath } from 'fs/promises'
 import { basename, join, dirname, resolve, sep } from 'path'
 import { LocalFileSystem } from '../local/LocalFileSystem'
 import { OperationManager } from '../operation/OperationManager'
@@ -14,8 +14,11 @@ interface CopyWorkItem {
   size: number
 }
 
-function isSameOrInside(child: string, parent: string): boolean {
-  return child === parent || child.startsWith(parent + sep)
+export function isSameOrInside(child: string, parent: string): boolean {
+  // A root (`/`, `C:\`) already ends in a separator; appending another would
+  // make nothing below it match.
+  const prefix = parent.endsWith(sep) ? parent : parent + sep
+  return child === parent || child.startsWith(prefix)
 }
 
 export function registerLocalFsHandlers(
@@ -133,7 +136,8 @@ export function registerLocalFsHandlers(
           // Dropping an item into the folder it already lives in (e.g. from
           // Finder) has nothing to copy.
           if (resolve(destDir, name) === resolve(src)) continue
-          if (st.isDirectory() && isSameOrInside(resolve(destDir), resolve(src))) {
+          // Compare real paths so a symlink into the folder cannot slip past.
+          if (st.isDirectory() && isSameOrInside(await realpath(destDir), await realpath(src))) {
             throw new Error(`Cannot copy a folder into itself: ${name}`)
           }
           if (st.isDirectory()) {
@@ -148,6 +152,7 @@ export function registerLocalFsHandlers(
       } catch (err) {
         return ipcError(err)
       }
+      if (work.length === 0) return { success: true, data: undefined }
 
       const totalBytes = work.reduce((sum, w) => sum + w.size, 0)
       const items = {

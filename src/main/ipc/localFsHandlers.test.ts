@@ -15,7 +15,7 @@ vi.mock('electron', () => ({
 
 import { ipcMain } from 'electron'
 import type { BrowserWindow } from 'electron'
-import { registerLocalFsHandlers } from './localFsHandlers'
+import { isSameOrInside, registerLocalFsHandlers } from './localFsHandlers'
 import { OperationManager } from '../operation/OperationManager'
 import type { IpcResult } from '@shared/types/ipc'
 
@@ -139,5 +139,57 @@ describe('localFsHandlers', () => {
       expect(result.success).toBe(false)
       expect(await fs.readdir(inner)).toEqual([])
     })
+
+    it.skipIf(process.platform === 'win32')(
+      'refuses to copy a folder into itself through a symlinked destination',
+      async () => {
+        const dir = path.join(tmpDir, 'photos')
+        const inner = path.join(dir, 'inner')
+        await fs.mkdir(inner, { recursive: true })
+        await fs.symlink(dir, path.join(tmpDir, 'link'))
+
+        const result = await handler('local:copyFiles')(
+          null,
+          [dir],
+          path.join(tmpDir, 'link', 'inner')
+        )
+
+        expect(result.success).toBe(false)
+        expect(await fs.readdir(inner)).toEqual([])
+      }
+    )
+
+    it('does not start a copy job when every dropped item is already in place', async () => {
+      const operationManager = new OperationManager()
+      const create = vi.spyOn(operationManager, 'create')
+      registerLocalFsHandlers({} as BrowserWindow, operationManager)
+      const file = path.join(tmpDir, 'photo.jpg')
+      await fs.writeFile(file, 'pixels')
+
+      const result = await handler('local:copyFiles')(null, [file], tmpDir)
+
+      expect(result).toEqual({ success: true, data: undefined })
+      expect(create).not.toHaveBeenCalled()
+    })
+  })
+})
+
+describe('isSameOrInside', () => {
+  const tmpRoot = os.tmpdir()
+
+  it('treats a filesystem root as containing everything', () => {
+    // '/' + sep은 '//'라 단순 접두사 비교로는 루트 아래 경로를 놓친다.
+    const root = path.parse(process.cwd()).root
+    expect(isSameOrInside(path.join(root, 'Users', 'me'), root)).toBe(true)
+    expect(isSameOrInside(root, root)).toBe(true)
+  })
+
+  it('does not treat a sibling with a common prefix as inside', () => {
+    expect(isSameOrInside(path.join(tmpRoot, 'photos-old'), path.join(tmpRoot, 'photos'))).toBe(
+      false
+    )
+    expect(isSameOrInside(path.join(tmpRoot, 'photos', 'a'), path.join(tmpRoot, 'photos'))).toBe(
+      true
+    )
   })
 })
