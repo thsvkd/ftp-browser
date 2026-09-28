@@ -13,6 +13,7 @@ import { registerGalleryHandlers } from './ipc/galleryHandlers'
 import { registerUpdateHandlers } from './ipc/updateHandlers'
 import { registerDevtools } from './debug/devtools'
 import { applyApplicationMenu } from './menu/appMenu'
+import { hideOnCloseOnMac } from './windowLifecycle'
 import { UpdateManager, isAutomaticUpdateSupported } from './update/UpdateManager'
 import { autoUpdater } from 'electron-updater'
 import {
@@ -34,6 +35,11 @@ if (smokeTestEnabled && smokeUserDataPath) {
 }
 
 let mainWindow: BrowserWindow | null = null
+let isQuitting = false
+
+app.on('before-quit', () => {
+  isQuitting = true
+})
 
 function createWindow(): BrowserWindow {
   mainWindow = new BrowserWindow({
@@ -55,6 +61,7 @@ function createWindow(): BrowserWindow {
   mainWindow.on('ready-to-show', () => {
     if (!smokeTestEnabled) mainWindow?.show()
   })
+  hideOnCloseOnMac(mainWindow, process.platform, () => isQuitting)
 
   if (smokeTestEnabled) {
     startPackagedSmokeTest(mainWindow.webContents, {
@@ -150,8 +157,10 @@ app.whenReady().then(() => {
     setInterval(() => void updateManager.check(), UPDATE_CHECK_INTERVAL_MS)
   }
 
+  // The IPC handlers above are bound to `win`, so bring that window back rather
+  // than creating one they cannot reach (see hideOnCloseOnMac).
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (!win.isDestroyed()) win.show()
   })
 })
 
