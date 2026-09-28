@@ -418,3 +418,27 @@ describe('FileContextMenu — dismiss triggers', () => {
     }
   })
 })
+
+describe('FileContextMenu — download', () => {
+  it('shows a toast when the main process refuses the download', async () => {
+    // main은 서버가 준 이름이 저장 폴더를 벗어나면 배치 전체를 거부한다. 그 거부가
+    // 처리되지 않은 rejection으로 사라지면 사용자는 아무 반응도 보지 못한다.
+    mockInvoke.mockImplementation(async (channel: string) => {
+      if (channel === 'local:selectSaveDirectory') return { success: true, data: '/dl' }
+      if (channel === 'transfer:enqueueBatch') {
+        return { success: false, error: 'Unsafe file name from server: "a\\\\b"' }
+      }
+      return { success: true }
+    })
+    const user = userEvent.setup()
+    renderMenu(ftpFile('a.jpg'))
+
+    await user.click(screen.getByRole('button', { name: en['menu.download'] }))
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(en['toast.downloadFailed'], {
+        description: expect.stringContaining('Unsafe file name')
+      })
+    )
+  })
+})

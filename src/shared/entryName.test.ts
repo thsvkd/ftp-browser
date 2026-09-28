@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isSafeLocalName, isSafeRemoteName } from './entryName'
+import { isSafeDownloadName, isSafeLocalName, isSafeRemoteName } from './entryName'
 
 // 이 술어들은 이름이 디렉터리를 벗어나는 것을 막는 핵심 방어다. Test-82/83·90은
 // 렌더러를 경유한 간접 검증이라 술어 자체의 경계 조건을 고정하지 못한다.
@@ -66,5 +66,42 @@ describe('isSafeRemoteName', () => {
     expect(isSafeRemoteName('notes.txt')).toBe(true)
     expect(isSafeRemoteName('New Docs')).toBe(true)
     expect(isSafeRemoteName('  ok.txt  ')).toBe(true)
+  })
+})
+
+// 다운로드 파일명은 사용자가 아니라 FTP 서버가 정한다. 악성 서버가 `../`나 하위 경로를
+// 담은 이름을 LIST에 실으면 다운로드 폴더 밖(자동 실행 위치 등)에 파일이 써진다.
+describe('isSafeDownloadName', () => {
+  it('rejects names that are not a single path component on any platform', () => {
+    for (const platform of ['darwin', 'linux', 'win32']) {
+      expect(isSafeDownloadName('../.zshrc', platform)).toBe(false)
+      expect(isSafeDownloadName('Library/LaunchAgents/x.plist', platform)).toBe(false)
+      expect(isSafeDownloadName('/etc/passwd', platform)).toBe(false)
+      expect(isSafeDownloadName('a\0b', platform)).toBe(false)
+      expect(isSafeDownloadName('.', platform)).toBe(false)
+      expect(isSafeDownloadName('..', platform)).toBe(false)
+      expect(isSafeDownloadName('', platform)).toBe(false)
+    }
+  })
+
+  it('rejects Windows separators, drive colons and trailing dots or spaces on Windows', () => {
+    expect(isSafeDownloadName('..\\..\\Startup\\x.bat', 'win32')).toBe(false)
+    expect(isSafeDownloadName('C:x.bat', 'win32')).toBe(false)
+    expect(isSafeDownloadName('.. ', 'win32')).toBe(false)
+    expect(isSafeDownloadName('...', 'win32')).toBe(false)
+  })
+
+  it('accepts backslashes and colons where they are ordinary characters', () => {
+    // 로컬 규칙(isSafeLocalName)을 그대로 쓰면 POSIX에서 합법적인 다운로드를 막게 된다.
+    expect(isSafeDownloadName('..\\..\\x.bat', 'darwin')).toBe(true)
+    expect(isSafeDownloadName('Photo: 2024.jpg', 'linux')).toBe(true)
+  })
+
+  it('accepts an ordinary name', () => {
+    for (const platform of ['darwin', 'linux', 'win32']) {
+      expect(isSafeDownloadName('photo.jpg', platform)).toBe(true)
+      expect(isSafeDownloadName('.hidden', platform)).toBe(true)
+      expect(isSafeDownloadName('..leading-dots.txt', platform)).toBe(true)
+    }
   })
 })

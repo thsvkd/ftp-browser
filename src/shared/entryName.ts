@@ -34,3 +34,22 @@ export function isSafeLocalName(name: string): boolean {
 export function isSafeRemoteName(name: string): boolean {
   return !escapesDirectory(name.trim())
 }
+
+/**
+ * Whether a file name the FTP server listed can be used as the last component
+ * of a local download path on `platform`.
+ *
+ * Unlike the predicates above this judges a name the *server* chose, so it is
+ * the line between a malicious listing and the user's disk: `../.zshrc` or
+ * `Library/LaunchAgents/x.plist` would otherwise land outside the folder the
+ * user picked. It is not trimmed — the name is used exactly as listed.
+ *
+ * Backslashes and colons only count on Windows, where they are a separator and
+ * a drive/stream marker; on POSIX they are ordinary characters and a server
+ * file carrying them downloads fine. Windows also strips trailing dots and
+ * spaces, which would turn `.. ` into `..`.
+ */
+export function isSafeDownloadName(name: string, platform: string): boolean {
+  if (!name || name === '.' || name === '..' || /[/\0]/.test(name)) return false
+  return platform !== 'win32' || !/[\\:]|[. ]$/.test(name)
+}

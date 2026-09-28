@@ -43,6 +43,40 @@ describe('TransferQueue', () => {
       expect(jobs[0].status).toBe('active') // immediately starts processing
     })
 
+    it('refuses a download whose server-supplied name would leave the target folder', () => {
+      const listener = vi.fn()
+      queue.on('queue:updated', listener)
+
+      expect(() =>
+        queue.enqueueBatch('download', [
+          { localPath: '/dl/a.jpg', remotePath: '/r/a.jpg', fileName: 'a.jpg', totalBytes: 1 },
+          {
+            localPath: '/dl/Library/LaunchAgents/x.plist',
+            remotePath: '/r/Library/LaunchAgents/x.plist',
+            fileName: 'Library/LaunchAgents/x.plist',
+            totalBytes: 1
+          }
+        ])
+      ).toThrow('Unsafe file name')
+
+      // 한 항목이라도 거부되면 배치 전체를 받지 않는다.
+      expect(queue.getAll()).toHaveLength(0)
+      expect(listener).not.toHaveBeenCalled()
+      expect(mockFileOps.download).not.toHaveBeenCalled()
+    })
+
+    it('refuses a download whose local path does not end in the file name', () => {
+      expect(() => queue.enqueue('download', '/dl/sub/../../.zshrc', '/r/x', 'x', 1)).toThrow(
+        'Unsafe file name'
+      )
+      expect(queue.getAll()).toHaveLength(0)
+    })
+
+    it('does not apply the download-name check to uploads', () => {
+      queue.enqueue('upload', '/local/dir/a.jpg', '/remote/dir/a.jpg', 'dir/a.jpg', 1)
+      expect(queue.getAll()).toHaveLength(1)
+    })
+
     it('should generate unique ids for each job', () => {
       const id1 = queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 100)
       const id2 = queue.enqueue('upload', '/local/b.jpg', '/remote/b.jpg', 'b.jpg', 200)

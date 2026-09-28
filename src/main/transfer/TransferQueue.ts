@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
+import { basename } from 'path'
+import { isSafeDownloadName } from '@shared/entryName'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
 import { classifyError, isRetryableError } from '../utils/errorClassifier'
 import type {
@@ -36,6 +38,18 @@ export class TransferQueue extends EventEmitter {
     forceBatch = false
   ): string[] {
     if (items.length === 0) return []
+    if (direction === 'download') {
+      // The renderer builds the local path from a name the server listed; check
+      // it here as well, since this is the last stop before the disk write.
+      for (const item of items) {
+        if (
+          !isSafeDownloadName(item.fileName, process.platform) ||
+          basename(item.localPath) !== item.fileName
+        ) {
+          throw new Error(`Unsafe file name from server: ${JSON.stringify(item.fileName)}`)
+        }
+      }
+    }
 
     const batchId = items.length > 1 || forceBatch ? randomUUID() : undefined
     const jobs: TransferJob[] = items.map((item) => ({

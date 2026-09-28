@@ -136,15 +136,21 @@ export function FileContextMenu({
     if (files.length === 0) return
     const result = await window.api.invoke<IpcResult<string | null>>('local:selectSaveDirectory')
     if (result.success && result.data) {
-      await enqueueBatch(
-        'download',
-        files.map((file) => ({
-          localPath: `${result.data}/${file.name}`,
-          remotePath: buildRemotePath(file.name),
-          fileName: file.name,
-          totalBytes: file.size
-        }))
-      )
+      try {
+        await enqueueBatch(
+          'download',
+          files.map((file) => ({
+            localPath: `${result.data}/${file.name}`,
+            remotePath: buildRemotePath(file.name),
+            fileName: file.name,
+            totalBytes: file.size
+          }))
+        )
+      } catch (err) {
+        toast.error(t('toast.downloadFailed'), {
+          description: err instanceof Error ? err.message : String(err)
+        })
+      }
     }
     handleClose()
   }

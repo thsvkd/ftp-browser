@@ -351,6 +351,31 @@ describe('FtpConnectionManager', () => {
       expect(result.entries[0].type).toBe('symbolic-link')
     })
 
+    it('drops entries whose names cannot be a single file name', async () => {
+      // basic-ftp는 '.'/'..'만 거른다. 슬래시나 NUL이 든 이름은 실제 파일일 수 없고,
+      // 그대로 두면 다운로드 경로를 다운로드 폴더 밖으로 끌고 나간다.
+      const entry = (name: string): object => ({
+        name,
+        isDirectory: false,
+        isSymbolicLink: false,
+        size: 1,
+        modifiedAt: null,
+        rawModifiedAt: '',
+        permissions: null
+      })
+      vi.mocked(Client.prototype.list).mockResolvedValue([
+        entry('ok.jpg'),
+        entry('../../.zshrc'),
+        entry('Library/LaunchAgents/x.plist'),
+        entry('nul\0byte'),
+        entry('back\\slash.txt')
+      ] as unknown as FileInfo[])
+
+      const result = await manager.list('/test')
+
+      expect(result.entries.map((e) => e.name)).toEqual(['ok.jpg', 'back\\slash.txt'])
+    })
+
     it('should handle missing modifiedAt', async () => {
       vi.mocked(Client.prototype.list).mockResolvedValue([
         {

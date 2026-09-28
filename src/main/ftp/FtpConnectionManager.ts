@@ -158,17 +158,22 @@ export class FtpConnectionManager extends EventEmitter {
   async list(remotePath: string): Promise<FtpListResult> {
     const fileInfos: FileInfo[] = await this.runOnMainClient((client) => client.list(remotePath))
 
-    const entries: FtpFileEntry[] = fileInfos.map((fi) => ({
-      name: fi.name,
-      type: fi.isDirectory ? 'directory' : fi.isSymbolicLink ? 'symbolic-link' : 'file',
-      size: fi.size,
-      modifiedAt: fi.modifiedAt?.toISOString() ?? '',
-      rawModifiedAt: fi.rawModifiedAt ?? '',
-      permissions: fi.permissions
-        ? `${fi.permissions.user}${fi.permissions.group}${fi.permissions.world}`
-        : undefined,
-      isImage: !fi.isDirectory && isImageFile(fi.name)
-    }))
+    // basic-ftp only drops `.` and `..`. A name carrying `/` or NUL cannot be a
+    // real entry in this directory, and passed on it would steer a download out
+    // of the folder the user picked.
+    const entries: FtpFileEntry[] = fileInfos
+      .filter((fi) => !/[/\0]/.test(fi.name))
+      .map((fi) => ({
+        name: fi.name,
+        type: fi.isDirectory ? 'directory' : fi.isSymbolicLink ? 'symbolic-link' : 'file',
+        size: fi.size,
+        modifiedAt: fi.modifiedAt?.toISOString() ?? '',
+        rawModifiedAt: fi.rawModifiedAt ?? '',
+        permissions: fi.permissions
+          ? `${fi.permissions.user}${fi.permissions.group}${fi.permissions.world}`
+          : undefined,
+        isImage: !fi.isDirectory && isImageFile(fi.name)
+      }))
 
     return { path: remotePath, entries }
   }
