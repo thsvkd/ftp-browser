@@ -1,7 +1,7 @@
-import { rename, rm } from 'fs/promises'
+import { rm } from 'fs/promises'
 import type { Client } from 'basic-ftp'
 import { FtpConnectionManager } from './FtpConnectionManager'
-import { partialPathFor } from '../utils/partialFile'
+import { movePartialIntoPlace, partialPathFor } from '../utils/partialFile'
 
 export interface ProgressInfo {
   bytes: number
@@ -135,7 +135,7 @@ export class FtpFileOperations {
           client.trackProgress()
         }
       })
-      await rename(partPath, localPath)
+      await movePartialIntoPlace(partPath, localPath)
     } catch (err) {
       await rm(partPath, { force: true }).catch(() => undefined)
       throw err

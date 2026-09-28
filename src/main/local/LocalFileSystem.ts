@@ -3,7 +3,7 @@ import { createReadStream, createWriteStream } from 'fs'
 import path from 'path'
 import { app } from 'electron'
 import { isImageFile } from '@shared/constants'
-import { partialPathFor } from '../utils/partialFile'
+import { movePartialIntoPlace, partialPathFor } from '../utils/partialFile'
 import type { LocalFileEntry, LocalListResult } from '@shared/types/local'
 
 export class LocalFileSystem {
@@ -159,7 +159,7 @@ export class LocalFileSystem {
         readStream.pipe(writeStream)
       })
       await writeClosed()
-      await fs.rename(partPath, dest)
+      await movePartialIntoPlace(partPath, dest)
     } catch (err) {
       await writeClosed()
       await fs.rm(partPath, { force: true }).catch(() => undefined)

@@ -125,6 +125,21 @@ describe('LocalFileSystem', () => {
       expect(await fs.readdir(tmpDir)).toEqual(['big.bin', 'keep.bin'])
     })
 
+    it('copies a file whose name is close to the 255-byte limit', async () => {
+      const src = path.join(tmpDir, 'src.bin')
+      const dest = path.join(tmpDir, 'a'.repeat(249) + '.jpg')
+      await fs.writeFile(src, 'data')
+
+      await localFs.copyFileWithProgress(
+        src,
+        dest,
+        () => undefined,
+        () => false
+      )
+
+      expect(await fs.readFile(dest, 'utf8')).toBe('data')
+    })
+
     it('keeps the content when a file is copied onto itself', async () => {
       const file = path.join(tmpDir, 'self.bin')
       const content = Buffer.alloc(64 * 1024, 3)
