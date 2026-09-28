@@ -441,6 +441,30 @@ describe('FtpConnectionManager', () => {
       expect(ok).toBe(42)
     })
 
+    it('should log in again when basic-ftp closed the main client on its own', async () => {
+      // basic-ftp는 timeout으로 닫을 때 소켓 리스너를 지워서 monitorConnection이 모른다.
+      const dead = manager.getClient()
+      Object.assign(dead, { closed: true })
+
+      const received = await manager.runOnMainClient(async (c) => c)
+
+      expect(received).not.toBe(dead)
+      expect(manager.getClient()).toBe(received)
+      expect(Client.prototype.access).toHaveBeenCalledTimes(2)
+      expect(manager.isConnected()).toBe(true)
+    })
+
+    it('should switch to error state when logging in again fails', async () => {
+      Object.assign(manager.getClient(), { closed: true })
+      vi.mocked(Client.prototype.access).mockRejectedValueOnce(new Error('refused'))
+      const statuses: string[] = []
+      manager.on('connectionStatus', (s: { status: string }) => statuses.push(s.status))
+
+      await expect(manager.runOnMainClient(async () => 1)).rejects.toThrow('refused')
+      expect(manager.isConnected()).toBe(false)
+      expect(statuses).toEqual(['error'])
+    })
+
     it('should pass the current internal client to the task', async () => {
       const internal = manager.getClient()
       const received = await manager.runOnMainClient(async (c) => c)

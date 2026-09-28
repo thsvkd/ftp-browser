@@ -113,12 +113,46 @@ export class FtpConnectionManager extends EventEmitter {
     if (!this._connected) {
       return Promise.reject(new Error('Not connected'))
     }
-    const next = this.mainClientLock.then(() => {
+    const next = this.mainClientLock.then(async () => {
       if (!this._connected) throw new Error('Not connected')
+      // basic-ftp는 timeout 등으로 client를 스스로 닫을 때 소켓 리스너를 전부 제거(removeAllListeners)한
+      // 뒤 닫으므로 monitorConnection이 알 수 없다. 닫힌 client는 이후 모든 task를 저장된 에러로 즉시
+      // 실패시키므로, 여기서 새 client로 다시 로그인한다.
+      if (this.client.closed) await this.reopenMainClient()
       return task(this.client)
     })
     this.mainClientLock = next.catch(() => undefined)
     return next
+  }
+
+  /** runOnMainClient 안에서만 호출한다. 실패하면 connect() 실패와 같이 error 상태로 전환한다. */
+  private async reopenMainClient(): Promise<void> {
+    const config = this._config
+    if (!config) throw new Error('Not connected')
+    const generation = this.connectGeneration
+    const client = createConfiguredClient()
+    try {
+      await client.access({
+        host: config.host,
+        port: config.port,
+        user: config.user,
+        password: config.password,
+        secure: config.secure
+      })
+    } catch (err) {
+      client.close()
+      if (generation === this.connectGeneration) {
+        this._connected = false
+        this.emitStatus('error', config.host, classifyError(err).message)
+      }
+      throw err
+    }
+    if (generation !== this.connectGeneration) {
+      client.close()
+      throw new Error('Not connected')
+    }
+    this.client = client
+    this.monitorConnection()
   }
 
   async list(remotePath: string): Promise<FtpListResult> {
