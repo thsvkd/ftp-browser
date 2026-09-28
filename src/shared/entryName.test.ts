@@ -91,6 +91,16 @@ describe('isSafeDownloadName', () => {
     expect(isSafeDownloadName('...', 'win32')).toBe(false)
   })
 
+  it('rejects reserved Windows device names on Windows only', () => {
+    // `LPT1.jpg`를 열면 파일이 아니라 프린터 장치가 열린다.
+    for (const name of ['CON', 'nul.txt', 'com1', 'LPT1.jpg', 'aux.tar.gz', 'COM¹']) {
+      expect(isSafeDownloadName(name, 'win32')).toBe(false)
+      expect(isSafeDownloadName(name, 'darwin')).toBe(true)
+    }
+    expect(isSafeDownloadName('console.log', 'win32')).toBe(true)
+    expect(isSafeDownloadName('com10.txt', 'win32')).toBe(true)
+  })
+
   it('accepts backslashes and colons where they are ordinary characters', () => {
     // 로컬 규칙(isSafeLocalName)을 그대로 쓰면 POSIX에서 합법적인 다운로드를 막게 된다.
     expect(isSafeDownloadName('..\\..\\x.bat', 'darwin')).toBe(true)

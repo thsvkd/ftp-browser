@@ -47,9 +47,13 @@ export function isSafeRemoteName(name: string): boolean {
  * Backslashes and colons only count on Windows, where they are a separator and
  * a drive/stream marker; on POSIX they are ordinary characters and a server
  * file carrying them downloads fine. Windows also strips trailing dots and
- * spaces, which would turn `.. ` into `..`.
+ * spaces, which would turn `.. ` into `..`, and opens a device instead of a
+ * file for reserved names such as `NUL.txt` or `LPT1.jpg`.
  */
 export function isSafeDownloadName(name: string, platform: string): boolean {
   if (!name || name === '.' || name === '..' || /[/\0]/.test(name)) return false
-  return platform !== 'win32' || !/[\\:]|[. ]$/.test(name)
+  if (platform !== 'win32') return true
+  return (
+    !/[\\:]|[. ]$/.test(name) && !/^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(\.|$)/i.test(name)
+  )
 }

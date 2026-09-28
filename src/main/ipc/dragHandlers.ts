@@ -4,6 +4,7 @@ import { mkdirSync, existsSync, rmSync } from 'fs'
 import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { ipcError } from '../utils/errorClassifier'
 import { ErrorCode } from '@shared/types/ipc'
+import { isSafeDownloadName } from '@shared/entryName'
 import type { IpcResult } from '@shared/types/ipc'
 
 interface DragFile {
@@ -47,6 +48,10 @@ export function registerDragHandlers(manager: FtpConnectionManager): void {
 
         try {
           for (const file of payload.files) {
+            // The name comes from the server's listing; see isSafeDownloadName.
+            if (!isSafeDownloadName(file.fileName, process.platform)) {
+              throw new Error(`Unsafe file name from server: ${JSON.stringify(file.fileName)}`)
+            }
             const localPath = join(tempDir, file.fileName)
             await client.downloadTo(localPath, file.remotePath)
             localPaths.push(localPath)
