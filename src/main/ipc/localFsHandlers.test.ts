@@ -16,7 +16,7 @@ vi.mock('electron', () => ({
 import { ipcMain } from 'electron'
 import type { BrowserWindow } from 'electron'
 import { registerLocalFsHandlers } from './localFsHandlers'
-import type { OperationManager } from '../operation/OperationManager'
+import { OperationManager } from '../operation/OperationManager'
 import type { IpcResult } from '@shared/types/ipc'
 
 type Handler = (event: unknown, ...args: unknown[]) => Promise<IpcResult<void>>
@@ -99,6 +99,45 @@ describe('localFsHandlers', () => {
       expect(result.success).toBe(false)
       expect(result).toMatchObject({ error: expect.any(String) })
       expect((result as { error: string }).error).not.toBe('')
+    })
+  })
+
+  describe('local:copyFiles', () => {
+    beforeEach(() => {
+      registerLocalFsHandlers({} as BrowserWindow, new OperationManager())
+    })
+
+    it('leaves a file intact when it is dropped into the folder it already lives in', async () => {
+      const file = path.join(tmpDir, 'photo.jpg')
+      await fs.writeFile(file, 'pixels')
+
+      const result = await handler('local:copyFiles')(null, [file], tmpDir)
+
+      expect(result).toEqual({ success: true, data: undefined })
+      expect(await fs.readFile(file, 'utf8')).toBe('pixels')
+    })
+
+    it('leaves a folder intact when it is dropped onto its own parent', async () => {
+      const dir = path.join(tmpDir, 'photos')
+      await fs.mkdir(dir)
+      await fs.writeFile(path.join(dir, 'a.jpg'), 'aaa')
+
+      const result = await handler('local:copyFiles')(null, [dir], tmpDir)
+
+      expect(result).toEqual({ success: true, data: undefined })
+      expect(await fs.readFile(path.join(dir, 'a.jpg'), 'utf8')).toBe('aaa')
+    })
+
+    it('refuses to copy a folder into itself', async () => {
+      const dir = path.join(tmpDir, 'photos')
+      const inner = path.join(dir, 'inner')
+      await fs.mkdir(inner, { recursive: true })
+      await fs.writeFile(path.join(dir, 'a.jpg'), 'aaa')
+
+      const result = await handler('local:copyFiles')(null, [dir], inner)
+
+      expect(result.success).toBe(false)
+      expect(await fs.readdir(inner)).toEqual([])
     })
   })
 })

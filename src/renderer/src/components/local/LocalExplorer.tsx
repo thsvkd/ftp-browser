@@ -193,8 +193,15 @@ export function LocalExplorer(): React.JSX.Element {
         const filePaths = files.map((f) => window.api.getPathForFile(f)).filter(Boolean)
         if (filePaths.length > 0) {
           const localDir = useLocalFsStore.getState().currentPath
-          await window.api.invoke('local:copyFiles', filePaths, localDir)
+          const result = await window.api.invoke<IpcResult<void>>(
+            'local:copyFiles',
+            filePaths,
+            localDir
+          )
           refresh()
+          if (!result.success) {
+            toast.error(t('toast.copyFailed'), { description: result.error })
+          }
         }
       }
     } catch (err) {

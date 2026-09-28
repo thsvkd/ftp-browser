@@ -145,6 +145,7 @@ export const fr = {
   'toast.navigateFailed': 'Impossible d’ouvrir « {{path}} »',
   'toast.uploadFailed': 'Impossible de démarrer l’envoi',
   'toast.downloadFailed': 'Impossible de démarrer le téléchargement',
+  'toast.copyFailed': 'Impossible de copier les fichiers',
   'toast.dropFailed': 'Impossible de traiter les éléments déposés',
   'toast.readDropFailed': 'Impossible de lire les éléments déposés',
   'toast.moveFailed_one': 'Impossible de déplacer {{count}} élément',

@@ -1,6 +1,6 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import { stat, mkdir } from 'fs/promises'
-import { basename, join, dirname, sep } from 'path'
+import { basename, join, dirname, resolve, sep } from 'path'
 import { LocalFileSystem } from '../local/LocalFileSystem'
 import { OperationManager } from '../operation/OperationManager'
 import { ipcError } from '../utils/errorClassifier'
@@ -12,6 +12,10 @@ interface CopyWorkItem {
   src: string
   dest: string
   size: number
+}
+
+function isSameOrInside(child: string, parent: string): boolean {
+  return child === parent || child.startsWith(parent + sep)
 }
 
 export function registerLocalFsHandlers(
@@ -126,6 +130,12 @@ export function registerLocalFsHandlers(
         for (const src of sourcePaths) {
           const st = await stat(src)
           const name = basename(src)
+          // Dropping an item into the folder it already lives in (e.g. from
+          // Finder) has nothing to copy.
+          if (resolve(destDir, name) === resolve(src)) continue
+          if (st.isDirectory() && isSameOrInside(resolve(destDir), resolve(src))) {
+            throw new Error(`Cannot copy a folder into itself: ${name}`)
+          }
           if (st.isDirectory()) {
             const inner = await localFs.collectFiles(src)
             for (const f of inner) {

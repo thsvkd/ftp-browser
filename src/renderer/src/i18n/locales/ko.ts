@@ -137,6 +137,7 @@ export const ko = {
   'toast.navigateFailed': "'{{path}}' 경로를 열지 못했습니다",
   'toast.uploadFailed': '업로드를 시작하지 못했습니다',
   'toast.downloadFailed': '다운로드를 시작하지 못했습니다',
+  'toast.copyFailed': '파일을 복사하지 못했습니다',
   'toast.dropFailed': '끌어다 놓은 항목을 처리하지 못했습니다',
   'toast.readDropFailed': '끌어다 놓은 항목을 읽지 못했습니다',
   'toast.moveFailed_other': '항목 {{count}}개를 이동하지 못했습니다',

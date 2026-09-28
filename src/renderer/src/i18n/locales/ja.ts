@@ -137,6 +137,7 @@ export const ja = {
   'toast.navigateFailed': '「{{path}}」を開けませんでした',
   'toast.uploadFailed': 'アップロードを開始できませんでした',
   'toast.downloadFailed': 'ダウンロードを開始できませんでした',
+  'toast.copyFailed': 'ファイルをコピーできませんでした',
   'toast.dropFailed': 'ドロップされた項目を処理できませんでした',
   'toast.readDropFailed': 'ドロップされた項目を読み取れませんでした',
   'toast.moveFailed_other': '{{count}} 個の項目を移動できませんでした',

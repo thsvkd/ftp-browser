@@ -105,6 +105,41 @@ describe('LocalFileSystem', () => {
 
       await expect(fs.access(dest)).rejects.toThrow()
     })
+
+    it('leaves an existing destination untouched when the copy is cancelled', async () => {
+      const src = path.join(tmpDir, 'big.bin')
+      const dest = path.join(tmpDir, 'keep.bin')
+      await fs.writeFile(src, Buffer.alloc(512 * 1024, 1))
+      await fs.writeFile(dest, 'original')
+
+      await expect(
+        localFs.copyFileWithProgress(
+          src,
+          dest,
+          () => undefined,
+          () => true
+        )
+      ).rejects.toThrow('cancelled')
+
+      expect(await fs.readFile(dest, 'utf8')).toBe('original')
+      expect(await fs.readdir(tmpDir)).toEqual(['big.bin', 'keep.bin'])
+    })
+
+    it('keeps the content when a file is copied onto itself', async () => {
+      const file = path.join(tmpDir, 'self.bin')
+      const content = Buffer.alloc(64 * 1024, 3)
+      await fs.writeFile(file, content)
+
+      await localFs.copyFileWithProgress(
+        file,
+        file,
+        () => undefined,
+        () => false
+      )
+
+      expect(await fs.readFile(file)).toEqual(content)
+      expect(await fs.readdir(tmpDir)).toEqual(['self.bin'])
+    })
   })
 
   describe('delete', () => {

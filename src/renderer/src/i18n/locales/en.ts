@@ -145,6 +145,7 @@ export const en = {
   'toast.navigateFailed': 'Failed to open "{{path}}"',
   'toast.uploadFailed': 'Failed to start the upload',
   'toast.downloadFailed': 'Failed to start the download',
+  'toast.copyFailed': 'Failed to copy the files',
   'toast.dropFailed': 'Failed to process the dropped items',
   'toast.readDropFailed': 'Failed to read the dropped items',
   'toast.moveFailed_one': 'Failed to move {{count}} item',

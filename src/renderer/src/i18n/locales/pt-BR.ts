@@ -142,6 +142,7 @@ export const ptBR = {
   'toast.navigateFailed': 'Não foi possível abrir “{{path}}”',
   'toast.uploadFailed': 'Não foi possível iniciar o envio',
   'toast.downloadFailed': 'Não foi possível iniciar o download',
+  'toast.copyFailed': 'Não foi possível copiar os arquivos',
   'toast.dropFailed': 'Não foi possível processar os itens soltos',
   'toast.readDropFailed': 'Não foi possível ler os itens soltos',
   'toast.moveFailed_one': 'Não foi possível mover {{count}} item',

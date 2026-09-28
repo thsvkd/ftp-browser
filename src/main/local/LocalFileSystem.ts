@@ -3,6 +3,7 @@ import { createReadStream, createWriteStream } from 'fs'
 import path from 'path'
 import { app } from 'electron'
 import { isImageFile } from '@shared/constants'
+import { partialPathFor } from '../utils/partialFile'
 import type { LocalFileEntry, LocalListResult } from '@shared/types/local'
 
 export class LocalFileSystem {
@@ -114,7 +115,11 @@ export class LocalFileSystem {
   /**
    * Stream-copy a single file, reporting each read chunk's length so callers can
    * accumulate byte progress. Polls `shouldCancel` between chunks; on cancel it
-   * removes the partial destination and throws an error tagged `cancelled`.
+   * throws an error tagged `cancelled`.
+   *
+   * The data goes to a sibling `.part` file that replaces `dest` only once it is
+   * complete, so an existing `dest` survives a failed or cancelled copy, and
+   * copying a file onto itself leaves its content intact.
    */
   async copyFileWithProgress(
     src: string,
@@ -122,8 +127,16 @@ export class LocalFileSystem {
     onBytes: (chunkLength: number) => void,
     shouldCancel: () => boolean
   ): Promise<void> {
+    const partPath = partialPathFor(dest)
     const readStream = createReadStream(src)
-    const writeStream = createWriteStream(dest)
+    const writeStream = createWriteStream(partPath, { flags: 'wx' })
+    // Wait for the write handle to fully close before renaming or removing the
+    // file — on Windows both fail while the descriptor is still open.
+    const writeClosed = async (): Promise<void> => {
+      if (!writeStream.closed) {
+        await new Promise<void>((resolve) => writeStream.once('close', () => resolve()))
+      }
+    }
     try {
       await new Promise<void>((resolve, reject) => {
         const fail = (err: Error): void => {
@@ -145,13 +158,11 @@ export class LocalFileSystem {
 
         readStream.pipe(writeStream)
       })
+      await writeClosed()
+      await fs.rename(partPath, dest)
     } catch (err) {
-      // Wait for the write handle to fully close before removing the partial
-      // file — on Windows `fs.rm` fails while the descriptor is still open.
-      if (!writeStream.closed) {
-        await new Promise<void>((resolve) => writeStream.once('close', () => resolve()))
-      }
-      await fs.rm(dest, { force: true }).catch(() => undefined)
+      await writeClosed()
+      await fs.rm(partPath, { force: true }).catch(() => undefined)
       throw err
     }
   }
