@@ -221,19 +221,29 @@ export function registerFtpHandlers(
       const job = operationManager.create('delete', items, 'files', targets.length)
 
       try {
+        // 진행률 단위는 지워진 항목(파일+폴더) 수다. 아직 LIST하지 않은 대상은 1개로 세고,
+        // 폴더를 LIST한 뒤에 그 폴더의 실제 항목 수로 total을 늘린다.
+        let done = 0
         for (let i = 0; i < targets.length; i++) {
           if (operationManager.isCancelled(job.id)) {
             operationManager.markCancelled(job.id)
             return { success: true, data: undefined }
           }
           const target = targets[i]
-          operationManager.progress(job.id, i, remoteBasename(target.path))
+          const rest = targets.length - i - 1
+          operationManager.progress(job.id, done, remoteBasename(target.path), done + 1 + rest)
           if (target.isDirectory) {
-            await fileOps.deleteDirectory(target.path)
+            let removed = 0
+            await fileOps.deleteDirectory(target.path, (n, total, path) => {
+              removed = n
+              operationManager.progress(job.id, done + n, remoteBasename(path), done + total + rest)
+            })
+            done += removed
           } else {
             await fileOps.deleteFile(target.path)
+            done += 1
           }
-          operationManager.progress(job.id, i + 1, remoteBasename(target.path))
+          operationManager.progress(job.id, done, remoteBasename(target.path), done + rest)
         }
         operationManager.complete(job.id)
         return { success: true, data: undefined }

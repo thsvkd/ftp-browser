@@ -8,6 +8,9 @@ export interface ProgressInfo {
 
 type ProgressCallback = (info: ProgressInfo) => void
 
+/** `removed` of `total` entries (files and folders) are gone; `path` is the one just removed. */
+export type DeleteProgressCallback = (removed: number, total: number, path: string) => void
+
 /**
  * Create a remote directory tree by issuing an absolute `MKD` for each path level.
  *
@@ -41,21 +44,45 @@ export async function ensureRemoteDir(client: Client, remotePath: string): Promi
  * so the delete reuses it and never changes the working directory.
  *
  * Symbolic links are removed with `DELE`, never followed.
+ *
+ * The whole tree is listed before anything is deleted, so `onProgress` gets an exact total at
+ * no extra cost: it is the same set of `LIST` commands a delete-as-you-go walk would issue.
  */
-export async function removeRemoteDirRecursive(client: Client, remotePath: string): Promise<void> {
-  const base = remotePath.replace(/\/+$/, '')
-  for (const entry of await client.list(remotePath)) {
-    if (entry.name === '.' || entry.name === '..') continue
-    const child = `${base}/${entry.name}`
-    // LIST/MLSD가 심링크로 표시한 항목만 따라가지 않는다. 심링크를 그냥 dir로 보고하는 서버라면
-    // 구분할 방법이 없어 따라 들어간다(basic-ftp removeDir도 같다).
-    if (entry.isDirectory && !entry.isSymbolicLink && !entry.link) {
-      await removeRemoteDirRecursive(client, child)
-    } else {
-      await client.remove(child)
+export async function removeRemoteDirRecursive(
+  client: Client,
+  remotePath: string,
+  onProgress?: DeleteProgressCallback
+): Promise<void> {
+  const files: string[] = []
+  const dirs: string[] = []
+  const walk = async (dir: string): Promise<void> => {
+    const base = dir.replace(/\/+$/, '')
+    for (const entry of await client.list(dir)) {
+      if (entry.name === '.' || entry.name === '..') continue
+      const child = `${base}/${entry.name}`
+      // LIST/MLSD가 심링크로 표시한 항목만 따라가지 않는다. 심링크를 그냥 dir로 보고하는 서버라면
+      // 구분할 방법이 없어 따라 들어간다(basic-ftp removeDir도 같다).
+      if (entry.isDirectory && !entry.isSymbolicLink && !entry.link) {
+        await walk(child)
+      } else {
+        files.push(child)
+      }
     }
+    // 후위 순서라 하위 폴더가 항상 부모보다 먼저 온다.
+    dirs.push(dir)
   }
-  await client.removeEmptyDir(remotePath)
+  await walk(remotePath)
+
+  const total = files.length + dirs.length
+  let removed = 0
+  for (const file of files) {
+    await client.remove(file)
+    onProgress?.(++removed, total, file)
+  }
+  for (const dir of dirs) {
+    await client.removeEmptyDir(dir)
+    onProgress?.(++removed, total, dir)
+  }
 }
 
 export class FtpFileOperations {
@@ -105,9 +132,11 @@ export class FtpFileOperations {
     this.manager.emit('mutation', { kind: 'delete', remotePath })
   }
 
-  async deleteDirectory(remotePath: string): Promise<void> {
+  async deleteDirectory(remotePath: string, onProgress?: DeleteProgressCallback): Promise<void> {
     try {
-      await this.manager.runOnMainClient((client) => removeRemoteDirRecursive(client, remotePath))
+      await this.manager.runOnMainClient((client) =>
+        removeRemoteDirRecursive(client, remotePath, onProgress)
+      )
     } finally {
       // 중간에 실패해도 하위 항목 일부는 이미 지워졌으므로 캐시는 무효화해야 한다.
       this.manager.emit('mutation', { kind: 'delete', remotePath })

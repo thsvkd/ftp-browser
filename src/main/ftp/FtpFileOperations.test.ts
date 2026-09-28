@@ -125,8 +125,19 @@ describe('FtpFileOperations', () => {
       mockClient.remove.mockImplementation(async (p: string) => calls.push(`DELE ${p}`))
       mockClient.removeEmptyDir.mockImplementation(async (p: string) => calls.push(`RMD ${p}`))
 
-      await ops.deleteDirectory('/remote/dir')
+      const progress: string[] = []
+      await ops.deleteDirectory('/remote/dir', (removed, total, path) =>
+        progress.push(`${removed}/${total} ${path}`)
+      )
 
+      // 트리를 먼저 다 LIST하므로 첫 삭제부터 total이 정확하다.
+      expect(progress).toEqual([
+        '1/5 /remote/dir/a.jpg',
+        '2/5 /remote/dir/sub (1)/b.jpg',
+        '3/5 /remote/dir/sub (1)/deeper',
+        '4/5 /remote/dir/sub (1)',
+        '5/5 /remote/dir'
+      ])
       expect(calls).toEqual([
         'DELE /remote/dir/a.jpg',
         'DELE /remote/dir/sub (1)/b.jpg',

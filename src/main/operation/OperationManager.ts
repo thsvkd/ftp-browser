@@ -43,10 +43,12 @@ export class OperationManager extends EventEmitter {
     return job
   }
 
-  progress(id: string, completed: number, currentItem?: string): void {
+  /** `total` can grow mid-job, e.g. once a folder being deleted has been listed. */
+  progress(id: string, completed: number, currentItem?: string, total?: number): void {
     const job = this.jobs.find((j) => j.id === id)
     if (!job || job.status !== 'active') return
     job.completed = completed
+    job.total = total ?? job.total
     job.currentItem = currentItem
     const payload: OperationProgress = { id, completed, total: job.total, currentItem }
     this.emit('operation:progress', payload)

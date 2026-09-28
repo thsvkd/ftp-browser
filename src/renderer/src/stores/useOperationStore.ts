@@ -17,7 +17,12 @@ export const useOperationStore = create<OperationStore>((set, get) => ({
   updateProgress: (progress) => {
     const jobs = get().jobs.map((j) =>
       j.id === progress.id
-        ? { ...j, completed: progress.completed, currentItem: progress.currentItem }
+        ? {
+            ...j,
+            completed: progress.completed,
+            total: progress.total,
+            currentItem: progress.currentItem
+          }
         : j
     )
     set({ jobs })
