@@ -14,7 +14,7 @@ import {
   type ServerDraft
 } from '@renderer/lib/serverAddress'
 import { t } from '@renderer/i18n'
-import type { FtpServer } from '@shared/types/ftp'
+import type { FtpServer, RecentPath } from '@shared/types/ftp'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
 
 interface ServerStore {
@@ -43,6 +43,21 @@ interface ServerStore {
 
 /** Bumped by every connect and cancel, so a late result of an abandoned attempt is ignored. */
 let connectAttempt = 0
+
+/** The folder last listed on this server, or '/' when there is none (or it can't be read). */
+async function lastVisitedPath(server: { host: string; port: number }): Promise<string> {
+  try {
+    const result = await window.api.invoke<IpcResult<RecentPath[]>>(
+      'ftp:getRecentPaths',
+      server.host,
+      server.port
+    )
+    return (result.success && result.data[0]?.path) || '/'
+  } catch (err) {
+    console.warn('[useServerStore] Failed to load the last folder:', err)
+    return '/'
+  }
+}
 
 export const useServerStore = create<ServerStore>((set, get) => ({
   servers: [],
@@ -104,7 +119,8 @@ export const useServerStore = create<ServerStore>((set, get) => ({
         username,
         password,
         secure: p.secure || base.secure,
-        path: p.path ?? base.path
+        // 주소에 폴더가 없으면 마지막으로 있던 폴더에서 연다.
+        path: p.path ?? ''
       }
     })
   },
@@ -132,6 +148,10 @@ export const useServerStore = create<ServerStore>((set, get) => ({
     if (ftp.connectionStatus === 'connected') await ftp.disconnect()
     if (attempt !== connectAttempt) return false
 
+    // 시작 폴더를 따로 정하지 않았으면 이 서버에서 마지막으로 있던 폴더로 연다.
+    const startPath = path ?? (draft.path.trim() || (await lastVisitedPath(server)))
+    if (attempt !== connectAttempt) return false
+
     // 저장된 서버를 저장된 계정으로 연결할 때만 id를 보낸다. 그래야 main이 그 서버의
     // 로그인을 고친다. 다른 사용자·익명으로 접속하면 저장된 로그인은 그대로 두고 시각만 찍는다.
     const savedRow = get().servers.find((s) => s.id === draft.id)
@@ -146,7 +166,7 @@ export const useServerStore = create<ServerStore>((set, get) => ({
         password: server.password || 'anonymous@',
         secure: server.secure
       },
-      path ?? (draft.path.trim() || '/')
+      startPath
     )
     if (attempt !== connectAttempt) return false
     if (!ok) {
@@ -161,7 +181,8 @@ export const useServerStore = create<ServerStore>((set, get) => ({
     // 다른 계정으로 연결했으면 툴바를 저장된 계정으로 되돌리지 않는다(연결한 그대로 둔다).
     if (draft.id !== undefined && !sameAccount) return true
     const saved = findSaved(get().servers, server.host, server.port)
-    if (saved) set({ draft: toDraft(saved, draft.path), address: serverAddress(saved) })
+    // 주소칸에서 폴더가 빠지므로 시작 폴더도 비운다. 다음 연결은 마지막으로 있던 폴더에서 연다.
+    if (saved) set({ draft: toDraft(saved), address: serverAddress(saved) })
     return true
   },
 

@@ -54,6 +54,7 @@ export const de = {
   'connect.dismissError': 'Schließen',
   'connect.hostPlaceholder': '192.168.0.10 oder ftp://-Adresse einfügen',
   'connect.startFolder': 'Startordner',
+  'connect.startFolderLast': 'Zuletzt geöffneter Ordner',
   'servers.search': 'Gespeicherte Server durchsuchen',
   'servers.searchManager': 'Nach Name, Adresse oder Benutzer suchen',
   'servers.current': 'Aktuell',

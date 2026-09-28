@@ -443,3 +443,109 @@ describe('regressions — server manager connect', () => {
     expect(screen.getByRole('button', { name: /^Galaxy$/ })).toBeTruthy()
   })
 })
+
+describe('reconnecting — start folder', () => {
+  const recent = (...paths: string[]): (() => Promise<unknown>) => {
+    return () =>
+      Promise.resolve({
+        success: true,
+        data: paths.map((path) => ({ path, lastVisited: '2026-09-29 10:00:00.000' }))
+      })
+  }
+  const listedPaths = (): unknown[] => invokeCalls(mockInvoke, 'ftp:list').map((c) => c[0])
+
+  it('opens the folder the server was last left in', async () => {
+    mockIpc([NAS], { 'ftp:getRecentPaths': recent('/photos/2026', '/photos', '/') })
+    const user = userEvent.setup()
+    renderToolbar(true)
+
+    await user.dblClick(await screen.findByTitle(/Double-click to connect/))
+
+    await waitFor(() => expect(useFtpStore.getState().currentPath).toBe('/photos/2026'))
+    expect(listedPaths()[0]).toBe('/photos/2026')
+    expect(invokeCalls(mockInvoke, 'ftp:getRecentPaths')[0]).toEqual(['nas.local', 21])
+  })
+
+  it('starts at the root when the server has no recent folder', async () => {
+    mockIpc([NAS])
+    const user = userEvent.setup()
+    renderToolbar(true)
+
+    await user.dblClick(await screen.findByTitle(/Double-click to connect/))
+
+    await waitFor(() => expect(listedPaths()).toEqual(['/']))
+  })
+
+  it('falls back to the root when the last folder is gone', async () => {
+    mockIpc([NAS], {
+      'ftp:getRecentPaths': recent('/gone'),
+      'ftp:list': (path) =>
+        Promise.resolve(
+          path === '/gone'
+            ? { success: false, error: 'No such directory' }
+            : { success: true, data: { path, entries: [] } }
+        )
+    })
+    const user = userEvent.setup()
+    renderToolbar(true)
+
+    await user.dblClick(await screen.findByTitle(/Double-click to connect/))
+
+    await waitFor(() => expect(useFtpStore.getState().connectionStatus).not.toBe('error'))
+    await waitFor(() => expect(listedPaths()).toEqual(['/gone', '/']))
+    expect(useFtpStore.getState().currentPath).toBe('/')
+  })
+
+  it('opens a folder typed in the address instead of the last one', async () => {
+    mockIpc([NAS], { 'ftp:getRecentPaths': recent('/photos') })
+    const user = userEvent.setup()
+    renderToolbar()
+    await savedButton()
+
+    await connectWith(user, 'nas.local/music')
+
+    await waitFor(() => expect(listedPaths()[0]).toBe('/music'))
+    expect(invokeCalls(mockInvoke, 'ftp:getRecentPaths')).toHaveLength(0)
+  })
+
+  it('resumes the last folder on a later reconnect after opening a typed one', async () => {
+    mockIpc([NAS], { 'ftp:getRecentPaths': recent('/music/2026') })
+    const user = userEvent.setup()
+    renderToolbar()
+    await savedButton()
+    await connectWith(user, 'nas.local/music')
+    await waitFor(() => expect(useServerStore.getState().connecting).toBe(false))
+    mockInvoke.mockClear()
+
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+
+    await waitFor(() => expect(listedPaths()[0]).toBe('/music/2026'))
+  })
+
+  it('forgets a folder typed in the address once it is erased again', async () => {
+    mockIpc([NAS], { 'ftp:getRecentPaths': recent('/photos') })
+    const user = userEvent.setup()
+    renderToolbar()
+    await savedButton()
+    await user.clear(addressInput())
+    await user.type(addressInput(), 'nas.local/m')
+    await user.type(addressInput(), '{Backspace}{Backspace}{Enter}')
+
+    await waitFor(() => expect(listedPaths()[0]).toBe('/photos'))
+  })
+
+  it('opens the root when it is picked as the start folder in the server manager', async () => {
+    mockIpc([NAS], { 'ftp:getRecentPaths': recent('/photos') })
+    const user = userEvent.setup()
+    renderToolbar()
+    await savedButton()
+    await user.click(screen.getByRole('button', { name: 'Server manager' }))
+    const dialog = screen.getByRole('dialog', { name: 'Server manager' })
+
+    await user.click(await within(dialog).findByRole('button', { name: '/' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Connect' }))
+
+    await waitFor(() => expect(listedPaths()[0]).toBe('/'))
+    expect(invokeCalls(mockInvoke, 'ftp:getRecentPaths')).toHaveLength(1)
+  })
+})

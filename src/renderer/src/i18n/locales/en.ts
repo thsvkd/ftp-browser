@@ -56,6 +56,7 @@ export const en = {
   'connect.dismissError': 'Dismiss',
   'connect.hostPlaceholder': '192.168.0.10 or paste an ftp:// address',
   'connect.startFolder': 'Start folder',
+  'connect.startFolderLast': 'Last opened folder',
   'servers.search': 'Search saved servers',
   'servers.searchManager': 'Search by name, address or user',
   'servers.current': 'Current',

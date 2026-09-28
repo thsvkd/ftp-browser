@@ -51,6 +51,7 @@ export const zhTW = {
   'connect.dismissError': '關閉',
   'connect.hostPlaceholder': '192.168.0.10 或貼上 ftp:// 位址',
   'connect.startFolder': '起始資料夾',
+  'connect.startFolderLast': '上次開啟的資料夾',
   'servers.search': '搜尋已儲存的伺服器',
   'servers.searchManager': '依名稱、位址或使用者搜尋',
   'servers.current': '目前',

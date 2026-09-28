@@ -101,7 +101,7 @@ export interface ServerDraft {
   username: string
   password: string
   secure: boolean
-  /** Start folder. */
+  /** Start folder; '' opens the folder this server was last left in. */
   path: string
 }
 
@@ -112,10 +112,10 @@ export const emptyDraft = (): ServerDraft => ({
   username: '',
   password: '',
   secure: false,
-  path: '/'
+  path: ''
 })
 
-export const toDraft = (s: FtpServer, path = '/'): ServerDraft => ({
+export const toDraft = (s: FtpServer, path = ''): ServerDraft => ({
   id: s.id,
   name: s.name,
   host: s.host,

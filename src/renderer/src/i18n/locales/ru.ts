@@ -57,6 +57,7 @@ export const ru = {
   'connect.dismissError': 'Закрыть',
   'connect.hostPlaceholder': '192.168.0.10 или вставьте адрес ftp://',
   'connect.startFolder': 'Начальная папка',
+  'connect.startFolderLast': 'Последняя открытая папка',
   'servers.search': 'Поиск по сохранённым серверам',
   'servers.searchManager': 'Поиск по имени, адресу или пользователю',
   'servers.current': 'Текущий',

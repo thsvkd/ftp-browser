@@ -51,6 +51,7 @@ export const ja = {
   'connect.dismissError': '閉じる',
   'connect.hostPlaceholder': '192.168.0.10、または ftp:// アドレスを貼り付け',
   'connect.startFolder': '開始フォルダー',
+  'connect.startFolderLast': '最後に開いたフォルダー',
   'servers.search': '保存済みサーバーを検索',
   'servers.searchManager': '名前、アドレス、ユーザーで検索',
   'servers.current': '現在',

@@ -135,9 +135,10 @@ export function registerFtpHandlers(
     (_event, host: string, port: number): IpcResult<RecentPath[]> => {
       try {
         const db = getDatabase()
+        // 저장된 서버처럼 호스트는 대소문자를 가리지 않는다('NAS.local'과 'nas.local'은 같은 서버).
         const rows = db
           .prepare(
-            'SELECT path, last_visited FROM server_recent_paths WHERE server_host = ? AND server_port = ? ORDER BY last_visited DESC LIMIT 20'
+            'SELECT path, last_visited FROM server_recent_paths WHERE lower(server_host) = lower(?) AND server_port = ? ORDER BY last_visited DESC LIMIT 20'
           )
           .all(host, port) as Array<{ path: string; last_visited: string }>
         return {
@@ -172,10 +173,13 @@ export function registerFtpHandlers(
             const db = getDatabase()
             const host = manager.getHost()
             const port = manager.getPort()
+            // 밀리초까지 찍는다. 다시 연결할 때 가장 최근 경로에서 여는데, 1초 안에
+            // 폴더를 여러 번 옮기면 초 단위로는 어느 것이 마지막인지 가릴 수 없다.
             db.prepare(
               `INSERT INTO server_recent_paths (server_host, server_port, path, last_visited)
-               VALUES (?, ?, ?, datetime('now'))
-               ON CONFLICT(server_host, server_port, path) DO UPDATE SET last_visited = datetime('now')`
+               VALUES (?, ?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now'))
+               ON CONFLICT(server_host, server_port, path)
+               DO UPDATE SET last_visited = excluded.last_visited`
             ).run(host, port, remotePath)
 
             // Keep only last 20 paths per server

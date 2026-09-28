@@ -51,6 +51,7 @@ export const ko = {
   'connect.dismissError': '닫기',
   'connect.hostPlaceholder': '192.168.0.10 또는 ftp:// 주소 붙여넣기',
   'connect.startFolder': '시작 폴더',
+  'connect.startFolderLast': '마지막으로 연 폴더',
   'servers.search': '저장된 서버 검색',
   'servers.searchManager': '별칭, 주소, 사용자로 검색',
   'servers.current': '현재',

@@ -51,6 +51,7 @@ export const zhCN = {
   'connect.dismissError': '关闭',
   'connect.hostPlaceholder': '192.168.0.10 或粘贴 ftp:// 地址',
   'connect.startFolder': '起始文件夹',
+  'connect.startFolderLast': '上次打开的文件夹',
   'servers.search': '搜索已保存的服务器',
   'servers.searchManager': '按名称、地址或用户搜索',
   'servers.current': '当前',

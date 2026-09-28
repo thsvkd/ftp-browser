@@ -53,6 +53,7 @@ export const it = {
   'connect.dismissError': 'Chiudi',
   'connect.hostPlaceholder': '192.168.0.10 o incolla un indirizzo ftp://',
   'connect.startFolder': 'Cartella iniziale',
+  'connect.startFolderLast': 'Ultima cartella aperta',
   'servers.search': 'Cerca nei server salvati',
   'servers.searchManager': 'Cerca per nome, indirizzo o utente',
   'servers.current': 'Attuale',

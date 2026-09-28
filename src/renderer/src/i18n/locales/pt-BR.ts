@@ -53,6 +53,7 @@ export const ptBR = {
   'connect.dismissError': 'Fechar',
   'connect.hostPlaceholder': '192.168.0.10 ou cole um endereço ftp://',
   'connect.startFolder': 'Pasta inicial',
+  'connect.startFolderLast': 'Última pasta aberta',
   'servers.search': 'Pesquisar servidores salvos',
   'servers.searchManager': 'Pesquisar por nome, endereço ou usuário',
   'servers.current': 'Atual',

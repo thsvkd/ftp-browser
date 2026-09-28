@@ -304,7 +304,7 @@ export function ServerForm({
             value={draft.path}
             disabled={disabled}
             spellCheck={false}
-            placeholder="/"
+            placeholder={t('connect.startFolderLast')}
             className={cn(inputCls, 'font-mono text-[12px]')}
             onChange={(e) => onPatch({ path: e.target.value })}
           />
