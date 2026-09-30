@@ -11,6 +11,9 @@ beforeEach(() => {
   db = new Database(':memory:')
   // 실제 스키마(마이그레이션 + initDatabase가 덧붙이는 인덱스·테이블)를 그대로 쓴다.
   db.exec(fs.readFileSync(path.join(__dirname, 'migrations', '001_initial.sql'), 'utf-8'))
+  db.exec(
+    fs.readFileSync(path.join(__dirname, 'migrations', '002_server_max_transfers.sql'), 'utf-8')
+  )
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_servers_host_port ON servers(host, port)')
   db.exec(`CREATE TABLE IF NOT EXISTS server_recent_paths (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,6 +117,60 @@ describe('saveServer', () => {
         .map((s) => s.host)
         .sort()
     ).toEqual(['nas.local', 'phone'])
+  })
+})
+
+describe('max transfers', () => {
+  it('defaults to 16 and round-trips a saved value through save, update and list', () => {
+    const saved = saveServer(db, base)
+    expect(saved.maxTransfers).toBe(16)
+
+    const tuned = saveServer(db, { ...saved, maxTransfers: 4 })
+    expect(tuned.maxTransfers).toBe(4)
+    expect(listServers(db)).toEqual([expect.objectContaining({ id: saved.id, maxTransfers: 4 })])
+
+    // 필드가 빠진 저장은 recordConnection처럼 저장된 값을 그대로 둔다
+    expect(saveServer(db, { ...base, id: saved.id }).maxTransfers).toBe(4)
+  })
+
+  it('accepts 1 and 20 and rejects anything outside 1..20 or not a whole number', () => {
+    for (const maxTransfers of [1, 20]) {
+      expect(
+        saveServer(db, { ...base, id: undefined, host: `h${maxTransfers}`, maxTransfers })
+      ).toMatchObject({ maxTransfers })
+    }
+    for (const maxTransfers of [0, 21, -3, 2.5, NaN]) {
+      expect(() => saveServer(db, { ...base, host: 'bad', maxTransfers })).toThrow(
+        expect.objectContaining({ code: ErrorCode.INVALID_MAX_TRANSFERS })
+      )
+    }
+    expect(listServers(db)).toHaveLength(2)
+  })
+
+  it('is set by a saved server connecting by id, and kept by a connect that does not send it', () => {
+    const { id } = saveServer(db, { ...base, maxTransfers: 8 })
+    const connectAs = { host: 'nas.local', port: 21, secure: false, user: 'me', password: 'pw' }
+
+    recordConnection(db, { ...connectAs, id })
+    expect(listServers(db)[0].maxTransfers).toBe(8)
+
+    recordConnection(db, { ...connectAs, id, maxTransfers: 12 })
+    expect(listServers(db)[0].maxTransfers).toBe(12)
+
+    // 저장된 서버를 다른 계정으로 연결하면 그 서버의 설정은 그대로다
+    recordConnection(db, { ...connectAs, user: 'bob', maxTransfers: 3 })
+    expect(listServers(db)[0].maxTransfers).toBe(12)
+  })
+
+  it('gives a server first saved by connecting the sent value, or 16 for a quick connect', () => {
+    const connectAs = { port: 21, secure: false, user: 'me', password: 'pw' }
+
+    recordConnection(db, { ...connectAs, host: 'quick' })
+    recordConnection(db, { ...connectAs, host: 'tuned', maxTransfers: 6 })
+    recordConnection(db, { ...connectAs, host: 'garbage', maxTransfers: 99 })
+
+    const byHost = Object.fromEntries(listServers(db).map((s) => [s.host, s.maxTransfers]))
+    expect(byHost).toEqual({ quick: 16, tuned: 6, garbage: 16 })
   })
 })
 

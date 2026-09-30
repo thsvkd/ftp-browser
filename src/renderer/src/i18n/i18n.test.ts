@@ -35,6 +35,13 @@ describe('translate', () => {
   })
 })
 
+describe('connect.maxTransfersHint', () => {
+  it('says a new limit takes effect from the next connection', () => {
+    // 연결 중인 서버의 값을 바꿔도 풀은 다음 연결 때 새 값을 읽는다
+    expect(en['connect.maxTransfersHint']).toMatch(/next connection/)
+  })
+})
+
 describe('locale catalogs', () => {
   it('lists every catalog in the picker', () => {
     expect(Object.keys(MESSAGES).sort()).toEqual(LOCALES.map((l) => l.code).sort())

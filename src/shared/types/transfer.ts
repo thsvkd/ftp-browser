@@ -25,9 +25,11 @@ export interface TransferJob {
   completedAt?: string
 }
 
-export interface TransferProgress {
-  id: string
-  transferredBytes: number
-  totalBytes: number
-  percent: number
+/**
+ * 메인 프로세스가 일정 주기(`FLUSH_MS`)로 모아서 보내는 변경분.
+ * `upserts`는 마지막 전송 이후 바뀐 작업의 스냅샷(진행률 포함), `removedIds`는 목록에서 빠진 작업이다.
+ */
+export interface TransferUpdate {
+  upserts: TransferJob[]
+  removedIds: string[]
 }

@@ -3,9 +3,11 @@ import {
   formatLastConnected,
   parseServerAddress,
   resolveDraft,
+  sameFields,
   serverAddress,
   stripPassword,
-  emptyDraft
+  emptyDraft,
+  toDraft
 } from './serverAddress'
 
 describe('parseServerAddress', () => {
@@ -109,5 +111,41 @@ describe('resolveDraft', () => {
       port: 2121,
       username: 'u'
     })
+  })
+})
+
+describe('max transfers in a draft', () => {
+  const saved = {
+    id: 1,
+    name: '',
+    host: 'nas',
+    port: 21,
+    username: '',
+    password: '',
+    secure: false
+  }
+
+  it('defaults to 16 for a new draft and for a server saved without a value', () => {
+    expect(emptyDraft().maxTransfers).toBe('16')
+    expect(toDraft(saved).maxTransfers).toBe('16')
+    expect(toDraft({ ...saved, maxTransfers: 4 }).maxTransfers).toBe('4')
+  })
+
+  it('sends the typed number, 16 when empty, and keeps a bad value for the validator', () => {
+    const d = { ...emptyDraft(), host: 'nas' }
+    expect(resolveDraft({ ...d, maxTransfers: '8' }).server.maxTransfers).toBe(8)
+    expect(resolveDraft({ ...d, maxTransfers: '' }).server.maxTransfers).toBe(16)
+    expect(resolveDraft({ ...d, maxTransfers: '0' }).server.maxTransfers).toBe(0)
+    expect(resolveDraft({ ...d, maxTransfers: '99' }).server.maxTransfers).toBe(99)
+  })
+
+  it('counts as an edit only when the value differs from what is saved', () => {
+    const d = toDraft({ ...saved, maxTransfers: 4 })
+    expect(sameFields(d, { ...saved, maxTransfers: 4 })).toBe(true)
+    expect(sameFields({ ...d, maxTransfers: '5' }, { ...saved, maxTransfers: 4 })).toBe(false)
+    expect(sameFields(toDraft(saved), saved)).toBe(true)
+    expect(sameFields({ ...d, maxTransfers: '' }, saved)).toBe(true)
+    // 잘못된 값은 기본값과 같다고 보지 않는다
+    expect(sameFields({ ...toDraft(saved), maxTransfers: '0' }, saved)).toBe(false)
   })
 })

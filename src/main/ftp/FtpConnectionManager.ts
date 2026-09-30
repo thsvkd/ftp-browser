@@ -2,11 +2,12 @@ import { Client, FileInfo } from 'basic-ftp'
 import { EventEmitter } from 'events'
 import { isImageFile } from '@shared/constants'
 import { classifyError } from '../utils/errorClassifier'
-import type {
-  FtpConnectPayload,
-  FtpFileEntry,
-  FtpListResult,
-  FtpConnectionState
+import {
+  normalizeMaxTransfers,
+  type FtpConnectPayload,
+  type FtpFileEntry,
+  type FtpListResult,
+  type FtpConnectionState
 } from '@shared/types/ftp'
 
 /**
@@ -185,13 +186,19 @@ export class FtpConnectionManager extends EventEmitter {
   async createSecondaryClient(): Promise<Client> {
     if (!this._config) throw new Error('Not connected')
     const client = createConfiguredClient()
-    await client.access({
-      host: this._config.host,
-      port: this._config.port,
-      user: this._config.user,
-      password: this._config.password,
-      secure: this._config.secure
-    })
+    try {
+      await client.access({
+        host: this._config.host,
+        port: this._config.port,
+        user: this._config.user,
+        password: this._config.password,
+        secure: this._config.secure
+      })
+    } catch (err) {
+      // 530 "too many connections"처럼 서버가 소켓을 열어 둔 채 거부하면 제어 연결이 남는다
+      client.close()
+      throw err
+    }
     return client
   }
 
@@ -209,6 +216,11 @@ export class FtpConnectionManager extends EventEmitter {
 
   getPort(): number {
     return this._port
+  }
+
+  /** 이 연결에서 허용하는 동시 전송 연결 수. 연결 전이거나 값이 없으면 기본값. */
+  getMaxTransfers(): number {
+    return normalizeMaxTransfers(this._config?.maxTransfers)
   }
 
   /** 소켓 이벤트를 감지하여 예상치 못한 연결 끊김을 renderer에 알림 */

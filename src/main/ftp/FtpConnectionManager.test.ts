@@ -376,6 +376,46 @@ describe('FtpConnectionManager', () => {
     it('should throw if not connected', async () => {
       await expect(manager.createSecondaryClient()).rejects.toThrow('Not connected')
     })
+
+    it('should close the new client when its login fails', async () => {
+      vi.mocked(Client.prototype.access).mockResolvedValueOnce({} as unknown as FTPResponse)
+      await manager.connect({ host: 'host', port: 21, user: 'u', password: 'p', secure: false })
+      const close = vi.mocked(Client.prototype.close)
+      close.mockClear()
+      const err = new Error('530 Too many connections')
+      vi.mocked(Client.prototype.access).mockRejectedValueOnce(err)
+
+      await expect(manager.createSecondaryClient()).rejects.toBe(err)
+      // 서버가 소켓을 열어 둔 채 거부해도 제어 연결이 남지 않는다
+      expect(close).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('getMaxTransfers', () => {
+    const login = { host: 'host', port: 21, user: 'u', password: 'p', secure: false }
+
+    it('should use the connect payload value, and 16 without one or before connecting', async () => {
+      expect(manager.getMaxTransfers()).toBe(16)
+      vi.mocked(Client.prototype.access).mockResolvedValue({} as unknown as FTPResponse)
+
+      await manager.connect({ ...login, maxTransfers: 6 })
+      expect(manager.getMaxTransfers()).toBe(6)
+
+      await manager.connect(login)
+      expect(manager.getMaxTransfers()).toBe(16)
+
+      await manager.connect({ ...login, maxTransfers: 6 })
+      await manager.disconnect()
+      expect(manager.getMaxTransfers()).toBe(16)
+    })
+
+    it('should fall back to 16 for a value outside 1..20', async () => {
+      vi.mocked(Client.prototype.access).mockResolvedValue({} as unknown as FTPResponse)
+      for (const maxTransfers of [0, 21, 2.5]) {
+        await manager.connect({ ...login, maxTransfers })
+        expect(manager.getMaxTransfers()).toBe(16)
+      }
+    })
   })
 
   describe('getClient', () => {

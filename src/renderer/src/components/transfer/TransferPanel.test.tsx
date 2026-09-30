@@ -1,10 +1,10 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { makeApiMock } from '@renderer/test/rendererTestUtils'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
-import type { TransferJob } from '@shared/types/transfer'
+import type { TransferJob, TransferUpdate } from '@shared/types/transfer'
 import { TransferPanel } from './TransferPanel'
 
 const mockInvoke = vi.fn()
@@ -96,5 +96,85 @@ describe('TransferPanel batch progress', () => {
       screen.getByRole('progressbar', { name: 'only.jpg progress' }).getAttribute('aria-valuenow')
     ).toBe('40')
     expect(screen.getAllByRole('progressbar')).toHaveLength(1)
+  })
+})
+
+describe('TransferPanel update stream', () => {
+  function captureUpdateListener(): (update: TransferUpdate) => void {
+    const api = makeApiMock(mockInvoke)
+    let listener: ((...args: unknown[]) => void) | undefined
+    api.on.mockImplementation((channel: string, cb: (...args: unknown[]) => void) => {
+      if (channel === 'transfer:updated') listener = cb
+      return () => undefined
+    })
+    vi.stubGlobal('api', api)
+    return (update) => {
+      act(() => listener?.(update))
+    }
+  }
+
+  it('auto-expands when a delta introduces an active job', () => {
+    const push = captureUpdateListener()
+    render(<TransferPanel />)
+    expect(screen.queryByText('only.jpg')).toBeNull()
+
+    push({
+      upserts: [job({ id: 'single', fileName: 'only.jpg', status: 'active' })],
+      removedIds: []
+    })
+
+    expect(screen.getByText('only.jpg')).toBeTruthy()
+  })
+
+  it('merges a progress-only delta into the existing job', async () => {
+    const push = captureUpdateListener()
+    render(<TransferPanel />)
+    push({
+      upserts: [job({ id: 'single', fileName: 'only.jpg', status: 'active' })],
+      removedIds: []
+    })
+
+    push({
+      upserts: [
+        job({ id: 'single', fileName: 'only.jpg', status: 'active', transferredBytes: 60 })
+      ],
+      removedIds: []
+    })
+
+    expect(
+      screen.getByRole('progressbar', { name: 'only.jpg progress' }).getAttribute('aria-valuenow')
+    ).toBe('60')
+  })
+
+  it('does not re-expand while the run is still going after the user collapsed it', async () => {
+    const push = captureUpdateListener()
+    render(<TransferPanel />)
+    push({ upserts: [job({ id: 'j', fileName: 'only.jpg', status: 'active' })], removedIds: [] })
+    await userEvent.setup().click(screen.getByText(/Transfers/))
+    expect(screen.queryByText('only.jpg')).toBeNull()
+
+    push({
+      upserts: [job({ id: 'j', fileName: 'only.jpg', status: 'active', transferredBytes: 10 })],
+      removedIds: []
+    })
+
+    expect(screen.queryByText('only.jpg')).toBeNull()
+  })
+
+  it('shows jobs that already exist in the main process on mount', async () => {
+    mockInvoke.mockImplementation(async (channel: string) =>
+      channel === 'transfer:getAll'
+        ? {
+            success: true,
+            data: [
+              job({ id: 'old', fileName: 'old.jpg', status: 'completed', transferredBytes: 100 })
+            ]
+          }
+        : { success: true }
+    )
+    render(<TransferPanel />)
+    await userEvent.setup().click(screen.getByText(/Transfers/))
+
+    expect(await screen.findByText('old.jpg')).toBeTruthy()
   })
 })

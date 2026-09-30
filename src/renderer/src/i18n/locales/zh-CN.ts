@@ -46,6 +46,8 @@ export const zhCN = {
   'connect.secureOn': 'FTPS (TLS) 已开启',
   'connect.secureOff': 'FTPS (TLS) 已关闭',
   'connect.secureHint': '仅在服务器支持时开启',
+  'connect.maxTransfers': '同时传输数',
+  'connect.maxTransfersHint': '1–20。服务器拒绝连接时会自动降低。下次连接时生效',
   'connect.serverManager': '服务器管理器',
   'connect.chipTooltip': '{{address}} · 双击即可连接',
   'connect.dismissError': '关闭',
@@ -72,6 +74,7 @@ export const zhCN = {
   'servers.exists': '另一个已保存的服务器已在使用 {{address}}。',
   'servers.notFound': '此服务器已不在保存列表中。',
   'servers.invalidPort': '请输入 1 到 65535 之间的端口。',
+  'servers.invalidMaxTransfers': '请输入 1 到 20 之间的传输数。',
   'servers.tlsBadge': '使用 FTPS (TLS)',
 
   'status.disconnected': '未连接',

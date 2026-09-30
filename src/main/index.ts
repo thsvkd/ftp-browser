@@ -113,7 +113,7 @@ app.whenReady().then(() => {
   const operationManager = registerOperationHandlers(win)
   const { manager, fileOps } = registerFtpHandlers(win, operationManager)
   registerLocalFsHandlers(win, operationManager)
-  registerTransferHandlers(win, fileOps)
+  registerTransferHandlers(win, fileOps, manager)
   registerThumbnailHandlers(win, db, manager)
   registerPreviewHandlers(db, manager)
   registerDragHandlers(manager)

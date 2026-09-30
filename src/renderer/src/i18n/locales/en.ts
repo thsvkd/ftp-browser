@@ -51,6 +51,9 @@ export const en = {
   'connect.secureOn': 'FTPS (TLS) is on',
   'connect.secureOff': 'FTPS (TLS) is off',
   'connect.secureHint': 'Only if the server supports it',
+  'connect.maxTransfers': 'Simultaneous transfers',
+  'connect.maxTransfersHint':
+    '1–20. Lowered automatically if the server refuses connections. Takes effect from the next connection',
   'connect.serverManager': 'Server manager',
   'connect.chipTooltip': '{{address}} · Double-click to connect',
   'connect.dismissError': 'Dismiss',
@@ -78,6 +81,7 @@ export const en = {
   'servers.exists': 'Another saved server already uses {{address}}.',
   'servers.notFound': 'This server is no longer saved.',
   'servers.invalidPort': 'Enter a port from 1 to 65535.',
+  'servers.invalidMaxTransfers': 'Enter a number of transfers from 1 to 20.',
   'servers.tlsBadge': 'Uses FTPS (TLS)',
 
   'status.disconnected': 'Disconnected',

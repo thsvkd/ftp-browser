@@ -132,7 +132,8 @@ describe('ConnectBar — saved servers', () => {
         port: 2221,
         username: 'phone',
         password: 'pw',
-        secure: false
+        secure: false,
+        maxTransfers: 6
       }
     ])
     const user = userEvent.setup()
@@ -151,7 +152,22 @@ describe('ConnectBar — saved servers', () => {
       port: 2221,
       user: 'phone',
       password: 'pw',
-      secure: false
+      secure: false,
+      maxTransfers: 6
+    })
+  })
+
+  it('connects a quick-connect address with 16 transfer connections', async () => {
+    const user = userEvent.setup()
+    renderToolbar()
+
+    await user.type(addressInput(), 'files.example.com')
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    expect(invokeCalls(mockInvoke, 'ftp:connect')[0][0]).toMatchObject({
+      host: 'files.example.com',
+      maxTransfers: 16
     })
   })
 

@@ -8,7 +8,7 @@ import {
   parseServerAddress,
   type ServerDraft
 } from '@renderer/lib/serverAddress'
-import type { RecentPath } from '@shared/types/ftp'
+import { isValidMaxTransfers, type RecentPath } from '@shared/types/ftp'
 import { STROKE, inputCls } from './styles'
 
 export function PasswordInput({
@@ -194,6 +194,8 @@ export function ServerForm({
   const id = useId()
   const t = useT()
   const portInvalid = draft.port.trim() !== '' && !isValidPort(Number(draft.port))
+  const maxTransfersInvalid =
+    draft.maxTransfers.trim() !== '' && !isValidMaxTransfers(Number(draft.maxTransfers))
   const row = (label: ReactNode, forId: string, node: ReactNode): React.JSX.Element => (
     <div className="min-w-0">
       <label htmlFor={forId} className="mb-1 block text-xs font-medium text-gray-600">
@@ -295,6 +297,29 @@ export function ServerForm({
           </span>
         }
       />
+      {row(
+        t('connect.maxTransfers'),
+        `${id}-transfers`,
+        <div className="flex items-center gap-3">
+          <input
+            id={`${id}-transfers`}
+            value={draft.maxTransfers}
+            disabled={disabled}
+            inputMode="numeric"
+            maxLength={2}
+            placeholder="16"
+            aria-invalid={maxTransfersInvalid}
+            title={maxTransfersInvalid ? t('servers.invalidMaxTransfers') : undefined}
+            className={cn(
+              inputCls,
+              'w-[72px] shrink-0 tabular-nums',
+              maxTransfersInvalid && 'border-red-400 focus:border-red-500 focus:ring-red-500/20'
+            )}
+            onChange={(e) => onPatch({ maxTransfers: e.target.value.replace(/\D/g, '') })}
+          />
+          <span className="text-xs text-gray-400">{t('connect.maxTransfersHint')}</span>
+        </div>
+      )}
       {row(
         t('connect.startFolder'),
         `${id}-path`,

@@ -167,4 +167,67 @@ describe('initDatabase cache.db', () => {
         .get('seed-thumb-test-197')
     ).toEqual({ cache_key: 'seed-thumb-test-197', host: 'seed.ftp.test' })
   })
+
+  it('should give servers saved before the setting existed 16 transfer connections', async () => {
+    const cachePath = path.join(userData, 'cache.db')
+    const seed = new Database(cachePath)
+    seed.exec(`
+      CREATE TABLE servers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        host TEXT NOT NULL,
+        port INTEGER NOT NULL DEFAULT 21,
+        username TEXT,
+        password_enc TEXT,
+        secure INTEGER NOT NULL DEFAULT 0,
+        last_connected TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `)
+    seed.prepare('INSERT INTO servers (name, host, port) VALUES (?, ?, ?)').run('old', 'a', 21)
+    seed.close()
+
+    const initDatabase = await loadInitDatabase()
+    opened = initDatabase()
+    expect(opened.prepare('SELECT max_transfers FROM servers').get()).toEqual({ max_transfers: 16 })
+
+    // 다시 열어도(이미 적용됨) 값을 건드리거나 경고하지 않는다.
+    opened.prepare('UPDATE servers SET max_transfers = 4').run()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    opened.close()
+    vi.resetModules()
+    opened = (await loadInitDatabase())()
+    expect(opened.prepare('SELECT max_transfers FROM servers').get()).toEqual({ max_transfers: 4 })
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('should log a max_transfers migration failure other than a duplicate column as an error', async () => {
+    // 이 컬럼이 없으면 서버 목록을 읽지 못하므로 경고가 아니라 에러로 남긴다
+    const readFileSync = fs.readFileSync
+    const read = vi
+      .spyOn(fs, 'readFileSync')
+      .mockImplementation(((file: fs.PathOrFileDescriptor, ...rest) =>
+        String(file).endsWith('002_server_max_transfers.sql')
+          ? 'NOT SQL'
+          : readFileSync(file, ...(rest as []))) as typeof fs.readFileSync)
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      opened = (await loadInitDatabase())()
+      expect(error).toHaveBeenCalledWith(
+        '[database] Failed to add servers.max_transfers column:',
+        expect.anything()
+      )
+    } finally {
+      read.mockRestore()
+      error.mockRestore()
+    }
+  })
+
+  it('should add max_transfers to a fresh cache.db', async () => {
+    const initDatabase = await loadInitDatabase()
+    opened = initDatabase()
+    opened.prepare('INSERT INTO servers (name, host) VALUES (?, ?)').run('n', 'h')
+    expect(opened.prepare('SELECT max_transfers FROM servers').get()).toEqual({ max_transfers: 16 })
+  })
 })

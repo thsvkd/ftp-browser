@@ -85,6 +85,23 @@ describe('preload api', () => {
     await expect(invoke('update:notAllowed')).rejects.toThrow('IPC channel not allowed')
   })
 
+  it('should deliver transfer deltas on transfer:updated only', async () => {
+    const api = await loadExposedApi()
+    const on = api.on as (channel: string, callback: (...args: unknown[]) => void) => () => void
+
+    const callback = vi.fn()
+    on('transfer:updated', callback)
+    const listener = vi.mocked(ipcRenderer.on).mock.calls.at(-1)?.[1]
+    expect(ipcRenderer.on).toHaveBeenCalledWith('transfer:updated', expect.any(Function))
+
+    const update = { upserts: [], removedIds: ['a'] }
+    listener?.({} as Electron.IpcRendererEvent, update)
+    expect(callback).toHaveBeenCalledWith(update)
+
+    // 진행률은 upsert에 실려 오므로 별도 채널은 더 이상 열려 있지 않다.
+    expect(() => on('transfer:progress', vi.fn())).toThrow('IPC event channel not allowed')
+  })
+
   it('should allow saving a server without connecting', async () => {
     const api = await loadExposedApi()
     const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>

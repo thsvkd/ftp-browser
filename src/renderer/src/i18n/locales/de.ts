@@ -49,6 +49,9 @@ export const de = {
   'connect.secureOn': 'FTPS (TLS) ist aktiviert',
   'connect.secureOff': 'FTPS (TLS) ist deaktiviert',
   'connect.secureHint': 'Nur wenn der Server es unterstützt',
+  'connect.maxTransfers': 'Gleichzeitige Übertragungen',
+  'connect.maxTransfersHint':
+    '1–20. Wird automatisch gesenkt, wenn der Server Verbindungen ablehnt. Gilt ab der nächsten Verbindung',
   'connect.serverManager': 'Serververwaltung',
   'connect.chipTooltip': '{{address}} · Zum Verbinden doppelklicken',
   'connect.dismissError': 'Schließen',
@@ -77,6 +80,7 @@ export const de = {
   'servers.exists': 'Ein anderer gespeicherter Server verwendet bereits {{address}}.',
   'servers.notFound': 'Dieser Server ist nicht mehr gespeichert.',
   'servers.invalidPort': 'Geben Sie einen Port von 1 bis 65535 ein.',
+  'servers.invalidMaxTransfers': 'Geben Sie eine Anzahl von 1 bis 20 ein.',
   'servers.tlsBadge': 'Verwendet FTPS (TLS)',
 
   'status.disconnected': 'Getrennt',

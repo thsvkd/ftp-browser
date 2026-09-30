@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { joinRemotePath, planRemoteMoves } from './remoteDrop'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { joinRemotePath, planRemoteMoves, performRemoteDrop } from './remoteDrop'
 
 describe('joinRemotePath', () => {
   it('joins a child onto the root without doubling the slash', () => {
@@ -50,5 +50,88 @@ describe('planRemoteMoves', () => {
 
   it('returns an empty plan for no items', () => {
     expect(planRemoteMoves([], '/dest')).toEqual([])
+  })
+})
+
+describe('performRemoteDrop (local upload)', () => {
+  const invoke = vi.fn()
+
+  /** 로컬 패널에서 끌어온 것처럼 application/x-local-files만 채운 dataTransfer */
+  const localDrop = (): DataTransfer =>
+    ({
+      getData: (type: string) =>
+        type === 'application/x-local-files' ? JSON.stringify([{ localPath: '/src/photos' }]) : '',
+      files: []
+    }) as unknown as DataTransfer
+
+  const expandTo = (relativePaths: string[]): void => {
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'local:expandForUpload') {
+        return {
+          success: true,
+          data: relativePaths.map((relativePath) => ({
+            localPath: `/src/${relativePath}`,
+            relativePath,
+            size: 5
+          }))
+        }
+      }
+      return { success: true, data: [] }
+    })
+  }
+
+  const enqueuePayload = (): {
+    direction: string
+    items: Array<{ remotePath: string }>
+    forceBatch: boolean
+    remoteDirs?: string[]
+  } => {
+    const call = invoke.mock.calls.find(([channel]) => channel === 'transfer:enqueueBatch')
+    expect(call).toBeDefined()
+    return call![1]
+  }
+
+  beforeEach(() => {
+    invoke.mockReset()
+    vi.stubGlobal('window', { api: { invoke } })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('never calls ftp:mkdir and hands the missing dirs to the batch, ancestors included', async () => {
+    expandTo(['photos/a/1.jpg', 'photos/a/b/2.jpg', 'photos/c/3.jpg', 'top.jpg'])
+
+    await performRemoteDrop(localDrop(), '/t')
+
+    expect(invoke.mock.calls.some(([channel]) => channel === 'ftp:mkdir')).toBe(false)
+    const payload = enqueuePayload()
+    expect(payload.direction).toBe('upload')
+    expect(payload.forceBatch).toBe(true)
+    expect([...payload.remoteDirs!].sort()).toEqual([
+      '/t/photos',
+      '/t/photos/a',
+      '/t/photos/a/b',
+      '/t/photos/c'
+    ])
+    expect(payload.items.map((item) => item.remotePath)).toContain('/t/photos/a/b/2.jpg')
+  })
+
+  it('does not list the target folder or the root as a dir to create', async () => {
+    expandTo(['a.jpg', 'sub/b.jpg'])
+
+    await performRemoteDrop(localDrop(), '/')
+
+    expect(enqueuePayload().remoteDirs).toEqual(['/sub'])
+  })
+
+  it('sends an empty dir list when every file lands directly in the target', async () => {
+    expandTo(['a.jpg', 'b.jpg'])
+
+    await performRemoteDrop(localDrop(), '/t')
+
+    expect(invoke.mock.calls.some(([channel]) => channel === 'ftp:mkdir')).toBe(false)
+    expect(enqueuePayload().remoteDirs ?? []).toEqual([])
   })
 })

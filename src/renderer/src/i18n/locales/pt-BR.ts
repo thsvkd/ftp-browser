@@ -48,6 +48,9 @@ export const ptBR = {
   'connect.secureOn': 'FTPS (TLS) ativado',
   'connect.secureOff': 'FTPS (TLS) desativado',
   'connect.secureHint': 'Somente se o servidor oferecer suporte',
+  'connect.maxTransfers': 'Transferências simultâneas',
+  'connect.maxTransfersHint':
+    '1–20. Reduzido automaticamente se o servidor recusar conexões. Vale a partir da próxima conexão',
   'connect.serverManager': 'Gerenciador de servidores',
   'connect.chipTooltip': '{{address}} · Clique duas vezes para conectar',
   'connect.dismissError': 'Fechar',
@@ -75,6 +78,7 @@ export const ptBR = {
   'servers.exists': 'Outro servidor salvo já usa {{address}}.',
   'servers.notFound': 'Este servidor não está mais salvo.',
   'servers.invalidPort': 'Digite uma porta de 1 a 65535.',
+  'servers.invalidMaxTransfers': 'Digite um número de transferências de 1 a 20.',
   'servers.tlsBadge': 'Usa FTPS (TLS)',
 
   'status.disconnected': 'Desconectado',

@@ -46,6 +46,9 @@ export const ja = {
   'connect.secureOn': 'FTPS(TLS): オン',
   'connect.secureOff': 'FTPS(TLS): オフ',
   'connect.secureHint': 'サーバーが対応している場合のみ',
+  'connect.maxTransfers': '同時転送数',
+  'connect.maxTransfersHint':
+    '1〜20。サーバーが接続を拒否した場合は自動的に減らします。次回の接続から適用されます',
   'connect.serverManager': 'サーバー マネージャー',
   'connect.chipTooltip': '{{address}} · ダブルクリックで接続',
   'connect.dismissError': '閉じる',
@@ -72,6 +75,7 @@ export const ja = {
   'servers.exists': '{{address}} は別の保存済みサーバーで使われています。',
   'servers.notFound': 'このサーバーはもう保存されていません。',
   'servers.invalidPort': '1 から 65535 までのポート番号を入力してください。',
+  'servers.invalidMaxTransfers': '同時転送数は 1 から 20 までで入力してください。',
   'servers.tlsBadge': 'FTPS(TLS) を使用',
 
   'status.disconnected': '未接続',

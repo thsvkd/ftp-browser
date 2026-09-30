@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { FtpFileOperations } from './FtpFileOperations'
+import { fastUpload } from './fastTransfer'
+import type { Client } from 'basic-ftp'
 import type { FtpConnectionManager, FtpMutationEvent } from './FtpConnectionManager'
+
+vi.mock('./fastTransfer', () => ({ fastUpload: vi.fn().mockResolvedValue(undefined) }))
 
 interface MockClient {
   uploadFrom: ReturnType<typeof vi.fn>
@@ -17,6 +21,7 @@ function createMockManager(): {
   manager: FtpConnectionManager
   client: MockClient
   emit: ReturnType<typeof vi.fn>
+  runOnMainClient: ReturnType<typeof vi.fn>
 } {
   const mockClient: MockClient = {
     uploadFrom: vi.fn().mockResolvedValue(undefined),
@@ -30,14 +35,16 @@ function createMockManager(): {
   }
 
   const emit = vi.fn()
+  const runOnMainClient = vi.fn(<T>(task: (c: MockClient) => Promise<T>) => task(mockClient))
   return {
     manager: {
       getClient: vi.fn(() => mockClient),
-      runOnMainClient: vi.fn(<T>(task: (c: MockClient) => Promise<T>) => task(mockClient)),
+      runOnMainClient,
       emit
     } as unknown as FtpConnectionManager,
     client: mockClient,
-    emit
+    emit,
+    runOnMainClient
   }
 }
 
@@ -45,12 +52,14 @@ describe('FtpFileOperations', () => {
   let ops: FtpFileOperations
   let mockClient: ReturnType<typeof createMockManager>['client']
   let emit: ReturnType<typeof createMockManager>['emit']
+  let runOnMainClient: ReturnType<typeof createMockManager>['runOnMainClient']
 
   beforeEach(() => {
     vi.clearAllMocks()
     const mock = createMockManager()
     mockClient = mock.client
     emit = mock.emit
+    runOnMainClient = mock.runOnMainClient
     ops = new FtpFileOperations(mock.manager)
   })
 
@@ -196,6 +205,92 @@ describe('FtpFileOperations', () => {
 
       const mutations = emit.mock.calls.filter((c) => c[0] === 'mutation')
       expect(mutations).toHaveLength(0)
+    })
+  })
+
+  describe('explicit client parameter', () => {
+    function createOwnClient(): MockClient {
+      return {
+        uploadFrom: vi.fn().mockResolvedValue(undefined),
+        downloadTo: vi.fn().mockResolvedValue(undefined),
+        remove: vi.fn(),
+        list: vi.fn(),
+        removeEmptyDir: vi.fn(),
+        rename: vi.fn(),
+        sendIgnoringError: vi.fn(),
+        trackProgress: vi.fn()
+      }
+    }
+    // 전용 클라이언트는 mock manager의 클라이언트와 달라야 "메인 클라이언트를 안 쓴다"를 증명할 수 있다.
+    function asClient(c: MockClient): Client {
+      return c as unknown as Client
+    }
+
+    it('uploads on the given client without touching the main client', async () => {
+      const own = createOwnClient()
+      await ops.upload('/local/a.txt', '/remote/a.txt', undefined, asClient(own))
+
+      expect(own.uploadFrom).toHaveBeenCalledTimes(1)
+      expect(own.uploadFrom.mock.calls[0]).toEqual(['/local/a.txt', '/remote/a.txt'])
+      expect(mockClient.uploadFrom).not.toHaveBeenCalled()
+      expect(runOnMainClient).not.toHaveBeenCalled()
+    })
+
+    it('uploads through the fast flow on the given client when asked', async () => {
+      const own = createOwnClient()
+      const onProgress = vi.fn()
+      await ops.upload('/local/a.txt', '/remote/a.txt', onProgress, asClient(own), true)
+
+      expect(fastUpload).toHaveBeenCalledWith(own, '/local/a.txt', '/remote/a.txt')
+      expect(own.uploadFrom).not.toHaveBeenCalled()
+      expect(own.trackProgress).toHaveBeenNthCalledWith(1, expect.any(Function))
+      expect(own.trackProgress).toHaveBeenLastCalledWith()
+    })
+
+    it('keeps the standard path on the main client even when the fast flow is asked', async () => {
+      await ops.upload('/local/a.txt', '/remote/a.txt', undefined, undefined, true)
+
+      expect(mockClient.uploadFrom).toHaveBeenCalledWith('/local/a.txt', '/remote/a.txt')
+      expect(fastUpload).not.toHaveBeenCalled()
+    })
+
+    it('downloads on the given client without touching the main client', async () => {
+      const own = createOwnClient()
+      await ops.download('/remote/a.txt', '/local/a.txt', undefined, asClient(own))
+
+      expect(own.downloadTo.mock.calls[0]).toEqual(['/local/a.txt', '/remote/a.txt'])
+      expect(mockClient.downloadTo).not.toHaveBeenCalled()
+      expect(runOnMainClient).not.toHaveBeenCalled()
+    })
+
+    it('sets progress tracking and clears it afterwards', async () => {
+      const own = createOwnClient()
+      const onProgress = vi.fn()
+      own.uploadFrom.mockImplementationOnce(async () => {
+        own.trackProgress.mock.calls[0][0]({ bytes: 5, bytesOverall: 9 })
+      })
+      await ops.upload('/local/a.txt', '/remote/a.txt', onProgress, asClient(own))
+
+      expect(onProgress).toHaveBeenCalledWith({ bytes: 5, bytesOverall: 9 })
+      expect(own.trackProgress).toHaveBeenLastCalledWith()
+    })
+
+    it('clears progress tracking when the transfer fails', async () => {
+      const own = createOwnClient()
+      own.downloadTo.mockRejectedValueOnce(new Error('boom'))
+      await expect(
+        ops.download('/remote/a.txt', '/local/a.txt', vi.fn(), asClient(own))
+      ).rejects.toThrow('boom')
+      expect(own.trackProgress).toHaveBeenLastCalledWith()
+    })
+
+    it('still emits the upload mutation, but not one for download', async () => {
+      const own = createOwnClient()
+      await ops.download('/remote/a.txt', '/local/a.txt', undefined, asClient(own))
+      expect(emit.mock.calls.filter((c) => c[0] === 'mutation')).toHaveLength(0)
+
+      await ops.upload('/local/a.txt', '/remote/a.txt', undefined, asClient(own))
+      expect(emit).toHaveBeenCalledWith('mutation', { kind: 'upload', remotePath: '/remote/a.txt' })
     })
   })
 

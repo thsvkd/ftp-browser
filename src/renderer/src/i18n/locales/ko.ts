@@ -46,6 +46,9 @@ export const ko = {
   'connect.secureOn': 'FTPS(TLS) 켜짐',
   'connect.secureOff': 'FTPS(TLS) 꺼짐',
   'connect.secureHint': '서버가 지원할 때만 켜세요',
+  'connect.maxTransfers': '동시 전송 수',
+  'connect.maxTransfersHint':
+    '1~20. 서버가 연결을 거부하면 자동으로 낮춥니다. 다음 연결부터 적용됩니다',
   'connect.serverManager': '서버 관리자',
   'connect.chipTooltip': '{{address}} · 두 번 클릭하면 연결합니다',
   'connect.dismissError': '닫기',
@@ -72,6 +75,7 @@ export const ko = {
   'servers.exists': '다른 저장된 서버가 이미 {{address}} 주소를 사용하고 있습니다.',
   'servers.notFound': '이 서버는 더 이상 저장되어 있지 않습니다.',
   'servers.invalidPort': '1에서 65535 사이의 포트를 입력하세요.',
+  'servers.invalidMaxTransfers': '동시 전송 수는 1에서 20 사이로 입력하세요.',
   'servers.tlsBadge': 'FTPS(TLS) 사용',
 
   'status.disconnected': '연결 안 됨',

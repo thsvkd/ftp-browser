@@ -76,8 +76,8 @@ async function moveRemoteFiles(items: RemoteFileDragItem[], targetPath: string):
 }
 
 /**
- * Upload local/OS files into `targetPath`, expanding dropped folders and
- * creating any missing remote subdirectories first.
+ * Upload local/OS files into `targetPath`, expanding dropped folders. Missing
+ * remote subdirectories are created by the transfer queue as part of the batch.
  */
 async function uploadLocalPaths(localPaths: string[], targetPath: string): Promise<void> {
   const enqueueBatch = useTransferStore.getState().enqueueBatch
@@ -94,23 +94,16 @@ async function uploadLocalPaths(localPaths: string[], targetPath: string): Promi
   const entries = expanded.data
   const toRemote = (rel: string): string => joinRemotePath(targetPath, rel)
 
-  // Ensure remote subdirectories exist before uploading files into them.
+  // Remote subdirectories the batch must create, ancestors included, down from the
+  // target (which already exists). The main process issues one MKD per directory
+  // through the transfer pool, overlapped with the uploads, so a missing folder
+  // that cannot be created surfaces as failed file transfers in the queue.
   const dirs = new Set<string>()
   for (const entry of entries) {
-    const remotePath = toRemote(entry.relativePath)
-    const slash = remotePath.lastIndexOf('/')
-    const dir = slash > 0 ? remotePath.slice(0, slash) : '/'
-    if (dir !== targetPath && dir !== '/') dirs.add(dir)
-  }
-  // Best-effort directory creation. ftp:mkdir issues idempotent MKD per level
-  // and treats "already exists" as success, so a reported failure here is a
-  // hard error (socket/timeout). Real permission/quota failures that come back
-  // as an FTP negative reply are not caught here — they surface as failed file
-  // transfers in the transfer queue below.
-  for (const dir of dirs) {
-    const result = await window.api.invoke<IpcResult<void>>('ftp:mkdir', dir)
-    if (!result.success) {
-      console.warn('[remoteDrop] Failed to create remote directory:', dir, result.error)
+    let dir = remoteDirname(toRemote(entry.relativePath))
+    while (dir !== targetPath && dir !== '/' && !dirs.has(dir)) {
+      dirs.add(dir)
+      dir = remoteDirname(dir)
     }
   }
 
@@ -123,7 +116,8 @@ async function uploadLocalPaths(localPaths: string[], targetPath: string): Promi
       fileName: entry.relativePath.slice(entry.relativePath.lastIndexOf('/') + 1),
       totalBytes: entry.size
     })),
-    containsFolder
+    containsFolder,
+    [...dirs]
   )
 }
 

@@ -52,6 +52,9 @@ export const ru = {
   'connect.secureOn': 'FTPS (TLS) включён',
   'connect.secureOff': 'FTPS (TLS) выключен',
   'connect.secureHint': 'Только если сервер это поддерживает',
+  'connect.maxTransfers': 'Одновременные передачи',
+  'connect.maxTransfersHint':
+    '1–20. Автоматически уменьшается, если сервер отклоняет подключения. Применяется со следующего подключения',
   'connect.serverManager': 'Диспетчер серверов',
   'connect.chipTooltip': '{{address}} · Дважды щёлкните, чтобы подключиться',
   'connect.dismissError': 'Закрыть',
@@ -81,6 +84,7 @@ export const ru = {
   'servers.exists': 'Адрес {{address}} уже используется другим сохранённым сервером.',
   'servers.notFound': 'Этот сервер больше не сохранён.',
   'servers.invalidPort': 'Введите порт от 1 до 65535.',
+  'servers.invalidMaxTransfers': 'Введите число передач от 1 до 20.',
   'servers.tlsBadge': 'Используется FTPS (TLS)',
 
   'status.disconnected': 'Нет подключения',

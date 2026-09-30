@@ -1,5 +1,6 @@
 import type { Client } from 'basic-ftp'
 import { FtpConnectionManager } from './FtpConnectionManager'
+import { fastUpload } from './fastTransfer'
 
 export interface ProgressInfo {
   bytes: number
@@ -88,43 +89,54 @@ export async function removeRemoteDirRecursive(
 export class FtpFileOperations {
   constructor(private manager: FtpConnectionManager) {}
 
+  /**
+   * `client`를 주면 그 클라이언트에서 직접 실행한다(전송 풀의 전용 연결). 메인 클라이언트의
+   * 직렬 큐(`runOnMainClient`)를 거치지 않으므로 탐색 명령과 서로 막지 않는다.
+   * `fast`면 그 클라이언트에서 빠른 업로드(fastTransfer)를 쓴다. 메인 클라이언트는 항상 표준 경로다.
+   */
   async upload(
     localPath: string,
     remotePath: string,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
+    client?: Client,
+    fast = false
   ): Promise<void> {
-    await this.manager.runOnMainClient(async (client) => {
+    const task = async (c: Client): Promise<void> => {
       if (onProgress) {
-        client.trackProgress((info) => {
+        c.trackProgress((info) => {
           onProgress({ bytes: info.bytes, bytesOverall: info.bytesOverall })
         })
       }
       try {
-        await client.uploadFrom(localPath, remotePath)
+        if (client && fast) await fastUpload(c, localPath, remotePath)
+        else await c.uploadFrom(localPath, remotePath)
       } finally {
-        client.trackProgress()
+        c.trackProgress()
       }
-    })
+    }
+    await (client ? task(client) : this.manager.runOnMainClient(task))
     this.manager.emit('mutation', { kind: 'upload', remotePath })
   }
 
   async download(
     remotePath: string,
     localPath: string,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
+    client?: Client
   ): Promise<void> {
-    await this.manager.runOnMainClient(async (client) => {
+    const task = async (c: Client): Promise<void> => {
       if (onProgress) {
-        client.trackProgress((info) => {
+        c.trackProgress((info) => {
           onProgress({ bytes: info.bytes, bytesOverall: info.bytesOverall })
         })
       }
       try {
-        await client.downloadTo(localPath, remotePath)
+        await c.downloadTo(localPath, remotePath)
       } finally {
-        client.trackProgress()
+        c.trackProgress()
       }
-    })
+    }
+    await (client ? task(client) : this.manager.runOnMainClient(task))
   }
 
   async deleteFile(remotePath: string): Promise<void> {

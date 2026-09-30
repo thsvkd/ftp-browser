@@ -152,6 +152,27 @@ export function initDatabase(): Database.Database {
     }
   }
 
+  // 002: 서버별 동시 전송 수. 기존 행은 컬럼 기본값 16을 받는다. ALTER는 두 번 실행할 수 없으므로
+  // "duplicate column name"은 이미 적용된 것으로 본다.
+  let serverMaxTransfersSql: string
+  try {
+    serverMaxTransfersSql = fs.readFileSync(
+      path.join(__dirname, 'migrations', '002_server_max_transfers.sql'),
+      'utf-8'
+    )
+  } catch {
+    serverMaxTransfersSql =
+      'ALTER TABLE servers ADD COLUMN max_transfers INTEGER NOT NULL DEFAULT 16'
+  }
+  try {
+    db.exec(serverMaxTransfersSql)
+  } catch (err) {
+    // item_count 캐시와 달리 이 컬럼이 없으면 서버 목록을 읽지 못하므로 에러로 남긴다
+    if (!String(err).includes('duplicate column name')) {
+      console.error('[database] Failed to add servers.max_transfers column:', err)
+    }
+  }
+
   return db
 }
 

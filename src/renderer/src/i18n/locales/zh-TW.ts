@@ -46,6 +46,8 @@ export const zhTW = {
   'connect.secureOn': 'FTPS (TLS) 已開啟',
   'connect.secureOff': 'FTPS (TLS) 已關閉',
   'connect.secureHint': '僅在伺服器支援時開啟',
+  'connect.maxTransfers': '同時傳輸數',
+  'connect.maxTransfersHint': '1–20。伺服器拒絕連線時會自動降低。下次連線時生效',
   'connect.serverManager': '伺服器管理員',
   'connect.chipTooltip': '{{address}} · 按兩下即可連線',
   'connect.dismissError': '關閉',
@@ -72,6 +74,7 @@ export const zhTW = {
   'servers.exists': '另一個已儲存的伺服器已在使用 {{address}}。',
   'servers.notFound': '此伺服器已不在儲存清單中。',
   'servers.invalidPort': '請輸入 1 到 65535 之間的連接埠。',
+  'servers.invalidMaxTransfers': '請輸入 1 到 20 之間的傳輸數。',
   'servers.tlsBadge': '使用 FTPS (TLS)',
 
   'status.disconnected': '未連線',

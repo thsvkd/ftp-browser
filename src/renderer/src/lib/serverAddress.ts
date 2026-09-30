@@ -1,4 +1,4 @@
-import type { FtpServer } from '@shared/types/ftp'
+import { DEFAULT_MAX_TRANSFERS, type FtpServer } from '@shared/types/ftp'
 
 export interface ParsedServerAddress {
   host: string
@@ -101,6 +101,8 @@ export interface ServerDraft {
   username: string
   password: string
   secure: boolean
+  /** Simultaneous transfer connections, as typed (digits only). */
+  maxTransfers: string
   /** Start folder; '' opens the folder this server was last left in. */
   path: string
 }
@@ -112,6 +114,7 @@ export const emptyDraft = (): ServerDraft => ({
   username: '',
   password: '',
   secure: false,
+  maxTransfers: String(DEFAULT_MAX_TRANSFERS),
   path: ''
 })
 
@@ -123,6 +126,7 @@ export const toDraft = (s: FtpServer, path = ''): ServerDraft => ({
   username: s.username,
   password: s.password,
   secure: s.secure,
+  maxTransfers: String(s.maxTransfers ?? DEFAULT_MAX_TRANSFERS),
   path
 })
 
@@ -163,7 +167,9 @@ export const sameFields = (d: ServerDraft, s: FtpServer): boolean =>
   (parseInt(d.port, 10) || 21) === s.port &&
   d.username === s.username &&
   d.password === s.password &&
-  d.secure === s.secure
+  d.secure === s.secure &&
+  (d.maxTransfers.trim() ? Number(d.maxTransfers) : DEFAULT_MAX_TRANSFERS) ===
+    (s.maxTransfers ?? DEFAULT_MAX_TRANSFERS)
 
 /** Every whitespace-separated token appears in the alias, host, user or port. */
 export function matchServer(s: FtpServer, query: string): boolean {
@@ -215,10 +221,11 @@ export const findSaved = (
 /**
  * The fields to send for a draft, with anything still pasted into the host field split out.
  * A plain host keeps its case, so an older 'NAS.local' row still matches on (host, port).
- * An empty port means 21; anything else is kept as typed so {@link isValidPort} can reject it.
+ * An empty port means 21 and an empty transfer count the default; anything else is kept as typed
+ * so {@link isValidPort} and `isValidMaxTransfers` can reject it.
  */
 export function resolveDraft(d: ServerDraft): {
-  server: Omit<FtpServer, 'lastConnected'>
+  server: Omit<FtpServer, 'lastConnected' | 'maxTransfers'> & { maxTransfers: number }
   path?: string
 } {
   const parsed = parseServerAddress(d.host)
@@ -230,7 +237,8 @@ export function resolveDraft(d: ServerDraft): {
       port: parsed.port ?? (d.port.trim() ? Number(d.port) : 21),
       username: d.username.trim() || parsed.user || '',
       password: d.password || parsed.password || '',
-      secure: d.secure || parsed.secure === true
+      secure: d.secure || parsed.secure === true,
+      maxTransfers: d.maxTransfers.trim() ? Number(d.maxTransfers) : DEFAULT_MAX_TRANSFERS
     },
     path: parsed.path
   }

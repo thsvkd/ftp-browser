@@ -63,7 +63,6 @@ const INVOKE_CHANNELS = [
 const EVENT_CHANNELS = [
   'ftp:connectionStatus',
   'transfer:updated',
-  'transfer:progress',
   'operation:updated',
   'operation:progress',
   'thumbnail:ready',

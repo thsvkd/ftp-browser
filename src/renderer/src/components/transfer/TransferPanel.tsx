@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { formatBytes } from '@renderer/lib/utils'
 import { useT } from '@renderer/i18n'
-import type { TransferJob, TransferProgress } from '@shared/types/transfer'
+import type { TransferJob, TransferUpdate } from '@shared/types/transfer'
+import type { IpcResult } from '@shared/types/ipc'
 
 interface TransferGroup {
   key: string
@@ -191,8 +192,7 @@ function BatchRows({
 
 export function TransferPanel(): React.JSX.Element {
   const jobs = useTransferStore((s) => s.jobs)
-  const setJobs = useTransferStore((s) => s.setJobs)
-  const updateProgress = useTransferStore((s) => s.updateProgress)
+  const applyUpdate = useTransferStore((s) => s.applyUpdate)
   const clearCompleted = useTransferStore((s) => s.clearCompleted)
   const cancel = useTransferStore((s) => s.cancel)
   const [collapsed, setCollapsed] = useState(true)
@@ -201,26 +201,24 @@ export function TransferPanel(): React.JSX.Element {
 
   useEffect(() => {
     const unsubUpdated = window.api.on('transfer:updated', (...args: unknown[]) => {
-      const next = args[0] as TransferJob[]
-      setJobs(next)
+      applyUpdate(args[0] as TransferUpdate)
       // Auto-expand only when a new run starts, so manually collapsing an
       // in-progress transfer remains respected.
-      const active = next.filter(
-        (job) => job.status === 'active' || job.status === 'pending'
-      ).length
+      const active = useTransferStore
+        .getState()
+        .jobs.filter((job) => job.status === 'active' || job.status === 'pending').length
       if (active > 0 && prevActiveCount.current === 0) {
         setCollapsed(false)
       }
       prevActiveCount.current = active
     })
-    const unsubProgress = window.api.on('transfer:progress', (...args: unknown[]) => {
-      updateProgress(args[0] as TransferProgress)
+    // 변경분만 오므로, 렌더러가 늦게 뜨거나 새로고침돼도 기존 작업이 보이도록 처음 한 번 전체를 받는다.
+    void window.api.invoke('transfer:getAll').then((result) => {
+      const res = result as IpcResult<TransferJob[]> | undefined
+      if (res?.success && res.data) applyUpdate({ upserts: res.data, removedIds: [] })
     })
-    return () => {
-      unsubUpdated()
-      unsubProgress()
-    }
-  }, [setJobs, updateProgress])
+    return unsubUpdated
+  }, [applyUpdate])
 
   const activeCount = jobs.filter(
     (job) => job.status === 'active' || job.status === 'pending'

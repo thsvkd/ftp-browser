@@ -1,6 +1,11 @@
 import type Database from 'better-sqlite3'
 import { ErrorCode, type ErrorCodeType } from '@shared/types/ipc'
-import type { FtpConnectPayload, FtpServer } from '@shared/types/ftp'
+import {
+  DEFAULT_MAX_TRANSFERS,
+  isValidMaxTransfers,
+  type FtpConnectPayload,
+  type FtpServer
+} from '@shared/types/ftp'
 
 /** A save the renderer can explain in its own language: `code` picks the message. */
 export class ServerSaveError extends Error {
@@ -20,6 +25,7 @@ interface ServerRow {
   username: string | null
   password_enc: string | null
   secure: number
+  max_transfers: number
   last_connected: string | null
 }
 
@@ -35,6 +41,12 @@ export function saveServer(db: Database.Database, server: FtpServer): FtpServer 
   const host = server.host.trim()
   if (!isValidPort(server.port)) {
     throw new ServerSaveError(ErrorCode.INVALID_PORT, `Invalid port: ${server.port}`)
+  }
+  if (server.maxTransfers !== undefined && !isValidMaxTransfers(server.maxTransfers)) {
+    throw new ServerSaveError(
+      ErrorCode.INVALID_MAX_TRANSFERS,
+      `Invalid max transfers: ${server.maxTransfers}`
+    )
   }
   const fields = [
     server.name.trim(),
@@ -75,15 +87,16 @@ export function saveServer(db: Database.Database, server: FtpServer): FtpServer 
       return Number(
         db
           .prepare(
-            'INSERT INTO servers (name, host, port, username, password_enc, secure) VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO servers (name, host, port, username, password_enc, secure, max_transfers) VALUES (?, ?, ?, ?, ?, ?, ?)'
           )
-          .run(...fields).lastInsertRowid
+          .run(...fields, server.maxTransfers ?? DEFAULT_MAX_TRANSFERS).lastInsertRowid
       )
     }
 
+    // 동시 전송 수가 빠진 저장은 recordConnection처럼 저장된 값을 그대로 둔다
     db.prepare(
-      'UPDATE servers SET name = ?, host = ?, port = ?, username = ?, password_enc = ?, secure = ? WHERE id = ?'
-    ).run(...fields, server.id)
+      'UPDATE servers SET name = ?, host = ?, port = ?, username = ?, password_enc = ?, secure = ?, max_transfers = COALESCE(?, max_transfers) WHERE id = ?'
+    ).run(...fields, server.maxTransfers ?? null, server.id)
     if (old.host !== host || old.port !== server.port) {
       // 새 주소에 남은 고아 경로가 있으면 UNIQUE에 걸리므로 덮어쓴다.
       db.prepare(
@@ -95,7 +108,7 @@ export function saveServer(db: Database.Database, server: FtpServer): FtpServer 
 
   const row = db
     .prepare(
-      'SELECT id, name, host, port, username, password_enc, secure, last_connected FROM servers WHERE id = ?'
+      'SELECT id, name, host, port, username, password_enc, secure, max_transfers, last_connected FROM servers WHERE id = ?'
     )
     .get(id) as ServerRow
   return toServer(row)
@@ -115,6 +128,11 @@ export function recordConnection(db: Database.Database, payload: FtpConnectPaylo
   const password = anonymous && payload.password === 'anonymous@' ? '' : payload.password
   const name = payload.name?.trim() ?? ''
   const secure = payload.secure ? 1 : 0
+  // 값이 없거나 범위 밖이면(빠른 연결) 저장된 값을 그대로 두고, 새 서버면 기본값을 쓴다.
+  const maxTransfers =
+    payload.maxTransfers !== undefined && isValidMaxTransfers(payload.maxTransfers)
+      ? payload.maxTransfers
+      : null
 
   db.transaction(() => {
     if (payload.id !== undefined) {
@@ -122,10 +140,11 @@ export function recordConnection(db: Database.Database, payload: FtpConnectPaylo
         .prepare(
           `UPDATE servers SET
              name = CASE WHEN ? <> '' THEN ? ELSE name END,
-             username = ?, password_enc = ?, secure = ?, last_connected = datetime('now')
+             username = ?, password_enc = ?, secure = ?, max_transfers = COALESCE(?, max_transfers),
+             last_connected = datetime('now')
            WHERE id = ?`
         )
-        .run(name, name, user, password, secure, payload.id)
+        .run(name, name, user, password, secure, maxTransfers, payload.id)
       if (updated.changes > 0) return
     }
     const touched = db
@@ -135,9 +154,17 @@ export function recordConnection(db: Database.Database, payload: FtpConnectPaylo
       .run(payload.host, payload.port)
     if (touched.changes > 0) return
     db.prepare(
-      `INSERT INTO servers (name, host, port, username, password_enc, secure, last_connected)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
-    ).run(name, payload.host, payload.port, user, password, secure)
+      `INSERT INTO servers (name, host, port, username, password_enc, secure, max_transfers, last_connected)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    ).run(
+      name,
+      payload.host,
+      payload.port,
+      user,
+      password,
+      secure,
+      maxTransfers ?? DEFAULT_MAX_TRANSFERS
+    )
   })()
 }
 
@@ -151,6 +178,7 @@ export function toServer(r: ServerRow): FtpServer {
     username: r.username || '',
     password: r.password_enc || '',
     secure: r.secure === 1,
+    maxTransfers: r.max_transfers,
     lastConnected: r.last_connected ?? undefined
   }
 }
@@ -159,7 +187,7 @@ export function toServer(r: ServerRow): FtpServer {
 export function listServers(db: Database.Database): FtpServer[] {
   const rows = db
     .prepare(
-      'SELECT id, name, host, port, username, password_enc, secure, last_connected FROM servers ORDER BY last_connected DESC, id DESC'
+      'SELECT id, name, host, port, username, password_enc, secure, max_transfers, last_connected FROM servers ORDER BY last_connected DESC, id DESC'
     )
     .all() as ServerRow[]
   return rows.map(toServer)

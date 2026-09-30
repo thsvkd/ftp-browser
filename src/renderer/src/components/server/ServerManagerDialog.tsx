@@ -17,7 +17,7 @@ import {
   type ServerDraft
 } from '@renderer/lib/serverAddress'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
-import type { FtpServer, RecentPath } from '@shared/types/ftp'
+import { isValidMaxTransfers, type FtpServer, type RecentPath } from '@shared/types/ftp'
 import { ServerForm } from './ServerForm'
 import { ErrorNote, ServerAvatar, Spinner, TlsBadge } from './serverUi'
 import { STROKE, arrowIndex, btn, inputCls, onEnterEsc, selectedCls } from './styles'
@@ -132,6 +132,7 @@ export function ServerManagerDialog({
     }
     if (result.code === ErrorCode.SERVER_NOT_FOUND) return t('servers.notFound')
     if (result.code === ErrorCode.INVALID_PORT) return t('servers.invalidPort')
+    if (result.code === ErrorCode.INVALID_MAX_TRANSFERS) return t('servers.invalidMaxTransfers')
     return result.error
   }
 
@@ -171,6 +172,10 @@ export function ServerManagerDialog({
     const { server } = resolveDraft(draft)
     if (!isValidPort(server.port)) {
       setSaveError(t('servers.invalidPort'))
+      return
+    }
+    if (!isValidMaxTransfers(server.maxTransfers)) {
+      setSaveError(t('servers.invalidMaxTransfers'))
       return
     }
     let target = draft

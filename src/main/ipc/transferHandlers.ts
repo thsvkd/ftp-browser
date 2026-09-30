@@ -1,10 +1,12 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { TransferQueue } from '../transfer/TransferQueue'
+import { TransferClientPool } from '../transfer/TransferClientPool'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
+import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { ipcError } from '../utils/errorClassifier'
 import type {
   TransferJob,
-  TransferProgress,
+  TransferUpdate,
   TransferDirection,
   TransferEnqueueItem
 } from '@shared/types/transfer'
@@ -22,20 +24,25 @@ interface EnqueueBatchPayload {
   direction: TransferDirection
   items: TransferEnqueueItem[]
   forceBatch?: boolean
+  /** 업로드 전에 만들어야 하는 원격 디렉터리(중간 경로 포함) */
+  remoteDirs?: string[]
 }
 
 export function registerTransferHandlers(
   win: BrowserWindow,
-  fileOps: FtpFileOperations
+  fileOps: FtpFileOperations,
+  manager: FtpConnectionManager
 ): TransferQueue {
-  const queue = new TransferQueue(fileOps)
+  // 전송은 전용 연결 풀에서 돌아 메인 클라이언트(탐색)를 막지 않는다
+  const queue = new TransferQueue(fileOps, new TransferClientPool(manager))
 
-  queue.on('queue:updated', (jobs: TransferJob[]) => {
-    win.webContents.send('transfer:updated', jobs)
+  queue.on('queue:updated', (update: TransferUpdate) => {
+    win.webContents.send('transfer:updated', update)
   })
 
-  queue.on('transfer:progress', (progress: TransferProgress) => {
-    win.webContents.send('transfer:progress', progress)
+  // 큐가 만든 폴더도 탐색 캐시가 알아야 한다(ftp:mkdir이 내던 mutation과 같다)
+  queue.on('dir:created', (remotePath: string) => {
+    manager.emit('mutation', { kind: 'mkdir', remotePath })
   })
 
   ipcMain.handle('transfer:enqueue', (_event, payload: EnqueuePayload): IpcResult<string> => {
@@ -57,7 +64,12 @@ export function registerTransferHandlers(
     'transfer:enqueueBatch',
     (_event, payload: EnqueueBatchPayload): IpcResult<string[]> => {
       try {
-        const ids = queue.enqueueBatch(payload.direction, payload.items, payload.forceBatch)
+        const ids = queue.enqueueBatch(
+          payload.direction,
+          payload.items,
+          payload.forceBatch,
+          payload.remoteDirs
+        )
         return { success: true, data: ids }
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) }

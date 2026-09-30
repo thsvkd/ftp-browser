@@ -14,7 +14,7 @@ import {
   type ServerDraft
 } from '@renderer/lib/serverAddress'
 import { t } from '@renderer/i18n'
-import type { FtpServer, RecentPath } from '@shared/types/ftp'
+import { isValidMaxTransfers, type FtpServer, type RecentPath } from '@shared/types/ftp'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
 
 interface ServerStore {
@@ -136,6 +136,10 @@ export const useServerStore = create<ServerStore>((set, get) => ({
       set({ error: t('servers.invalidPort') })
       return false
     }
+    if (!isValidMaxTransfers(server.maxTransfers)) {
+      set({ error: t('servers.invalidMaxTransfers') })
+      return false
+    }
     const attempt = ++connectAttempt
     set({
       draft,
@@ -164,7 +168,8 @@ export const useServerStore = create<ServerStore>((set, get) => ({
         port: server.port,
         user: server.username || 'anonymous',
         password: server.password || 'anonymous@',
-        secure: server.secure
+        secure: server.secure,
+        maxTransfers: server.maxTransfers
       },
       startPath
     )
@@ -197,6 +202,13 @@ export const useServerStore = create<ServerStore>((set, get) => ({
     const { server } = resolveDraft(draft)
     if (!isValidPort(server.port)) {
       return { success: false, error: t('servers.invalidPort'), code: ErrorCode.INVALID_PORT }
+    }
+    if (!isValidMaxTransfers(server.maxTransfers)) {
+      return {
+        success: false,
+        error: t('servers.invalidMaxTransfers'),
+        code: ErrorCode.INVALID_MAX_TRANSFERS
+      }
     }
     const result = await window.api.invoke<IpcResult<FtpServer>>('ftp:saveServer', server)
     if (!result.success) return result
