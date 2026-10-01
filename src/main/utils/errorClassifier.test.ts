@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { classifyError, ipcError, isRetryableError } from './errorClassifier'
+import { classifyError, ipcError, isRetryableError, socketErrorDetail } from './errorClassifier'
 import { ErrorCode } from '@shared/types/ipc'
 
 /** basic-ftp FTPError처럼 숫자 code를 가진 Error 생성 */
@@ -248,5 +248,34 @@ describe('isRetryableError', () => {
 
   it('should return false for non-Error values', () => {
     expect(isRetryableError('string error')).toBe(false)
+  })
+})
+
+describe('socketErrorDetail', () => {
+  /** net.connect가 내는 형태: code·syscall·address·port가 모두 붙는다 */
+  function makeSocketError(): NodeJS.ErrnoException {
+    return Object.assign(makeSystemError('ECONNREFUSED', 'connect ECONNREFUSED 127.0.0.1:2121'), {
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 2121
+    })
+  }
+
+  it('should keep code, syscall, address and port of a socket error', () => {
+    expect(socketErrorDetail(makeSocketError())).toBe('ECONNREFUSED connect 127.0.0.1:2121')
+  })
+
+  it('should leave out the port when the error has none', () => {
+    const err = makeSocketError()
+    delete (err as { port?: number }).port
+    expect(socketErrorDetail(err)).toBe('ECONNREFUSED connect 127.0.0.1')
+  })
+
+  it('should return an empty string for an error without a socket address', () => {
+    // 파일 에러(ENOSPC 등)와 FTP 응답은 메시지만으로 충분하다
+    const disk = Object.assign(makeSystemError('ENOSPC', 'no space'), { syscall: 'write' })
+    expect(socketErrorDetail(disk)).toBe('')
+    expect(socketErrorDetail(makeFtpError(550, 'not found'))).toBe('')
+    expect(socketErrorDetail('string error')).toBe('')
   })
 })

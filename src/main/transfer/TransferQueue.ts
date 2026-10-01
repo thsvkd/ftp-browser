@@ -16,7 +16,8 @@ import {
   SEGMENT_MIN,
   type SegmentRange
 } from './segmentedDownload'
-import { classifyError, isRetryableError } from '../utils/errorClassifier'
+import { classifyError, isRetryableError, socketErrorDetail } from '../utils/errorClassifier'
+import { markSparse } from '../utils/sparseFile'
 import type {
   TransferJob,
   TransferDirection,
@@ -26,6 +27,13 @@ import type {
 
 const MAX_RETRIES = 3
 const RETRY_DELAY_MS = 2000
+/**
+ * 풀 로그인이 실패한 뒤 새 항목을 시작하지 않고 쉬는 시간. 연달아 실패할 때마다 두 배로 늘린다.
+ * 로그인 실패는 작업 탓이 아니므로 작업마다 재시도/실패로 치르지 않는다.
+ */
+export const LOGIN_HOLD_MS = 500
+/** 연달아 이만큼 로그인이 실패하면 남은 대기 작업을 그 에러 하나로 한꺼번에 실패시킨다. */
+export const MAX_LOGIN_FAILURES = 4
 /** 변경분을 렌더러로 내보내는 최소 간격(초당 10회). 파일 수천 개여도 IPC 부하가 O(변경된 작업)으로 묶인다. */
 const FLUSH_MS = 100
 /**
@@ -33,6 +41,13 @@ const FLUSH_MS = 100
  * 데이터 전에 오는 다른 응답(425, 450, 550 등)은 RETR·PASV의 것이라 REST 문제로 보지 않는다.
  */
 const REST_REJECT_CODES = new Set([500, 501, 502, 504])
+
+/** 작업에 보일 에러 메시지. 소켓 연결 에러면 어느 주소로의 연결인지 덧붙여 나중에 진단할 수 있게 한다. */
+function jobError(err: unknown): string {
+  const { message } = classifyError(err)
+  const detail = socketErrorDetail(err)
+  return detail ? `${message} (${detail})` : message
+}
 
 /** await 사이에 cancel()이 상태를 바꾸므로 대입 직후의 타입 좁히기를 피해 매번 읽는다. */
 function isCancelled(job: TransferJob): boolean {
@@ -99,7 +114,7 @@ function remoteParent(remotePath: string): string {
 }
 
 /**
- * 전송 큐. 작업을 FIFO로 꺼내 TransferClientPool의 전용 연결 위에서 최대 pool.limit개까지
+ * 전송 큐. 작업을 FIFO로 꺼내 TransferClientPool의 전용 연결 위에서 최대 pool.slots개까지
  * 동시에 실행한다. 풀이 null을 주는 서버(보조 로그인 불가)에서만 메인 클라이언트로 하나씩 돈다.
  */
 export class TransferQueue extends EventEmitter {
@@ -123,6 +138,12 @@ export class TransferQueue extends EventEmitter {
   private flushTimer: ReturnType<typeof setTimeout> | null = null
   /** 큐가 비어 있다가 아직 어떤 작업도 active가 되지 않음. 첫 active는 주기를 기다리지 않고 바로 알린다. */
   private idle = true
+  /** 풀 로그인이 연달아 실패한 회차 수. 새로 로그인한 클라이언트를 얻으면 0으로 돌아간다. */
+  private loginFailures = 0
+  /** 로그인 실패 뒤 쉬는 중인 타이머. 끝나면 pump한다. 도는 동안 새 항목을 시작하지 않는다. */
+  private loginHold: ReturnType<typeof setTimeout> | null = null
+  /** 풀이 시험 로그인을 할 수 있게 되는 때 pump하는 타이머 */
+  private probeWake: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     private fileOps: FtpFileOperations,
@@ -254,18 +275,39 @@ export class TransferQueue extends EventEmitter {
 
   /** 빈 풀 슬롯만큼 대기 항목을 시작한다. 모두 끝났으면 풀의 idle close를 걸고 변경분을 바로 보낸다. */
   private pump(): void {
-    while (this.running < this.pool.limit) {
+    // 로그인 실패 뒤 쉬는 중: 타이머가 끝나면 다시 부른다
+    if (this.loginHold) return
+    // 로그인이 실패한 뒤에는 하나씩만 더 시작해, 또 실패해도 회차마다 로그인 시도가 하나로 끝난다.
+    // pool.slots는 acquire가 동기적으로 바꿀 수 있어 매번 읽는다.
+    const cap = this.loginFailures > 0 ? this.running + 1 : Infinity
+    while (this.running < Math.min(this.pool.slots, cap)) {
       const item = this.nextRunnable()
       if (!item) break
       this.running++
       void this.run(item)
     }
+    this.wakeForProbe()
     if (this.running === 0 && this.pendingRetries === 0) {
       this.pool.armIdleClose()
       // 큐가 비었다: 마지막 완료를 주기(FLUSH_MS)만큼 늦게 알리지 않고 바로 보낸다
       this.idle = true
       this.flush()
     }
+  }
+
+  /**
+   * 대기 항목이 남았는데 풀이 아직 시험 로그인을 하지 않으면, 할 수 있게 되는 때 다시 pump한다. 그러지
+   * 않으면 줄어든 limit가 다음 작업이 끝날 때까지(긴 파일이면 수 분) 늘지 않는다.
+   */
+  private wakeForProbe(): void {
+    if (this.probeWake || this.running === 0 || this.workHead >= this.work.length) return
+    const delay = this.pool.probeDelay()
+    if (delay === 0 || delay === Infinity) return
+    this.probeWake = setTimeout(() => {
+      this.probeWake = null
+      this.pump()
+    }, delay)
+    this.probeWake.unref?.()
   }
 
   /** 취소된 항목을 건너뛰고 다음 대기 항목을 꺼낸다. */
@@ -298,21 +340,31 @@ export class TransferQueue extends EventEmitter {
     try {
       client = await this.pool.acquire()
     } catch (err) {
-      // 로그인 실패, 미연결 등: 전송 실패와 같게 재시도/실패 처리. 로그인을 기다리는 사이
-      // 취소되었거나 분할이 끝난 항목은 되살리거나 실패로 바꾸지 않고 그냥 버린다.
-      if (this.isRunnable(item)) this.retryOrFail(item, err)
+      // 로그인 실패, 미연결 등: 작업 탓이 아니므로 항목을 큐 앞에 되돌리고 큐를 잠시 쉰다
+      this.onLoginFailure(item, err)
       this.finishRun()
       return
     }
 
     if (client === LIMIT) {
-      // 서버 연결 수 제한이지 작업 실패가 아니다. 맨 앞에 되돌리고, 진행 중인 전송이
-      // 끝날 때 다시 pump된다. 아무것도 안 돌고 있으면 여기서 다시 시도한다.
+      // 서버 연결 수 제한이지 작업 실패가 아니다. 맨 앞에 되돌리고, 진행 중인 전송이 끝날 때나
+      // 풀이 시험 로그인을 할 수 있게 될 때 다시 pump된다. 아무것도 안 돌고 있으면 여기서 다시 시도한다.
       this.pushFront(item)
       this.running--
       if (this.running === 0) this.pump()
+      else this.wakeForProbe()
       return
     }
+    // 새로 로그인했다(또는 메인 클라이언트 fallback): 로그인이 된다. 쉬는 중이거나 하나씩만 시작하던 큐,
+    // 거부된 로그인이 LIMIT로 큐에 돌려보낸 슬롯을 바로 limit만큼 다시 채운다. pump는 pool.slots까지만
+    // 시작하므로 돌지 않는다. idle 재사용은 로그인이 된다는 뜻이 아니라 쉬는 상태를 풀지 않는다: 풀면
+    // 열린 연결이 도는 동안 실패하는 로그인이 회차마다 다시 몰린다.
+    if (client === null || this.pool.takeFreshLogin(client)) {
+      this.loginFailures = 0
+      if (this.loginHold) clearTimeout(this.loginHold)
+      this.loginHold = null
+    }
+    this.pump()
 
     if (item.segment) {
       await this.runSegment(item as SegmentItem, client)
@@ -444,6 +496,9 @@ export class TransferQueue extends EventEmitter {
 
     const file = await open(job.localPath, 'w')
     try {
+      // NTFS는 늘리기만 한 파일의 끝쪽에 처음 쓸 때 그 앞을 0으로 채우며 다른 구간의 쓰기도 막는다(512 MiB에
+      // 수 초). 희소 파일은 채우지 않으므로 늘리기 전에 표시한다. 최적화일 뿐이라 실패해도 그대로 받는다.
+      if (process.platform === 'win32') await markSparse(file).catch(() => false)
       await file.truncate(size)
       if (isCancelled(job)) throw new Error('Cancelled')
     } catch (err) {
@@ -705,6 +760,44 @@ export class TransferQueue extends EventEmitter {
   }
 
   /**
+   * 풀 로그인 실패를 처리하는 회로 차단기. 항목은 재시도 횟수를 쓰지 않고 큐 앞에 되돌리고(로그인을 기다리는
+   * 사이 취소되었거나 분할이 끝난 항목은 버린다), LOGIN_HOLD_MS부터 두 배씩 늘려 가며 pump를 미룬다.
+   * 함께 시작했다 함께 실패한 로그인은 한 회차로 센다. MAX_LOGIN_FAILURES회차째에도 실패하면 대기 항목을
+   * 로그인 시도 없이 이 에러 하나로 모두 실패시킨다. 이전에는 작업마다 새 로그인을 시도해 곧바로 실패시켜,
+   * 연결이 잠깐 거부되는 동안 큐의 상당 부분이 실패했다.
+   */
+  private onLoginFailure(item: WorkItem, err: unknown): void {
+    if (this.isRunnable(item)) this.pushFront(item)
+    if (this.loginHold) return
+    this.loginFailures++
+    // 메시지만으로는 어느 연결이 실패했는지 알 수 없으므로 code·syscall·address·port가 담긴 에러를 남긴다
+    console.warn(
+      `[TransferQueue] Transfer login failed (${this.loginFailures}/${MAX_LOGIN_FAILURES}):`,
+      err
+    )
+    if (this.loginFailures >= MAX_LOGIN_FAILURES) {
+      this.loginFailures = 0
+      this.failPending(err)
+      return
+    }
+    this.loginHold = setTimeout(
+      () => {
+        this.loginHold = null
+        this.pump()
+      },
+      LOGIN_HOLD_MS * 2 ** (this.loginFailures - 1)
+    )
+  }
+
+  /** 대기 항목을 모두 같은 에러로 실패시킨다. 분할 구간 항목은 그 작업과 분할을 함께 끝낸다. */
+  private failPending(err: unknown): void {
+    const pending = this.work.slice(this.workHead)
+    this.work = []
+    this.workHead = 0
+    for (const item of pending) if (this.isRunnable(item)) this.fail(item, err)
+  }
+
+  /**
    * 재시도 가능한 에러면 대기로 되돌리고 RETRY_DELAY_MS 뒤 큐 끝에 다시 넣는다. 큐는 막지 않는다.
    * 구간 항목은 작업을 active로 둔 채 그 구간만 다시 넣고(재시도 횟수는 구간마다 따로 센다),
    * 실패하면 다른 구간도 멈춘다.
@@ -723,18 +816,24 @@ export class TransferQueue extends EventEmitter {
         job.transferredBytes = 0
       }
       const attempt = segment ? segment.retries : job.retryCount
-      job.error = `Retry ${attempt}/${MAX_RETRIES}: ${classifyError(err).message}`
+      job.error = `Retry ${attempt}/${MAX_RETRIES}: ${jobError(err)}`
       this.pendingRetries++
       setTimeout(() => {
         this.pendingRetries--
         if (this.isRunnable(item)) this.work.push(item)
         this.pump()
       }, RETRY_DELAY_MS)
+      this.markDirty(job)
     } else {
-      job.status = 'failed'
-      job.error = classifyError(err).message
-      if (item.segment) this.stopSegmented(job, item.segment.state)
+      this.fail(item, err)
     }
+  }
+
+  private fail(item: WorkItem, err: unknown): void {
+    const { job } = item
+    job.status = 'failed'
+    job.error = jobError(err)
+    if (item.segment) this.stopSegmented(job, item.segment.state)
     this.markDirty(job)
   }
 

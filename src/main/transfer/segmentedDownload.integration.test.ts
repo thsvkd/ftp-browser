@@ -11,6 +11,25 @@ import { SegmentWriter } from '../ftp/segmentWriter'
 import type { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { startMockFtpServer, type MockFtpServer } from './__fixtures__/mockFtpServer'
 
+// 디스크가 가득 차는 상황을 흉내 내려고 fs.writev를 갈아 끼울 수 있게 감싼다(ESM의 fs는 spyOn으로 바꿀 수 없다).
+// hooks.writev가 없으면 실제 fs 그대로다.
+type WritevCallback = (err: Error | null, bytes: number) => void
+const hooks = vi.hoisted(() => ({
+  writev: undefined as
+    | undefined
+    | ((position: number, write: () => void, callback: WritevCallback) => void)
+}))
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  const writev = (...args: unknown[]): void => {
+    const write = (): void => (actual.writev as (...a: unknown[]) => void)(...args)
+    if (hooks.writev) {
+      hooks.writev(args[2] as number, write, args[args.length - 1] as WritevCallback)
+    } else write()
+  }
+  return { ...actual, writev }
+})
+
 const MiB = 1024 * 1024
 const FILE_SIZE = 5 * MiB
 
@@ -87,6 +106,7 @@ describe('segmented download against a mock FTP server', () => {
   })
 
   afterEach(async () => {
+    hooks.writev = undefined
     pool.dispose()
     await server.close()
     fs.rmSync(dir, { recursive: true, force: true })
@@ -123,4 +143,50 @@ describe('segmented download against a mock FTP server', () => {
     expect(pool.segmentedBroken).toBe(true)
     expect(queue.getAll()[0].retryCount).toBeUndefined()
   })
+
+  it('should fail the job as disk full without retrying when a range write hits ENOSPC', async () => {
+    // 희소 파일은 늘릴 때 공간을 잡아 두지 않아, 디스크가 차면 전송 중의 쓰기에서야 드러난다
+    hooks.writev = (position, write, callback) => {
+      if (position < FILE_SIZE / 2) return write()
+      const err = Object.assign(new Error('ENOSPC: no space left on device, write'), {
+        code: 'ENOSPC'
+      })
+      setImmediate(() => callback(err, 0))
+    }
+    const queue = await setup(false)
+    const localPath = path.join(dir, 'big.bin')
+    queue.enqueue('download', localPath, '/big.bin', 'big.bin', FILE_SIZE)
+    await vi.waitFor(() => expect(queue.getAll()[0].status).toBe('failed'), {
+      timeout: 15_000,
+      interval: 20
+    })
+
+    const [job] = queue.getAll()
+    // classifyError의 FS_DISK_FULL 메시지 그대로다. "Retry 1/3: ..."이 아니므로 재시도하지 않았다.
+    expect(job.error).toBe('Disk is full.')
+    expect(job.retryCount).toBeUndefined()
+    // 미리 늘려 둔 파일은 남기지 않는다
+    await vi.waitFor(() => expect(fs.existsSync(localPath)).toBe(false), { timeout: 5_000 })
+    const retrs = server.log.filter((line) => line.startsWith('< RETR'))
+    expect(retrs.length).toBeLessThanOrEqual(4)
+  })
+
+  it.runIf(process.platform === 'win32')(
+    'should leave a sparse file that hashes the same as the source on Windows',
+    async () => {
+      const queue = await setup(false)
+      const localPath = await download(queue)
+
+      const koffi = await import('koffi')
+      const getFileAttributes = koffi
+        .load('kernel32.dll')
+        .func('uint32_t __stdcall GetFileAttributesW(str16 path)')
+      const INVALID_FILE_ATTRIBUTES = 0xffffffff
+      const FILE_ATTRIBUTE_SPARSE_FILE = 0x200
+      const attributes = getFileAttributes(localPath) as number
+      expect(attributes).not.toBe(INVALID_FILE_ATTRIBUTES)
+      expect(attributes & FILE_ATTRIBUTE_SPARSE_FILE).toBe(FILE_ATTRIBUTE_SPARSE_FILE)
+      expect(sha256(fs.readFileSync(localPath))).toBe(sha256(source))
+    }
+  )
 })

@@ -111,6 +111,31 @@ function yamlListItems(block: string, key: string): string[] {
   return found
 }
 
+/**
+ * `key:`가 나올 때마다 그 목록을 들여쓰기와 함께 따로 돌려준다. 최상위 목록은 들여쓰기 0이다(나온 순서가
+ * 아니다). yamlListItems는 모두 이어 붙여, 플랫폼 블록(mac·linux)의 목록이 최상위 목록을 대신하는지
+ * 가려낼 수 없다.
+ */
+function eachYamlList(source: string, key: string): Array<{ indent: number; items: string[] }> {
+  const lines = source.split(/\r?\n/)
+  const keyRe = new RegExp(`^([ \\t]*)${escapeRegExp(key)}:`)
+  const lists: Array<{ indent: number; items: string[] }> = []
+  lines.forEach((line, start) => {
+    const match = line.match(keyRe)
+    if (!match) return
+    const end = lines.findIndex(
+      (l, i) =>
+        i > start &&
+        l.trim() !== '' &&
+        !l.trimStart().startsWith('#') &&
+        (l.match(/^[ \t]*/)?.[0] ?? '').length <= match[1].length
+    )
+    const block = lines.slice(start, end === -1 ? undefined : end).join('\n')
+    lists.push({ indent: match[1].length, items: yamlListItems(block, key) })
+  })
+  return lists
+}
+
 function yamlScalar(block: string, key: string): string | undefined {
   const keyRe = new RegExp(`^([ \\t]*)${escapeRegExp(key)}:\\s*(.*)$`)
   for (const line of block.split(/\r?\n/)) {
@@ -497,8 +522,17 @@ describe('electron-builder.yml Windows release contract', () => {
     // 실제로 .stryker-tmp(뮤테이션 샌드박스 — 뮤턴트가 적용된 프로젝트 전체 복사본과 중복
     // out/main/index.js를 포함한다)가 통째로 패키징돼 패키징된 앱이 실행 즉시 죽었다.
     // CI는 fresh checkout이라 이 실패가 드러나지 않는다. 허용 목록이라야 기본이 '제외'가 된다.
-    const patterns = yamlListItems(yml, 'files')
-    expect(patterns).toEqual(['out/**', 'resources/**', 'package.json'])
+    // 플랫폼 블록(mac·linux)의 files는 최상위 목록을 대신한다. `!` 패턴만으로 된 목록이면 electron-builder가
+    // 앞에 `**/*`를 붙여 루트 전체(src/, .claude/, .omc/, dist/)가 다시 패키징되므로 그 목록도 허용 목록으로 시작해야 한다.
+    const allowList = ['out/**', 'resources/**', 'package.json']
+    const lists = eachYamlList(yml, 'files')
+    const topLevel = lists.filter((list) => list.indent === 0)
+    expect(topLevel).toHaveLength(1)
+    const patterns = topLevel[0].items
+    expect(patterns).toEqual(allowList)
+    const platformLists = lists.filter((list) => list.indent > 0)
+    for (const { items } of platformLists)
+      expect(items.slice(0, allowList.length)).toEqual(allowList)
 
     // 허용 목록이 실제 진입점을 덮는지 교차 확인한다. package.json의 main이 허용 목록 밖으로
     // 옮겨가면 여기서 깨진다 — 목록만 단언하면 그 경우를 놓친다.
@@ -511,6 +545,24 @@ describe('electron-builder.yml Windows release contract', () => {
     const patterns = yamlListItems(yml, 'asarUnpack')
     expect(patterns).toContain('**/node_modules/sharp/**/*')
     expect(patterns).toContain('**/node_modules/@img/**/*')
+  })
+
+  it('should ship koffi unpacked on Windows only', () => {
+    // koffi는 Windows 희소 파일(sparseFile.ts)에만 쓰인다. 맥·리눅스 패키지에 네이티브 모듈을 싣지 않는다.
+    // 플랫폼 files는 최상위 목록을 대신하므로 허용 목록을 되풀이한 뒤 koffi만 뺀다
+    const files = [
+      'out/**',
+      'resources/**',
+      'package.json',
+      '!**/node_modules/koffi{,/**/*}',
+      '!**/node_modules/@koromix{,/**/*}'
+    ]
+    expect(yamlListItems(yamlBlock(yml, 'mac'), 'files')).toEqual(files)
+    expect(yamlListItems(yamlBlock(yml, 'linux'), 'files')).toEqual(files)
+    expect(yamlListItems(yamlBlock(yml, 'win'), 'files')).toEqual([])
+    const unpack = yamlListItems(yml, 'asarUnpack')
+    expect(unpack).toContain('**/node_modules/koffi/**/*')
+    expect(unpack).toContain('**/node_modules/@koromix/**/*')
   })
 
   it('should include the platform and architecture in macOS artifact names', () => {

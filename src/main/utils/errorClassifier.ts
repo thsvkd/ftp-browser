@@ -112,6 +112,23 @@ export function classifyError(err: unknown): ClassifiedError {
   return { code: ErrorCode.UNKNOWN, message: err.message }
 }
 
+/**
+ * 소켓 연결 에러가 담은 진단 정보("ECONNREFUSED connect 127.0.0.1:2121"). classifyError의 메시지는
+ * syscall·address·port를 버려 어느 연결이 거부됐는지 알 수 없으므로 로그와 작업 에러에 덧붙인다.
+ * address가 없는 에러(파일 에러, FTP 응답 등)는 메시지만으로 충분하므로 빈 문자열이다.
+ */
+export function socketErrorDetail(err: unknown): string {
+  if (!(err instanceof Error)) return ''
+  const { code, syscall, address, port } = err as NodeJS.ErrnoException & {
+    address?: string
+    port?: number
+  }
+  if (!address) return ''
+  const parts = [typeof code === 'string' ? code : '', syscall ?? '', address]
+  if (port !== undefined) parts[2] += `:${port}`
+  return parts.filter(Boolean).join(' ')
+}
+
 /** IpcResult의 실패 형태를 간편하게 생성 */
 export function ipcError(err: unknown): { success: false; error: string; code: ErrorCodeType } {
   const { code, message } = classifyError(err)

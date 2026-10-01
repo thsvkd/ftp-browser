@@ -22,6 +22,9 @@ asarUnpack:
   - resources/**
   - '**/node_modules/sharp/**/*'
   - '**/node_modules/@img/**/*'
+  # Windows 희소 파일용 FFI(sparseFile.ts). 네이티브 모듈은 플랫폼별 @koromix/koffi-* 패키지에 있다.
+  - '**/node_modules/koffi/**/*'
+  - '**/node_modules/@koromix/**/*'
 win:
   executableName: ftp-browser
   target:
@@ -44,6 +47,15 @@ portable:
   artifactName: ${name}-${version}-portable.${ext}
 mac:
   artifactName: ${name}-${version}-mac-${arch}.${ext}
+  # koffi는 Windows에서만 쓴다(sparseFile.ts가 win32에서만 import). 맥·리눅스 패키지에서는 뺀다.
+  # 플랫폼 files는 최상위 files를 대신한다. `!` 패턴만으로 된 목록이면 electron-builder가 앞에 `**/*`를
+  # 붙여 루트 전체가 패키징되므로 위의 허용 목록을 되풀이한다.
+  files:
+    - out/**
+    - resources/**
+    - package.json
+    - '!**/node_modules/koffi{,/**/*}'
+    - '!**/node_modules/@koromix{,/**/*}'
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
@@ -54,6 +66,13 @@ mac:
 dmg:
   artifactName: ${name}-${version}-mac-${arch}.${ext}
 linux:
+  # mac과 같은 이유로 허용 목록을 되풀이하고 Windows 전용 koffi를 뺀다
+  files:
+    - out/**
+    - resources/**
+    - package.json
+    - '!**/node_modules/koffi{,/**/*}'
+    - '!**/node_modules/@koromix{,/**/*}'
   target:
     - AppImage
     - snap

@@ -7,10 +7,18 @@ import * as path from 'path'
 import { Readable, type Writable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { FTPError, type Client } from 'basic-ftp'
-import { TransferQueue } from './TransferQueue'
+import { LOGIN_HOLD_MS, MAX_LOGIN_FAILURES, TransferQueue } from './TransferQueue'
 import { planSegments, LAN_RTT_MS } from './segmentedDownload'
-import { LIMIT, MAX_TRANSFER_CLIENTS, TransferClientPool } from './TransferClientPool'
+import {
+  LIMIT,
+  MAX_PROBE_COOLDOWN_MS,
+  MAX_TRANSFER_CLIENTS,
+  PROBE_COOLDOWN_MS,
+  REFUSED_LOGIN_BACKOFF_MS,
+  TransferClientPool
+} from './TransferClientPool'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
+import { markSparse } from '../utils/sparseFile'
 import type { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import type { TransferJob, TransferUpdate } from '@shared/types/transfer'
 
@@ -28,6 +36,9 @@ vi.mock('../ftp/fastTransfer', async (importOriginal) => ({
     client.uploadFrom(localPath, remotePath),
   isFastFlowSuspect: (err: unknown) => err instanceof Error && fastSuspects.has(err)
 }))
+
+// 희소 표시는 Windows API를 부르므로 호출만 본다. 실제 동작은 sparseFile.test.ts와 Windows 통합 테스트가 다룬다.
+vi.mock('../utils/sparseFile', () => ({ markSparse: vi.fn().mockResolvedValue(true) }))
 
 // 분할 기준(64 MiB)을 4000바이트로, 구간 크기를 1000바이트로 낮춘다. 기존 테스트의 작업(최대 1024바이트)은
 // 기준 아래라 그대로 한 스트림으로 돈다. LAN 한 스트림의 속도 판정은 20 ms 뒤에 한다.
@@ -84,6 +95,11 @@ interface MockPool {
   discard: ReturnType<typeof vi.fn>
   releaseAfterError: ReturnType<typeof vi.fn>
   armIdleClose: ReturnType<typeof vi.fn>
+  /** acquire가 새로 로그인한 클라이언트를 줬는지. 기본값은 매번 새 로그인이다. */
+  takeFreshLogin: ReturnType<typeof vi.fn>
+  /** 큐가 함께 돌릴 수 있는 수. 시험 로그인을 하지 않는 mock이라 limit와 같다. */
+  readonly slots: number
+  probeDelay: ReturnType<typeof vi.fn>
   /** 메인 클라이언트 fallback에서 쓰는 브라우즈용 클라이언트 */
   main: FakeClient
   runOnMainClient: ReturnType<typeof vi.fn>
@@ -107,6 +123,11 @@ function createMockPool(limit = 3): MockPool {
     discard: vi.fn(),
     releaseAfterError: vi.fn(),
     armIdleClose: vi.fn(),
+    takeFreshLogin: vi.fn(() => true),
+    get slots() {
+      return this.limit
+    },
+    probeDelay: vi.fn(() => Infinity),
     main,
     runOnMainClient: vi.fn((task: (client: FakeClient) => Promise<unknown>) => task(main))
   }
@@ -154,6 +175,22 @@ function items(n: number, prefix = ''): Parameters<TransferQueue['enqueueBatch']
 }
 
 const MKD_OK = { code: 257, message: '257 created' }
+
+/** 보조 연결의 connect가 거부된 형태. net이 붙이는 code·syscall·address·port를 모두 갖는다. */
+function refusedError(): Error {
+  return Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:2121 (control socket)'), {
+    code: 'ECONNREFUSED',
+    syscall: 'connect',
+    address: '127.0.0.1',
+    port: 2121
+  })
+}
+
+/** 로그인 실패 뒤 큐를 쉬게 하는 시간의 합. 이만큼 지나면 큐가 남은 작업을 한꺼번에 실패시킨다. */
+const LOGIN_HOLD_TOTAL = Array.from(
+  { length: MAX_LOGIN_FAILURES - 1 },
+  (_, i) => LOGIN_HOLD_MS * 2 ** i
+).reduce((a, b) => a + b, 0)
 
 /** 마이크로태스크만 흘려보낸다(재시도 타이머는 건드리지 않음). */
 const settle = (): Promise<void> => vi.advanceTimersByTimeAsync(0).then(() => undefined)
@@ -615,14 +652,165 @@ describe('TransferQueue', () => {
     })
 
     it('should fail the job when the pool cannot log in', async () => {
-      pool.acquire.mockRejectedValueOnce(new Error('Not connected'))
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      pool.acquire.mockRejectedValue(new Error('Not connected'))
 
       queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 100)
       await settle()
+      // 한 번의 로그인 실패로 작업을 실패시키지 않는다
+      expect(queue.getAll()[0].status).toBe('pending')
 
+      await vi.advanceTimersByTimeAsync(LOGIN_HOLD_TOTAL)
       expect(queue.getAll()[0].status).toBe('failed')
       expect(queue.getAll()[0].error).toBe('Not connected to FTP server.')
       expect(mockFileOps.download).not.toHaveBeenCalled()
+      warn.mockRestore()
+    })
+  })
+
+  describe('pool login failures', () => {
+    const loginIncorrect = (): FTPError =>
+      new FTPError({ code: 530, message: '530 Login incorrect' })
+
+    beforeEach(() => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+      vi.mocked(console.warn).mockRestore()
+    })
+
+    it('should hold the queue instead of failing each job while logins keep failing', async () => {
+      pool.acquire.mockRejectedValue(loginIncorrect())
+
+      queue.enqueueBatch('download', items(500))
+      await settle()
+      // 함께 시작한 로그인(limit개)이 함께 실패해도 작업은 하나도 실패하지 않는다
+      expect(pool.acquire).toHaveBeenCalledTimes(3)
+      expect(queue.getAll().every((job) => job.status === 'pending')).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(LOGIN_HOLD_MS - 1)
+      expect(pool.acquire).toHaveBeenCalledTimes(3)
+      // 쉬고 나면 로그인을 하나만 다시 시도한다
+      await vi.advanceTimersByTimeAsync(1)
+      expect(pool.acquire).toHaveBeenCalledTimes(4)
+      expect(queue.getAll().every((job) => job.status === 'pending')).toBe(true)
+    })
+
+    it('should fail the remaining jobs with one error after a bounded number of logins', async () => {
+      pool.acquire.mockRejectedValue(loginIncorrect())
+
+      queue.enqueueBatch('download', items(500))
+      await vi.advanceTimersByTimeAsync(LOGIN_HOLD_TOTAL)
+
+      // 함께 실패한 첫 회차(limit개) 뒤로는 회차마다 한 번씩만 로그인한다
+      expect(pool.acquire).toHaveBeenCalledTimes(3 + MAX_LOGIN_FAILURES - 1)
+      const jobs = queue.getAll()
+      expect(jobs.every((job) => job.status === 'failed')).toBe(true)
+      expect(new Set(jobs.map((job) => job.error))).toEqual(
+        new Set(['Authentication failed. Check username and password.'])
+      )
+      expect(jobs.every((job) => job.retryCount === undefined)).toBe(true)
+      expect(mockFileOps.download).not.toHaveBeenCalled()
+      expect(pool.armIdleClose).toHaveBeenCalled()
+
+      // 실패시킨 뒤에는 다시 로그인하지 않는다
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(pool.acquire).toHaveBeenCalledTimes(3 + MAX_LOGIN_FAILURES - 1)
+    })
+
+    it('should resume every job without charging it once a login succeeds', async () => {
+      // 함께 시작한 로그인(limit개)이 모두 실패해야 큐가 쉰다
+      for (let i = 0; i < 3; i++) pool.acquire.mockRejectedValueOnce(new Error('Not connected'))
+
+      queue.enqueueBatch('download', items(5))
+      await settle()
+      expect(queue.getAll().every((job) => job.status === 'pending')).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(LOGIN_HOLD_MS)
+      const jobs = queue.getAll()
+      expect(jobs.map((job) => job.status)).toEqual(Array(5).fill('completed'))
+      expect(jobs.every((job) => job.retryCount === undefined && !job.error)).toBe(true)
+    })
+
+    it('should start the other jobs as soon as a login succeeds after a failed round', async () => {
+      const transfers = deferTransfers(mockFileOps.download)
+      pool.acquire
+        .mockRejectedValueOnce(loginIncorrect())
+        .mockRejectedValueOnce(loginIncorrect())
+        .mockRejectedValueOnce(loginIncorrect())
+
+      queue.enqueueBatch('download', items(10))
+      await vi.advanceTimersByTimeAsync(LOGIN_HOLD_MS)
+
+      // 첫 작업이 끝날 때까지 한 연결로만 돌지 않는다
+      expect(transfers.size).toBe(3)
+      expect(pool.acquire).toHaveBeenCalledTimes(6)
+    })
+
+    it('should drop the hold when another login of the same round succeeds', async () => {
+      const transfers = deferTransfers(mockFileOps.download)
+      pool.acquire.mockRejectedValueOnce(loginIncorrect())
+
+      queue.enqueueBatch('download', items(10))
+      await settle()
+
+      // 성공한 로그인이 있으면 빈 슬롯을 LOGIN_HOLD_MS 동안 비워 두지 않는다
+      expect(transfers.size).toBe(3)
+    })
+
+    it('should keep holding when the other acquires of the round only reuse idle clients', async () => {
+      const transfers = deferTransfers(mockFileOps.download)
+      pool.acquire.mockRejectedValueOnce(loginIncorrect())
+      pool.takeFreshLogin.mockReturnValue(false)
+
+      queue.enqueueBatch('download', items(10))
+      await settle()
+
+      // idle 재사용은 로그인이 된다는 뜻이 아니다: 쉬는 동안 빈 슬롯으로 로그인을 다시 몰지 않는다
+      expect(transfers.size).toBe(2)
+      expect(pool.acquire).toHaveBeenCalledTimes(3)
+
+      await vi.advanceTimersByTimeAsync(LOGIN_HOLD_MS)
+      expect(pool.acquire).toHaveBeenCalledTimes(4)
+      expect(transfers.size).toBe(3)
+    })
+
+    it('should hold only the first delay again after a login has succeeded', async () => {
+      pool.limit = 1
+      pool.acquire.mockRejectedValueOnce(loginIncorrect())
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await vi.advanceTimersByTimeAsync(LOGIN_HOLD_MS)
+      expect(queue.getAll()[0].status).toBe('completed')
+
+      pool.acquire.mockRejectedValueOnce(loginIncorrect())
+      queue.enqueue('download', '/local/b.jpg', '/remote/b.jpg', 'b.jpg', 10)
+      await vi.advanceTimersByTimeAsync(LOGIN_HOLD_MS)
+      expect(queue.getAll()[1].status).toBe('completed')
+    })
+
+    it('should drop a job cancelled while the queue holds', async () => {
+      pool.acquire.mockRejectedValueOnce(loginIncorrect())
+      const id = queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+      queue.cancel(id)
+
+      await vi.advanceTimersByTimeAsync(LOGIN_HOLD_TOTAL)
+      expect(queue.getAll()[0].status).toBe('cancelled')
+      expect(pool.acquire).toHaveBeenCalledTimes(1)
+      expect(pool.armIdleClose).toHaveBeenCalled()
+    })
+
+    it('should keep the socket address of a refused connection in the job error', async () => {
+      ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockRejectedValueOnce(refusedError())
+
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+
+      expect(queue.getAll()[0].status).toBe('failed')
+      expect(queue.getAll()[0].error).toBe(
+        'Connection refused. Check the host and port. (ECONNREFUSED connect 127.0.0.1:2121)'
+      )
     })
   })
 
@@ -882,6 +1070,393 @@ describe('TransferQueue', () => {
       const downloaded = clients.reduce((n, c) => n + c.downloadTo.mock.calls.length, 0)
       expect(uploaded).toBe(12)
       expect(downloaded).toBe(12)
+    })
+
+    describe('with refused logins', () => {
+      beforeEach(() => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+      })
+
+      afterEach(() => {
+        vi.mocked(console.warn).mockRestore()
+      })
+
+      it('should complete all 500 jobs when the first 20 logins are refused', async () => {
+        const { pool: realPool, createSecondaryClient } = createRealPool()
+        for (let i = 0; i < 20; i++) createSecondaryClient.mockRejectedValueOnce(refusedError())
+        queue = new TransferQueue(mockFileOps, realPool)
+
+        queue.enqueueBatch('download', items(500))
+        await vi.advanceTimersByTimeAsync(10_000)
+
+        const jobs = queue.getAll()
+        expect(jobs.filter((job) => job.status !== 'completed')).toEqual([])
+        expect(jobs.every((job) => job.retryCount === undefined)).toBe(true)
+        expect(mockFileOps.download).toHaveBeenCalledTimes(500)
+        realPool.dispose()
+      })
+
+      it('should run in parallel again after a whole burst of logins is refused', async () => {
+        const { pool: realPool, createSecondaryClient } = createRealPool()
+        for (let i = 0; i < 16; i++) createSecondaryClient.mockRejectedValueOnce(refusedError())
+        let inFlight = 0
+        let peak = 0
+        ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+          inFlight++
+          peak = Math.max(peak, inFlight)
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          inFlight--
+        })
+        queue = new TransferQueue(mockFileOps, realPool)
+
+        queue.enqueueBatch('download', items(200))
+        await vi.advanceTimersByTimeAsync(20_000)
+
+        // 함께 거부된 로그인이 서로를 세어 limit를 1까지 줄이면 남은 큐가 한 연결로만 돈다
+        expect(queue.getAll().every((job) => job.status === 'completed')).toBe(true)
+        expect(realPool.limit).toBe(16)
+        expect(peak).toBe(16)
+        realPool.dispose()
+      })
+
+      it('should run in parallel as soon as logins succeed again, not after the first long job', async () => {
+        const { pool: realPool, createSecondaryClient } = createRealPool()
+        for (let i = 0; i < 16; i++) createSecondaryClient.mockRejectedValueOnce(refusedError())
+        let inFlight = 0
+        ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+          inFlight++
+          await new Promise((resolve) => setTimeout(resolve, 60_000))
+          inFlight--
+        })
+        queue = new TransferQueue(mockFileOps, realPool)
+
+        queue.enqueueBatch('download', items(40))
+        await vi.advanceTimersByTimeAsync(1_000)
+
+        // 거부된 15개는 LIMIT로 큐에 돌아갔다. 쉬었다 다시 된 로그인이 나머지 슬롯을 바로 채워야 한다 —
+        // 그러지 않으면 첫 파일(60초)이 끝날 때까지 한 연결로만 돈다.
+        expect(realPool.limit).toBe(16)
+        expect(inFlight).toBe(16)
+        realPool.dispose()
+      })
+
+      it('should finish on the open clients without a login storm when further logins fail with 530', async () => {
+        const { pool: realPool, createSecondaryClient } = createRealPool()
+        const login = createSecondaryClient.getMockImplementation() as () => Promise<unknown>
+        let logins = 0
+        createSecondaryClient.mockImplementation(async () => {
+          logins++
+          if (logins <= 2) return login()
+          throw new FTPError({ code: 530, message: '530 Login incorrect.' })
+        })
+        let inFlight = 0
+        let peak = 0
+        ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+          inFlight++
+          peak = Math.max(peak, inFlight)
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          inFlight--
+        })
+        queue = new TransferQueue(mockFileOps, realPool)
+
+        queue.enqueueBatch('download', items(300))
+        await vi.advanceTimersByTimeAsync(60_000)
+
+        // 열린 2개로 끝까지 돌고, 실패하는 로그인을 슬롯이 빌 때마다 되풀이하지 않는다
+        const jobs = queue.getAll()
+        expect(jobs.filter((job) => job.status !== 'completed')).toEqual([])
+        expect(jobs.every((job) => job.retryCount === undefined)).toBe(true)
+        expect(peak).toBe(2)
+        // 처음 몰린 로그인과, 점점 드물어지는 시험 로그인뿐이다
+        expect(createSecondaryClient.mock.calls.length).toBeLessThanOrEqual(
+          MAX_TRANSFER_CLIENTS + probesBefore(60_000)
+        )
+        realPool.dispose()
+      })
+
+      /**
+       * 0 ms 무렵 처음 실패한 풀이 end 전에 시작할 수 있는 시험 로그인 수. 실패할 때마다 다음 시험 로그인까지
+       * 기다리는 시간이 PROBE_COOLDOWN_MS부터 두 배씩(MAX_PROBE_COOLDOWN_MS까지) 늘어난다.
+       */
+      function probesBefore(end: number): number {
+        let probes = 0
+        for (let at = PROBE_COOLDOWN_MS, wait = PROBE_COOLDOWN_MS; at < end; probes++) {
+          wait = Math.min(wait * 2, MAX_PROBE_COOLDOWN_MS)
+          at += wait
+        }
+        return probes
+      }
+
+      /** 처음 몰린 burst개 뒤로 실패한 로그인 사이의 가장 짧은 간격(ms). 그런 실패가 둘보다 적으면 Infinity. */
+      function shortestGapAfterBurst(failedAt: number[], burst: number): number {
+        const later = [...failedAt].sort((a, b) => a - b).slice(burst)
+        return Math.min(...later.slice(1).map((t, i) => t - later[i]))
+      }
+
+      it('should not start another burst of failing logins each time a lost client is replaced', async () => {
+        // 사용자당 2개까지 받고, 넘으면 연결 수 문구가 없는 530을 주는 서버. 작업마다 연결이 끊겨(EPIPE)
+        // 클라이언트가 버려지고 새로 로그인한다. 새 로그인이 될 때마다 limit를 되돌리면 그때마다 실패할
+        // 로그인이 limit만큼 몰린다.
+        vi.setSystemTime(0)
+        const { pool: realPool, createSecondaryClient } = createRealPool()
+        const login = createSecondaryClient.getMockImplementation() as () => Promise<FakeClient>
+        const CAP = 2
+        let open = 0
+        const loginTimes: number[] = []
+        const failedAt: number[] = []
+        createSecondaryClient.mockImplementation(() => {
+          loginTimes.push(Date.now())
+          return new Promise((resolve, reject) =>
+            setTimeout(() => {
+              if (open >= CAP) {
+                failedAt.push(Date.now())
+                reject(new FTPError({ code: 530, message: '530 Login incorrect.' }))
+                return
+              }
+              open++
+              void login().then((client) => {
+                client.close = vi.fn(() => {
+                  if (!client.closed) open--
+                  client.closed = true
+                })
+                resolve(client)
+              })
+            }, 5)
+          )
+        })
+        ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          throw Object.assign(new Error('write EPIPE'), { code: 'EPIPE' })
+        })
+        queue = new TransferQueue(mockFileOps, realPool)
+
+        const jobs = 300
+        queue.enqueueBatch('download', items(jobs))
+        await vi.advanceTimersByTimeAsync(60_000)
+
+        // 실패하는 로그인은 처음 한 번 몰린 것과, 점점 드물어지는 시험 로그인뿐이다. 버려진 클라이언트는
+        // limit 안에서 하나씩 대신한다.
+        const burst = MAX_TRANSFER_CLIENTS - CAP
+        expect(failedAt.length).toBeLessThanOrEqual(burst + probesBefore(60_000))
+        expect(shortestGapAfterBurst(failedAt, burst)).toBeGreaterThanOrEqual(PROBE_COOLDOWN_MS)
+        expect(loginTimes.length).toBeLessThanOrEqual(jobs + burst + probesBefore(60_000))
+        const perSecond = new Map<number, number>()
+        for (const t of loginTimes) {
+          const s = Math.floor(t / 1000)
+          perSecond.set(s, (perSecond.get(s) ?? 0) + 1)
+        }
+        // 열린 2개가 50 ms마다 하나씩 버려져 새로 로그인하는 속도 + 처음 몰린 로그인
+        expect(Math.max(...perSecond.values())).toBeLessThanOrEqual(
+          CAP * (1000 / 50) + MAX_TRANSFER_CLIENTS
+        )
+        expect(queue.getAll().every((job) => job.status === 'failed')).toBe(true)
+        realPool.dispose()
+      })
+
+      it('should keep failed logins to one per growing wait when failures answer late and logins are slow', async () => {
+        // 사용자당 2개까지 받는 서버가 넘는 로그인에 300 ms 뒤 530을 준다(vsftpd의 delay_failed_login처럼).
+        // 판정은 로그인을 받을 때 이미 받은 세션 수로 한다. 로그인은 60 ms, 작업은 10 ms이고 작업마다 연결이
+        // 끊긴다(EPIPE). 실패가 늦게 오는 동안 열린 클라이언트가 바뀌어도 실패할 로그인이 다시 몰리면 안 된다.
+        vi.setSystemTime(0)
+        const { pool: realPool, createSecondaryClient } = createRealPool()
+        const login = createSecondaryClient.getMockImplementation() as () => Promise<FakeClient>
+        const CAP = 2
+        let open = 0
+        let accepting = 0
+        const failedAt: number[] = []
+        createSecondaryClient.mockImplementation(() => {
+          if (open + accepting >= CAP) {
+            return new Promise((_, reject) =>
+              setTimeout(() => {
+                failedAt.push(Date.now())
+                reject(new FTPError({ code: 530, message: '530 Login incorrect.' }))
+              }, 300)
+            )
+          }
+          accepting++
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              accepting--
+              open++
+              void login().then((client) => {
+                client.close = vi.fn(() => {
+                  if (!client.closed) open--
+                  client.closed = true
+                })
+                resolve(client)
+              })
+            }, 60)
+          )
+        })
+        ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10))
+          throw Object.assign(new Error('write EPIPE'), { code: 'EPIPE' })
+        })
+        queue = new TransferQueue(mockFileOps, realPool)
+
+        queue.enqueueBatch('download', items(300))
+        await vi.advanceTimersByTimeAsync(120_000)
+
+        expect(queue.getAll().every((job) => job.status === 'failed')).toBe(true)
+        // 처음 몰린 14개 뒤로는 시험 로그인만 실패하고, 실패 사이는 PROBE_COOLDOWN_MS 이상 벌어진다
+        const burst = MAX_TRANSFER_CLIENTS - CAP
+        expect(failedAt.length).toBeLessThanOrEqual(burst + probesBefore(120_000))
+        expect(shortestGapAfterBurst(failedAt, burst)).toBeGreaterThanOrEqual(PROBE_COOLDOWN_MS)
+        realPool.dispose()
+      })
+
+      it.each([
+        [
+          'the last 8 of the first 16 logins fail once',
+          (k: number) => (k > 8 && k <= 16 ? 20 : -10)
+        ],
+        ['the first login fails while the other 15 log in', (k: number) => (k === 1 ? 2 : -30)]
+      ])('should run all 16 at once again soon when %s', async (_, answer) => {
+        // answer(k): k번째 로그인이 양수 ms 뒤에 530으로 실패하거나, -ms 뒤에 된다. 서버는 16개를 받는다.
+        const { pool: realPool, createSecondaryClient } = createRealPool()
+        const login = createSecondaryClient.getMockImplementation() as () => Promise<unknown>
+        let logins = 0
+        createSecondaryClient.mockImplementation(() => {
+          const ms = answer(++logins)
+          return new Promise((resolve, reject) =>
+            setTimeout(
+              () =>
+                ms > 0
+                  ? reject(new FTPError({ code: 530, message: '530 Login incorrect.' }))
+                  : resolve(login()),
+              Math.abs(ms)
+            )
+          )
+        })
+        let inFlight = 0
+        let peak = 0
+        ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+          inFlight++
+          peak = Math.max(peak, inFlight)
+          await new Promise((resolve) => setTimeout(resolve, 5_000))
+          inFlight--
+        })
+        queue = new TransferQueue(mockFileOps, realPool)
+
+        queue.enqueueBatch('download', items(200))
+        // 첫 작업(5초)이 끝나기 전에 시험 로그인으로 16개까지 다시 늘린다
+        await vi.advanceTimersByTimeAsync(3_000)
+        expect(realPool.limit).toBe(16)
+        expect(inFlight).toBe(16)
+
+        await vi.advanceTimersByTimeAsync(120_000)
+        expect(queue.getAll().every((job) => job.status === 'completed')).toBe(true)
+        expect(peak).toBe(16)
+        realPool.dispose()
+      })
+
+      it('should never go past a connection limit the server announced while growing back', async () => {
+        // 첫 로그인들이 모두 530으로 실패한 뒤, 서버는 4개까지 받고 넘으면 421을 준다. 시험 로그인으로 limit를
+        // 늘리다 421을 받으면 거기서 멈춘다.
+        const { pool: realPool, createSecondaryClient } = createRealPool()
+        const login = createSecondaryClient.getMockImplementation() as () => Promise<FakeClient>
+        const CAP = 4
+        let logins = 0
+        let open = 0
+        let tooMany = 0
+        createSecondaryClient.mockImplementation(() => {
+          const k = ++logins
+          return new Promise((resolve, reject) =>
+            setTimeout(() => {
+              if (k <= MAX_TRANSFER_CLIENTS) {
+                reject(new FTPError({ code: 530, message: '530 Login incorrect.' }))
+              } else if (open >= CAP) {
+                tooMany++
+                reject(new FTPError({ code: 421, message: '421 Too many connections' }))
+              } else {
+                open++
+                void login().then((client) => {
+                  client.close = vi.fn(() => {
+                    if (!client.closed) open--
+                    client.closed = true
+                  })
+                  resolve(client)
+                })
+              }
+            }, 5)
+          )
+        })
+        let inFlight = 0
+        let peak = 0
+        ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+          inFlight++
+          peak = Math.max(peak, inFlight)
+          await new Promise((resolve) => setTimeout(resolve, 200))
+          inFlight--
+        })
+        queue = new TransferQueue(mockFileOps, realPool)
+
+        queue.enqueueBatch('download', items(300))
+        await vi.advanceTimersByTimeAsync(60_000)
+
+        expect(queue.getAll().every((job) => job.status === 'completed')).toBe(true)
+        expect(peak).toBe(CAP)
+        expect(tooMany).toBe(1)
+        realPool.dispose()
+      })
+
+      it.each([
+        ['530', () => new FTPError({ code: 530, message: '530 Login incorrect.' })],
+        [
+          'ECONNABORTED',
+          () => Object.assign(new Error('read ECONNABORTED'), { code: 'ECONNABORTED' })
+        ]
+      ])(
+        'should run in parallel again after a whole burst of logins fails with %s',
+        async (_, error) => {
+          const { pool: realPool, createSecondaryClient } = createRealPool()
+          const login = createSecondaryClient.getMockImplementation() as () => Promise<unknown>
+          let logins = 0
+          createSecondaryClient.mockImplementation(() => {
+            const n = ++logins
+            if (n > MAX_TRANSFER_CLIENTS) return login()
+            return new Promise((_, reject) => setTimeout(() => reject(error()), n))
+          })
+          let inFlight = 0
+          let peak = 0
+          ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+            inFlight++
+            peak = Math.max(peak, inFlight)
+            await new Promise((resolve) => setTimeout(resolve, 5_000))
+            inFlight--
+          })
+          queue = new TransferQueue(mockFileOps, realPool)
+
+          queue.enqueueBatch('download', items(200))
+          await vi.advanceTimersByTimeAsync(120_000)
+
+          // 함께 실패한 로그인이 limit를 1까지 줄여도, 그 뒤 로그인이 되면 설정한 전송 수로 돌아온다
+          expect(queue.getAll().every((job) => job.status === 'completed')).toBe(true)
+          expect(realPool.limit).toBe(16)
+          expect(peak).toBe(16)
+          realPool.dispose()
+        }
+      )
+
+      it('should keep logins bounded and finish on the main client when every login is refused', async () => {
+        const { pool: realPool, createSecondaryClient } = createRealPool()
+        createSecondaryClient.mockRejectedValue(refusedError())
+        queue = new TransferQueue(mockFileOps, realPool)
+
+        queue.enqueueBatch('download', items(500))
+        await vi.advanceTimersByTimeAsync(10_000)
+
+        const maxLogins = MAX_TRANSFER_CLIENTS + REFUSED_LOGIN_BACKOFF_MS.length
+        expect(createSecondaryClient.mock.calls.length).toBeLessThanOrEqual(maxLogins)
+        expect(queue.getAll().every((job) => job.status === 'completed')).toBe(true)
+        // client 없이 부르면 FtpFileOperations가 메인 클라이언트로 실행한다
+        const download = mockFileOps.download as ReturnType<typeof vi.fn>
+        expect(download.mock.calls.every((call) => call[3] === undefined)).toBe(true)
+
+        await vi.advanceTimersByTimeAsync(60_000)
+        expect(createSecondaryClient.mock.calls.length).toBeLessThanOrEqual(maxLogins)
+        realPool.dispose()
+      })
     })
   })
 
@@ -1361,11 +1936,25 @@ describe('TransferQueue', () => {
         pool.clients.push(client)
         return client
       })
+      sizesAtMark = []
+      vi.mocked(markSparse).mockImplementation(async (file) => {
+        sizesAtMark.push(fs.fstatSync(file.fd).size)
+        return true
+      })
     })
 
     afterEach(() => {
+      Object.defineProperty(process, 'platform', platform)
       fs.rmSync(dir, { recursive: true, force: true })
     })
+
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    /** markSparse가 불린 순간의 로컬 파일 크기. 0이면 SIZE 크기로 늘리기 전에 불렸다. */
+    let sizesAtMark: number[]
+
+    function setPlatform(value: NodeJS.Platform): void {
+      Object.defineProperty(process, 'platform', { ...platform, value })
+    }
 
     it('should run the final range on the head client and queue the other ranges ahead of later jobs', async () => {
       const small = deferTransfers(mockFileOps.download)
@@ -1709,6 +2298,44 @@ describe('TransferQueue', () => {
       await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
     })
 
+    it('should mark the file sparse on Windows before growing it to the server size', async () => {
+      // NTFS는 늘리기만 한 파일의 끝쪽에 처음 쓸 때 그 앞을 0으로 채우며 모든 구간의 쓰기를 막는다
+      setPlatform('win32')
+
+      enqueueBig()
+      await vi.waitFor(() => expect(big().status).toBe('completed'))
+
+      expect(markSparse).toHaveBeenCalledTimes(1)
+      expect(sizesAtMark).toEqual([0])
+      expect(fs.readFileSync(localPath).equals(source)).toBe(true)
+    })
+
+    it.each(['darwin', 'linux'] as const)('should not mark the file sparse on %s', async (os) => {
+      setPlatform(os)
+
+      enqueueBig()
+      await vi.waitFor(() => expect(big().status).toBe('completed'))
+
+      expect(markSparse).not.toHaveBeenCalled()
+      expect(fs.readFileSync(localPath).equals(source)).toBe(true)
+    })
+
+    it.each([
+      ['returns false', () => Promise.resolve(false)],
+      ['rejects', () => Promise.reject(new Error('Cannot find the native Koffi module'))]
+    ])('should still download in ranges when marking the file sparse %s', async (_, outcome) => {
+      // 희소 표시는 최적화일 뿐이다: 실패해도 작업을 실패시키거나 한 스트림으로 바꾸지 않는다
+      setPlatform('win32')
+      vi.mocked(markSparse).mockImplementation(outcome)
+
+      enqueueBig()
+      await vi.waitFor(() => expect(big().status).toBe('completed'))
+
+      expect(server.events.sort()).toEqual(['seg 0', 'seg 1334', `seg ${FINAL}`])
+      expect(big().retryCount).toBeUndefined()
+      expect(fs.readFileSync(localPath).equals(source)).toBe(true)
+    })
+
     describe('on a LAN (SIZE answers faster than LAN_RTT_MS)', () => {
       /**
        * 첫 청크 뒤 PROBE_MS보다 오래 멈춘 머리 스트림은 둘째 청크에서 느리다고 판정된다. 판정 순간 받아 둔
@@ -1788,6 +2415,19 @@ describe('TransferQueue', () => {
         expect(fs.readFileSync(localPath).equals(source)).toBe(true)
         expect(big().transferredBytes).toBe(SEG_MIN)
         expect(big().retryCount).toBeUndefined()
+      })
+
+      it('should mark the file sparse on Windows before the one stream, so the split pieces write into it', async () => {
+        // 분할한 조각은 머리 스트림보다 뒤쪽 오프셋에 먼저 쓰므로 WAN 분할과 같은 0 채우기를 겪는다
+        setPlatform('win32')
+        await splitSlowHead()
+        headStall.resolve()
+        await vi.waitFor(() => expect(big().status).toBe('completed'))
+
+        expect(markSparse).toHaveBeenCalledTimes(1)
+        expect(sizesAtMark).toEqual([0])
+        expect(server.events).toEqual(['seg 0', ...REST_STARTS.map((s) => `seg ${s}`)])
+        expect(fs.readFileSync(localPath).equals(source)).toBe(true)
       })
 
       it('should close the head client and unlink the file on cancel before the verdict', async () => {
