@@ -1,7 +1,12 @@
-# Shell scripts must use LF so POSIX shells (macOS/Linux/Git Bash) can execute
-# them regardless of the checkout platform. Without this, core.autocrlf would
-# rewrite them to CRLF on Windows and break the `#!/usr/bin/env bash` shebang.
+# Text files are stored and checked out with LF on every platform. Without this,
+# core.autocrlf would rewrite them to CRLF on a Windows checkout, and Prettier
+# (LF by default) would then report every line of every file.
+* text=auto eol=lf
+
+# Spelled out for shell scripts too: POSIX shells (macOS/Linux/Git Bash) must be
+# able to execute them, and `#!/usr/bin/env bash` breaks on CRLF.
 *.sh text eol=lf
 
-# PowerShell scripts use CRLF, the Windows convention.
+# PowerShell scripts use CRLF, the Windows convention. This overrides the LF
+# default above because later rules win.
 *.ps1 text eol=crlf
