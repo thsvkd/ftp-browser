@@ -148,6 +148,8 @@ export const es = {
   'toast.navigateFailed': 'No se pudo abrir “{{path}}”',
   'toast.uploadFailed': 'No se pudo iniciar la subida',
   'toast.downloadFailed': 'No se pudo iniciar la descarga',
+  'toast.unsafeNamesSkipped':
+    'Se omitieron archivos cuyo nombre no se puede guardar en este equipo',
   'toast.dropFailed': 'No se pudieron procesar los elementos soltados',
   'toast.readDropFailed': 'No se pudieron leer los elementos soltados',
   'toast.moveFailed_one': 'No se pudo mover {{count}} elemento',

@@ -138,6 +138,7 @@ export const zhTW = {
   'toast.navigateFailed': '無法開啟「{{path}}」',
   'toast.uploadFailed': '無法開始上傳',
   'toast.downloadFailed': '無法開始下載',
+  'toast.unsafeNamesSkipped': '已略過名稱無法儲存到此電腦的檔案',
   'toast.dropFailed': '無法處理拖放的項目',
   'toast.readDropFailed': '無法讀取拖放的項目',
   'toast.moveFailed_other': '無法移動 {{count}} 個項目',

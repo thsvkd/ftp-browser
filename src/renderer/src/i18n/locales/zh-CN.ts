@@ -138,6 +138,7 @@ export const zhCN = {
   'toast.navigateFailed': '无法打开“{{path}}”',
   'toast.uploadFailed': '无法开始上传',
   'toast.downloadFailed': '无法开始下载',
+  'toast.unsafeNamesSkipped': '已跳过名称无法保存到此电脑的文件',
   'toast.dropFailed': '无法处理拖放的项目',
   'toast.readDropFailed': '无法读取拖放的项目',
   'toast.moveFailed_other': '无法移动 {{count}} 个项目',

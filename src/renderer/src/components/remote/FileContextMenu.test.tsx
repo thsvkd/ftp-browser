@@ -418,3 +418,64 @@ describe('FileContextMenu — dismiss triggers', () => {
     }
   })
 })
+
+// 원격 이름을 그대로 로컬 경로에 붙이면 Windows에서 `\`가 구분자가 되어 저장 폴더 밖에
+// 쓰게 된다. 다운로드 대상은 저장 폴더 안의, 로컬에서 쓸 수 있는 이름이어야 한다.
+describe('FileContextMenu — download keeps remote names inside the chosen folder', () => {
+  function answerSaveDirectory(dir: string): void {
+    mockInvoke.mockImplementation(async (channel: string) =>
+      channel === 'local:selectSaveDirectory' ? { success: true, data: dir } : { success: true }
+    )
+  }
+
+  it('saves a name with backslashes under a sanitised name on Windows', async () => {
+    const user = userEvent.setup()
+    answerSaveDirectory('C:\\Downloads')
+    renderMenu(ftpFile('..\\..\\evil.dll', 7))
+
+    await user.click(screen.getByRole('button', { name: en['menu.download'] }))
+
+    await waitFor(() => expect(calls('transfer:enqueueBatch')).toHaveLength(1))
+    expect(calls('transfer:enqueueBatch')[0][0]).toMatchObject({
+      direction: 'download',
+      items: [
+        {
+          localPath: 'C:\\Downloads\\.._.._evil.dll',
+          remotePath: `${REMOTE_DIR}/..\\..\\evil.dll`,
+          fileName: '..\\..\\evil.dll',
+          totalBytes: 7
+        }
+      ]
+    })
+  })
+
+  it('keeps characters that are legal on POSIX', async () => {
+    const user = userEvent.setup()
+    window.api.platform = 'linux'
+    answerSaveDirectory('/home/me')
+    renderMenu(ftpFile('a:b'))
+
+    await user.click(screen.getByRole('button', { name: en['menu.download'] }))
+
+    await waitFor(() => expect(calls('transfer:enqueueBatch')).toHaveLength(1))
+    expect(calls('transfer:enqueueBatch')[0][0]).toMatchObject({
+      items: [{ localPath: '/home/me/a:b' }]
+    })
+  })
+
+  it('skips a name that cannot be saved and says so', async () => {
+    const user = userEvent.setup()
+    answerSaveDirectory('C:\\Downloads')
+    // Windows는 끝의 점을 버리므로 '...'는 '..'와 같은 곳을 가리킨다.
+    renderMenu(ftpFile('...'))
+
+    await user.click(screen.getByRole('button', { name: en['menu.download'] }))
+
+    await waitFor(() => {
+      expect(toastError).toHaveBeenCalledWith(en['toast.unsafeNamesSkipped'], {
+        description: '...'
+      })
+    })
+    expect(calls('transfer:enqueueBatch')).toHaveLength(0)
+  })
+})

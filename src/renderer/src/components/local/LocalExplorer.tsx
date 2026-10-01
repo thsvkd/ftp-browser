@@ -4,7 +4,8 @@ import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
-import { joinLocalPath } from '@renderer/lib/localPath'
+import { planDownloads } from '@renderer/lib/localPath'
+import { currentPlatform } from '@renderer/lib/platform'
 import { toast } from 'sonner'
 import type { DeleteTarget } from '@shared/types/operation'
 import type { IpcResult } from '@shared/types/ipc'
@@ -174,15 +175,11 @@ export function LocalExplorer(): React.JSX.Element {
           size: number
         }>
         const localDir = useLocalFsStore.getState().currentPath
-        await enqueueBatch(
-          'download',
-          remoteFiles.map((file) => ({
-            localPath: joinLocalPath(localDir, file.fileName),
-            remotePath: file.remotePath,
-            fileName: file.fileName,
-            totalBytes: file.size
-          }))
-        )
+        const { items, skipped } = planDownloads(localDir, remoteFiles, currentPlatform())
+        if (skipped.length > 0) {
+          toast.error(t('toast.unsafeNamesSkipped'), { description: skipped.join(', ') })
+        }
+        await enqueueBatch('download', items)
         return
       }
 

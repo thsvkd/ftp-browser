@@ -149,6 +149,8 @@ export const de = {
   'toast.navigateFailed': '„{{path}}“ konnte nicht geöffnet werden',
   'toast.uploadFailed': 'Hochladen konnte nicht gestartet werden',
   'toast.downloadFailed': 'Herunterladen konnte nicht gestartet werden',
+  'toast.unsafeNamesSkipped':
+    'Dateien übersprungen, deren Namen auf diesem Computer nicht gespeichert werden können',
   'toast.dropFailed': 'Die abgelegten Elemente konnten nicht verarbeitet werden',
   'toast.readDropFailed': 'Die abgelegten Elemente konnten nicht gelesen werden',
   'toast.moveFailed_one': '{{count}} Element konnte nicht verschoben werden',

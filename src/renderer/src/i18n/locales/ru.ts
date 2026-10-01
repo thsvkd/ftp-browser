@@ -160,6 +160,7 @@ export const ru = {
   'toast.navigateFailed': 'Не удалось открыть путь «{{path}}»',
   'toast.uploadFailed': 'Не удалось начать отправку',
   'toast.downloadFailed': 'Не удалось начать скачивание',
+  'toast.unsafeNamesSkipped': 'Пропущены файлы, имена которых нельзя сохранить на этом компьютере',
   'toast.dropFailed': 'Не удалось обработать перетащенные элементы',
   'toast.readDropFailed': 'Не удалось прочитать перетащенные элементы',
   'toast.moveFailed_one': 'Не удалось переместить {{count}} элемент',

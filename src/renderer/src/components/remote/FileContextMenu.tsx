@@ -4,6 +4,8 @@ import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 import { clampMenuPosition, type MenuPlacement } from '@renderer/lib/menuPosition'
+import { planDownloads } from '@renderer/lib/localPath'
+import { currentPlatform } from '@renderer/lib/platform'
 import { isSafeRemoteName } from '@shared/entryName'
 import { useT } from '@renderer/i18n'
 import type { FtpFileEntry } from '@shared/types/ftp'
@@ -136,15 +138,19 @@ export function FileContextMenu({
     if (files.length === 0) return
     const result = await window.api.invoke<IpcResult<string | null>>('local:selectSaveDirectory')
     if (result.success && result.data) {
-      await enqueueBatch(
-        'download',
+      const { items, skipped } = planDownloads(
+        result.data,
         files.map((file) => ({
-          localPath: `${result.data}/${file.name}`,
           remotePath: buildRemotePath(file.name),
           fileName: file.name,
-          totalBytes: file.size
-        }))
+          size: file.size
+        })),
+        currentPlatform()
       )
+      if (skipped.length > 0) {
+        toast.error(t('toast.unsafeNamesSkipped'), { description: skipped.join(', ') })
+      }
+      await enqueueBatch('download', items)
     }
     handleClose()
   }

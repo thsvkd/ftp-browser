@@ -6,7 +6,8 @@ import {
   getRootLabel,
   getRootPath,
   joinLocalPath,
-  isRootPath
+  isRootPath,
+  planDownloads
 } from './localPath'
 
 describe('splitLocalPath', () => {
@@ -212,5 +213,98 @@ describe('isRootPath', () => {
       expect(isRootPath('/home')).toBe(false)
       expect(isRootPath('/usr/local')).toBe(false)
     })
+  })
+})
+
+describe('planDownloads', () => {
+  const remote = (
+    fileName: string,
+    size = 10
+  ): { remotePath: string; fileName: string; size: number } => ({
+    remotePath: `/srv/${fileName}`,
+    fileName,
+    size
+  })
+
+  it('saves a hostile Windows name under a sanitised name inside the folder', () => {
+    const { items, skipped } = planDownloads(
+      'C:\\Downloads',
+      [remote('..\\..\\evil.dll'), remote('a:b'), remote('CON')],
+      'win32'
+    )
+    expect(skipped).toEqual([])
+    expect(items.map((i) => i.localPath)).toEqual([
+      'C:\\Downloads\\.._.._evil.dll',
+      'C:\\Downloads\\a_b',
+      'C:\\Downloads\\CON_'
+    ])
+    // 원격 경로와 표시 이름은 서버 쪽 원래 이름을 그대로 쓴다.
+    expect(items[0]).toMatchObject({
+      remotePath: '/srv/..\\..\\evil.dll',
+      fileName: '..\\..\\evil.dll',
+      totalBytes: 10
+    })
+  })
+
+  it('uses the Windows rules for a Windows folder even when the platform is unknown', () => {
+    // preload가 없으면 platform이 ''이다. 더 느슨한 POSIX 규칙으로 `\`를 남기면 폴더 밖으로 나간다.
+    for (const platform of ['', 'linux']) {
+      const { items } = planDownloads('C:\\Downloads', [remote('..\\x'), remote('CON')], platform)
+      expect(items.map((i) => i.localPath)).toEqual(['C:\\Downloads\\.._x', 'C:\\Downloads\\CON_'])
+    }
+  })
+
+  it('uses the Windows rules for a UNC folder even when the platform is unknown', () => {
+    const share = '\\\\srv\\share'
+    const { items } = planDownloads(share, [remote('..\\x'), remote('CON')], '')
+    expect(items.map((i) => i.localPath.slice(share.length + 1))).toEqual(['.._x', 'CON_'])
+  })
+
+  it('numbers names that collide once sanitised, keeping the extension', () => {
+    const { items, skipped } = planDownloads(
+      'C:\\Downloads',
+      [remote('a:b'), remote('a_b'), remote('x_y.txt'), remote('x:y.txt')],
+      'win32'
+    )
+    expect(skipped).toEqual([])
+    expect(items.map((i) => i.localPath)).toEqual([
+      'C:\\Downloads\\a_b',
+      'C:\\Downloads\\a_b (1)',
+      'C:\\Downloads\\x_y.txt',
+      'C:\\Downloads\\x_y (1).txt'
+    ])
+    // 원격 쪽은 각자 원래 이름을 그대로 쓴다
+    expect(items.map((i) => i.fileName)).toEqual(['a:b', 'a_b', 'x_y.txt', 'x:y.txt'])
+  })
+
+  it('keeps a genuine remote name that a sanitised name would otherwise be numbered into', () => {
+    const { items } = planDownloads(
+      'C:\\Downloads',
+      [remote('a_b'), remote('a:b'), remote('a_b (1)')],
+      'win32'
+    )
+    expect(items.map((i) => i.localPath)).toEqual([
+      'C:\\Downloads\\a_b',
+      'C:\\Downloads\\a_b (2)',
+      'C:\\Downloads\\a_b (1)'
+    ])
+  })
+
+  it('numbers names that differ only in case on macOS, whose file system ignores case', () => {
+    const { items } = planDownloads('/Users/me', [remote('README'), remote('readme')], 'darwin')
+    expect(items.map((i) => i.localPath)).toEqual(['/Users/me/README', '/Users/me/readme (1)'])
+  })
+
+  it('skips names that cannot be saved instead of writing outside the folder', () => {
+    const { items, skipped } = planDownloads('/home/me', [remote('..'), remote('ok.txt')], 'linux')
+    expect(skipped).toEqual(['..'])
+    expect(items).toEqual([
+      {
+        localPath: '/home/me/ok.txt',
+        remotePath: '/srv/ok.txt',
+        fileName: 'ok.txt',
+        totalBytes: 10
+      }
+    ])
   })
 })
