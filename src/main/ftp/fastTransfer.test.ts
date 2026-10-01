@@ -6,12 +6,18 @@ import * as os from 'os'
 import * as path from 'path'
 import { Client, FTPError } from 'basic-ftp'
 import { enterPassiveModeIPv4_forceControlHostIP } from 'basic-ftp/dist/transfer'
-import { fastUpload, isFastFlowSuspect } from './fastTransfer'
+import { fastUpload, isFastFlowSuspect, UPLOAD_BUFFER, UPLOAD_BUFFERS } from './fastTransfer'
 import {
   startMockFtpServer,
   type MockFtpServer,
   type MockFtpServerOptions
 } from '../transfer/__fixtures__/mockFtpServer'
+
+// 업로드 읽기(길이·버퍼·동시 개수·에러)를 보려고 fs.read만 감싼다. 동작은 실제 fs 그대로다.
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  return { ...actual, read: vi.fn(actual.read) }
+})
 
 function sha256(data: Buffer): string {
   return createHash('sha256').update(data).digest('hex')
@@ -104,11 +110,14 @@ describe('fastUpload against a mock FTP server', () => {
     await connect(LATE_150)
     await prime()
     const file = localFile('empty.bin', 0)
-    const uploadFrom = vi.spyOn(client, 'uploadFrom')
 
     await fastUpload(client, file.path, '/empty.bin')
 
-    expect(uploadFrom).toHaveBeenCalledWith(file.path, '/empty.bin')
+    // 표준 경로는 데이터 연결이 열린 뒤에 STOR를 보낸다
+    const last = server.log.slice(server.log.lastIndexOf('< PASV'))
+    expect(last.indexOf('! data connected')).toBeGreaterThan(-1)
+    expect(last.indexOf('! data connected')).toBeLessThan(last.indexOf('< STOR /empty.bin'))
+    expect(earlyDataCount()).toBe(0)
     expect(server.stored.get('/empty.bin')).toEqual(Buffer.alloc(0))
   })
 
@@ -165,6 +174,181 @@ describe('fastUpload against a mock FTP server', () => {
     expect((err as Error).message).toMatch(/PASV returned another host \(10\.0\.0\.1\)/)
     expect(isFastFlowSuspect(err)).toBe(false)
     expect(server.log.some((line) => line.startsWith('< STOR'))).toBe(false)
+  })
+
+  describe('read ring', () => {
+    const B = UPLOAD_BUFFER
+    const read = vi.mocked(fs.read)
+
+    beforeEach(() => {
+      read.mockClear()
+    })
+
+    /** fastUpload가 부른 fs.read마다 [요청 길이, 버퍼 크기] */
+    function readSizes(): Array<[number, number]> {
+      return read.mock.calls.map((call) => [
+        (call as unknown[])[3] as number,
+        ((call as unknown[])[1] as Buffer).length
+      ])
+    }
+
+    /** 바이트마다 값이 달라 조각 순서가 어긋나면 해시가 달라지는 내용 */
+    function patterned(name: string, size: number): { path: string; data: Buffer } {
+      const data = Buffer.alloc(size)
+      for (let i = 0; i < size; i++) data[i] = (i * 31 + 7) % 251
+      const file = path.join(dir, name)
+      fs.writeFileSync(file, data)
+      return { path: file, data }
+    }
+
+    for (const tls of [false, true]) {
+      it(`should upload boundary sizes byte-identical on the standard and the fast path (tls=${tls})`, async () => {
+        await connect({ ...LATE_150, tls })
+        const alloc = vi.spyOn(Buffer, 'allocUnsafeSlow')
+        const sizes = [0, 1, B - 1, B, B + 1, 3 * B + 17]
+
+        for (const [i, size] of sizes.entries()) {
+          const file = localFile(`r${i}.bin`, size)
+          await fastUpload(client, file.path, `/std${i}.bin`, false)
+          await fastUpload(client, file.path, `/fast${i}.bin`)
+          expect(sha256(server.stored.get(`/std${i}.bin`)!)).toBe(sha256(file.data))
+          expect(sha256(server.stored.get(`/fast${i}.bin`)!)).toBe(sha256(file.data))
+        }
+
+        // 빈 파일을 뺀 빠른 경로 업로드마다 150 전에 데이터를 보냈다
+        expect(earlyDataCount()).toBe(sizes.length - 1)
+        // 버퍼는 전송끼리 돌려 쓰므로 한 전송이 쥐는 수 넘게 할당하지 않는다
+        expect(alloc.mock.calls.filter(([size]) => size === B).length).toBeLessThanOrEqual(
+          UPLOAD_BUFFERS
+        )
+        alloc.mockRestore()
+      })
+    }
+
+    it('should read in file order with UPLOAD_BUFFERS reads in flight', async () => {
+      await connect()
+      const actual = await vi.importActual<typeof import('fs')>('fs')
+      let inflight = 0
+      let peak = 0
+      read.mockImplementation(((...args: Parameters<typeof actual.read>) => {
+        inflight++
+        peak = Math.max(peak, inflight)
+        const cb = args[args.length - 1] as (err: Error | null, n: number, b: Buffer) => void
+        const rest = args.slice(0, -1) as unknown[]
+        ;(actual.read as (...a: unknown[]) => void)(
+          ...rest,
+          (err: Error | null, n: number, b: Buffer) => {
+            inflight--
+            cb(err, n, b)
+          }
+        )
+      }) as never)
+      const file = patterned('order.bin', 20 * B + 17)
+
+      try {
+        await fastUpload(client, file.path, '/order.bin', false)
+      } finally {
+        read.mockImplementation(actual.read as never)
+      }
+
+      expect(sha256(server.stored.get('/order.bin')!)).toBe(sha256(file.data))
+      expect(UPLOAD_BUFFER).toBe(256 * 1024)
+      expect(UPLOAD_BUFFERS).toBe(8)
+      expect(peak).toBe(UPLOAD_BUFFERS)
+      // 버퍼 크기 단위로 읽고, 마지막은 남은 17 바이트 + 파일 끝을 알아챌 1 바이트다
+      expect(readSizes()).toEqual([...Array(20).fill([B, B]), [18, B]])
+    })
+
+    for (const fast of [false, true]) {
+      it(`should keep at most two buffers queued on a slowly read data socket (fast=${fast})`, async () => {
+        // 서버가 10 ms마다 32 KiB만 읽는다: 커널 버퍼가 차면 나머지는 소켓의 쓰기 대기열에 쌓인다
+        await connect({ storPace: { bytes: 32 * 1024, ms: 10 } })
+        if (fast) await prime()
+        const file = localFile('slow.bin', 12 * B)
+        const original = net.Socket.prototype.write
+        let peak = 0
+        const write = vi.spyOn(net.Socket.prototype, 'write').mockImplementation(function (
+          this: net.Socket,
+          ...args: unknown[]
+        ) {
+          // 제어 명령은 빼고 데이터 버퍼를 넘기기 직전에 이미 쌓여 있던 양만 본다
+          if (Buffer.isBuffer(args[0]) && args[0].length > 1024)
+            peak = Math.max(peak, this.writableLength)
+          return (original as (...a: unknown[]) => boolean).apply(this, args)
+        })
+
+        try {
+          await fastUpload(client, file.path, '/slow.bin', fast)
+        } finally {
+          write.mockRestore()
+        }
+
+        expect(sha256(server.stored.get('/slow.bin')!)).toBe(sha256(file.data))
+        // 진행률(bytesWritten)과 watchdog이 서버보다 링 전체(2 MiB)만큼 앞서지 않게 한다
+        expect(peak).toBeLessThan(2 * B)
+      }, 20_000)
+    }
+
+    it('should read a file smaller than one buffer with a single read into a pooled buffer', async () => {
+      await connect()
+      const file = localFile('small.bin', 8192)
+
+      await fastUpload(client, file.path, '/small.bin', false)
+
+      expect(readSizes()).toEqual([[8193, B]])
+      expect(server.stored.get('/small.bin')).toEqual(file.data)
+    })
+
+    it('should size each read to what is left of a file that is a whole number of buffers', async () => {
+      await connect()
+      const file = patterned('whole.bin', 2 * B)
+
+      await fastUpload(client, file.path, '/whole.bin', false)
+
+      expect(readSizes().map(([length]) => length)).toEqual([B, B, 1])
+      expect(sha256(server.stored.get('/whole.bin')!)).toBe(sha256(file.data))
+    })
+
+    /** 첫 fs.read 직전에 한 번 action을 실행한다 */
+    async function beforeFirstRead(action: () => void): Promise<void> {
+      const actual = await vi.importActual<typeof import('fs')>('fs')
+      read.mockImplementationOnce(((...args: unknown[]) => {
+        action()
+        ;(actual.read as (...a: unknown[]) => void)(...args)
+      }) as never)
+    }
+
+    it('should fail when the local file grows while it is being uploaded', async () => {
+      await connect()
+      const file = localFile('grow.bin', B + 10)
+      await beforeFirstRead(() => fs.appendFileSync(file.path, Buffer.alloc(2 * B, 2)))
+
+      await expect(fastUpload(client, file.path, '/grow.bin', false)).rejects.toThrow(
+        /changed while it was being uploaded/
+      )
+    })
+
+    it('should fail when the local file shrinks while it is being uploaded', async () => {
+      await connect()
+      const file = localFile('shrink.bin', 4096)
+      await beforeFirstRead(() => fs.truncateSync(file.path, 10))
+
+      await expect(fastUpload(client, file.path, '/shrink.bin', false)).rejects.toThrow(
+        /changed while it was being uploaded/
+      )
+    })
+
+    it('should fail the upload with the read error', async () => {
+      await connect()
+      const file = localFile('eio.bin', 3 * B)
+      const eio = Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' })
+      read.mockImplementationOnce(((...args: unknown[]) => {
+        const cb = args[args.length - 1] as (err: Error) => void
+        setImmediate(() => cb(eio))
+      }) as never)
+
+      await expect(fastUpload(client, file.path, '/eio.bin', false)).rejects.toThrow('EIO')
+    })
   })
 
   it('should upload over FTPS reusing the control connection TLS session', async () => {

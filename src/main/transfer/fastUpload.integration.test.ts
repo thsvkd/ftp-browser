@@ -87,6 +87,18 @@ describe('fast uploads through the transfer queue against a mock FTP server', ()
     expect(pool.fastBroken).toBe(false)
   })
 
+  it('should upload files larger than the 1 MiB read chunk byte for byte, on both paths', async () => {
+    await setup(LATE_150)
+
+    const size = 3 * 1024 * 1024 + 17
+    const first = await upload('a.bin', size)
+    const second = await upload('b.bin', size)
+
+    expect(sha256(server.stored.get('/a.bin')!)).toBe(sha256(first))
+    expect(sha256(server.stored.get('/b.bin')!)).toBe(sha256(second))
+    expect(server.log.filter((line) => line === '! early data')).toHaveLength(1)
+  })
+
   it('should fall back to the standard path when the server rejects the early upload with 425', async () => {
     await setup({ ...LATE_150, rejectEarlyData: true })
 

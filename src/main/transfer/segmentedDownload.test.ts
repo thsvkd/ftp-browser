@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -11,6 +11,13 @@ import {
   SEGMENT_DONE,
   SEGMENT_OVERFLOW
 } from './segmentedDownload'
+import { DOWNLOAD_WRITE_BUFFER } from '../ftp/fastTransfer'
+
+// 쓰기 묶음(fs.writev 호출 수·일부만 쓴 경우)을 보려고 writev만 감싼다. 동작은 실제 fs 그대로다.
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  return { ...actual, writev: vi.fn(actual.writev) }
+})
 
 const MiB = 1024 * 1024
 
@@ -194,7 +201,8 @@ describe('SegmentWriter', () => {
     await errored
 
     expect(seen.reduce((a, b) => a + b, 0)).toBe(10)
-    expect(seen).toEqual([4, 4, 2])
+    // 첫 쓰기가 도는 동안 쌓인 두 조각은 한 번에 쓰여 한 번에 보고된다
+    expect(seen).toEqual([4, 6])
   })
 
   it('should surface fd write errors', async () => {
@@ -229,5 +237,84 @@ describe('SegmentWriter', () => {
         .subarray(10, 20)
         .every((b) => b === 0)
     ).toBe(true)
+  })
+
+  it('should write chunks buffered while corked in a single writev at the range offset', async () => {
+    const writev = vi.mocked(fs.writev)
+    writev.mockClear()
+    const w = new SegmentWriter(fd, { start: 20, end: 50, final: true })
+    w.cork()
+    w.write(Buffer.alloc(10, 1))
+    w.write(Buffer.alloc(10, 2))
+    w.write(Buffer.alloc(10, 3))
+    w.uncork()
+    w.end()
+    await once(w, 'finish')
+
+    expect(writev).toHaveBeenCalledTimes(1)
+    expect(writev.mock.calls[0][2]).toBe(20)
+    const data = readAll()
+    expect(data.subarray(20, 30).every((b) => b === 1)).toBe(true)
+    expect(data.subarray(30, 40).every((b) => b === 2)).toBe(true)
+    expect(data.subarray(40, 50).every((b) => b === 3)).toBe(true)
+    expect(w.written).toBe(30)
+    expect(w.complete).toBe(true)
+  })
+
+  it('should continue a writev that wrote only part of the batch', async () => {
+    const actual = await vi.importActual<typeof import('fs')>('fs')
+    const writev = vi.mocked(fs.writev)
+    writev.mockClear()
+    // 첫 호출은 절반만 쓰고 절반만 썼다고 알린다
+    writev.mockImplementationOnce(((
+      target: number,
+      buffers: NodeJS.ArrayBufferView[],
+      position: number,
+      cb: (err: NodeJS.ErrnoException | null, written: number) => void
+    ) => {
+      const all = Buffer.concat(buffers as Buffer[])
+      actual.writev(target, [all.subarray(0, all.length / 2)], position, cb)
+    }) as never)
+    const w = new SegmentWriter(fd, { start: 0, end: 40, final: true })
+    w.cork()
+    w.write(Buffer.alloc(20, 7))
+    w.write(Buffer.alloc(20, 8))
+    w.uncork()
+    w.end()
+    await once(w, 'finish')
+
+    expect(writev).toHaveBeenCalledTimes(2)
+    expect(writev.mock.calls[1][2]).toBe(20)
+    const data = readAll()
+    expect(data.subarray(0, 20).every((b) => b === 7)).toBe(true)
+    expect(data.subarray(20, 40).every((b) => b === 8)).toBe(true)
+    expect(w.written).toBe(40)
+  })
+
+  it('should end a final range at the cut given to splitAt as a completed non-final range', async () => {
+    const range = { start: 0, end: 100, final: true }
+    const w = new SegmentWriter(fd, range)
+    await new Promise<void>((resolve) => w.write(Buffer.alloc(20, 1), () => resolve()))
+
+    w.splitAt(40)
+    expect(range).toEqual({ start: 0, end: 40, final: false })
+    const errored = once(w, 'error')
+    w.write(Buffer.alloc(30, 2))
+    const [err] = await errored
+
+    expect((err as NodeJS.ErrnoException).code).toBe(SEGMENT_DONE)
+    expect(w.overflow).toBe(false)
+    expect(w.written).toBe(40)
+    expect(w.complete).toBe(true)
+    const data = readAll()
+    expect(data.subarray(20, 40).every((b) => b === 2)).toBe(true)
+    // 잘린 뒤쪽은 새 구간의 몫이라 건드리지 않는다
+    expect(data.subarray(40, 50).every((b) => b === 0)).toBe(true)
+  })
+
+  it('should buffer up to the given high water mark, DOWNLOAD_WRITE_BUFFER by default', () => {
+    const range = { start: 0, end: 10, final: true }
+    expect(new SegmentWriter(fd, range).writableHighWaterMark).toBe(DOWNLOAD_WRITE_BUFFER)
+    expect(new SegmentWriter(fd, range, undefined, 1234).writableHighWaterMark).toBe(1234)
   })
 })

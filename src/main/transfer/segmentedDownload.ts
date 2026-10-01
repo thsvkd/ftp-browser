@@ -1,22 +1,38 @@
-import { Writable } from 'stream'
-import * as fs from 'fs'
+import type { SegmentRange } from '../ftp/segmentWriter'
+
+// 구간 쓰기는 ftp/segmentWriter에 있다. 기존 가져오기가 그대로 되도록 여기서도 내보낸다.
+export {
+  SegmentWriter,
+  downloadInto,
+  SEGMENT_DONE,
+  SEGMENT_OVERFLOW,
+  type SegmentRange
+} from '../ftp/segmentWriter'
 
 /** 이 크기(64 MiB) 이상인 다운로드만 구간 분할 대상으로 삼는다. 테스트는 planSegments 인자로 낮춘다. */
 export const SEGMENT_MIN = 64 * 1024 * 1024
 /** 세그먼트 하나가 맡는 목표 크기. 구간 수는 ceil(size / SEGMENT_SIZE)를 풀 한도로 자른 값이다. */
 export const SEGMENT_SIZE = 64 * 1024 * 1024
 
-/** 비최종 구간이 정확히 len 바이트를 채워 의도적으로 스트림을 끊을 때 콜백 에러에 실리는 코드. */
-export const SEGMENT_DONE = 'SEGMENT_DONE'
-/** 최종 구간이 len을 넘겨 받았을 때(서버가 REST를 무시한 경우) 실리는 코드. */
-export const SEGMENT_OVERFLOW = 'SEGMENT_OVERFLOW'
-
-/** [start, end) 바이트 구간. final은 EOF까지 자연 종료(226)하는 마지막 구간이다. */
-export interface SegmentRange {
-  start: number
-  end: number
-  final: boolean
-}
+/**
+ * SIZE 응답이 이보다 빠르면 LAN으로 보고 분할 대상 파일을 한 스트림으로 받기 시작한다. 루프백 왕복은 0.1 ms
+ * 안팎, 유선 LAN은 0.1~0.5 ms에 서버 stat 시간이 더해지고, 현실적인 WAN은 3 ms 이상이다. 이벤트 루프가 바빠
+ * LAN을 WAN으로 잘못 보면 원래의 분할 경로가 될 뿐이다.
+ */
+export const LAN_RTT_MS = 2
+/** LAN 한 스트림의 속도를 첫 쓰기 완료부터 이만큼 잰 뒤 판정한다. 그 전에 끝나는 파일은 판정 없이 끝난다. */
+export const PROBE_MS = 100
+/**
+ * LAN 한 스트림이 이보다 느리면(1GbE 유효 대역폭 근처) 연결당 속도 제한이나 스트림당 CPU 한계로 보고 남은
+ * 부분을 구간으로 나눈다. 이보다 빠르면 FileZilla처럼 파일 하나를 한 연결로 받는 편이 빠르다(구간으로 나눠
+ * 쓴 파일은 APFS에서 닫을 때 약 70 ms가 더 든다).
+ */
+export const FAST_STREAM_BPS = 100e6
+/**
+ * LAN 한 스트림의 쓰기 버퍼. 디스크 쓰기가 소켓 수신보다 느린 순간에도 수신이 멈추지 않게 크게 잡는다.
+ * 평문 FTP는 슬랩(DOWNLOAD_SLAB x DOWNLOAD_SLABS)에 받아 슬랩 수가 메모리를 묶으므로 TLS 스트림 경로에서만 쓰인다.
+ */
+export const LAN_WRITE_BUFFER = 32 * 1024 * 1024
 
 /**
  * 파일을 구간으로 나눈다. 분할하지 않는 편이 나으면(빈 배열) 단일 스트림으로 받는다.
@@ -43,97 +59,4 @@ export function planSegments(
     start = end
   }
   return ranges
-}
-
-function segmentError(code: string, message: string): NodeJS.ErrnoException {
-  const err: NodeJS.ErrnoException = new Error(message)
-  err.code = code
-  return err
-}
-
-/**
- * 이미 열린 fd의 range.start 위치부터 위치 지정 쓰기(pwrite)를 하는 Writable.
- * basic-ftp `downloadTo(writer, remotePath, range.start)`의 대상으로 쓴다.
- *
- * - 비최종 구간: len에 닿으면 잘라 쓴 뒤 콜백 에러(SEGMENT_DONE)로 스트림을 끊는다.
- *   FTP RETR에는 끝 오프셋이 없어 이렇게 끊을 수밖에 없고, basic-ftp는 이때 클라이언트를
- *   closeWithError 하므로 호출자는 written === len이면 성공으로 보고 그 클라이언트를 버린다.
- * - 최종 구간: len까지만 쓰고, 더 오면 overflow로 표시하며 SEGMENT_OVERFLOW로 끊는다.
- *   서버가 REST를 무시하고 0부터 보낼 때 나타난다.
- * - onProgress에는 실제로 쓴 바이트 수(증분)를 넘긴다.
- */
-export class SegmentWriter extends Writable {
-  readonly length: number
-  written = 0
-  overflow = false
-  /** 진행 중인 위치 지정 쓰기. stop()이 이것이 끝나기를 기다린다. */
-  private inflight: Promise<void> = Promise.resolve()
-  private stopped = false
-
-  constructor(
-    private readonly fd: number,
-    private readonly range: SegmentRange,
-    private readonly onProgress?: (bytes: number) => void
-  ) {
-    super()
-    this.length = range.end - range.start
-  }
-
-  /** 이 구간이 정확히 len 바이트를 받았는지. */
-  get complete(): boolean {
-    return this.written === this.length
-  }
-
-  /**
-   * 이후 청크는 버리고, 진행 중인 쓰기가 끝나면 resolve한다. downloadTo가 소켓 에러로 먼저
-   * reject되어도 스레드풀의 fs.write는 남아 있을 수 있으므로, fd를 닫기 전에 반드시 기다린다.
-   * 닫힌 fd 번호가 다른 파일에 재사용된 뒤 늦은 쓰기가 그 파일을 덮는 일을 막는다.
-   */
-  stop(): Promise<void> {
-    this.stopped = true
-    return this.inflight
-  }
-
-  _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
-    if (this.stopped) return callback()
-    const room = this.length - this.written
-    const take = Math.min(chunk.length, room)
-    const exhausted = chunk.length >= room
-
-    this.inflight = this.writeFully(chunk, take)
-      .then(() => {
-        this.written += take
-        if (take > 0) this.onProgress?.(take)
-
-        if (!exhausted) return callback()
-        if (this.range.final) {
-          // 정확히 len에서 끝나면 정상. 그보다 많이 왔을 때만 overflow다.
-          if (chunk.length === room) return callback()
-          this.overflow = true
-          return callback(
-            segmentError(SEGMENT_OVERFLOW, 'Final segment received more bytes than expected')
-          )
-        }
-        callback(segmentError(SEGMENT_DONE, 'Segment complete'))
-      })
-      .catch((err) => callback(err as Error))
-  }
-
-  /** fs.write는 일부만 쓸 수 있으므로 take 바이트를 다 쓸 때까지 반복한다. */
-  private async writeFully(chunk: Buffer, take: number): Promise<void> {
-    let done = 0
-    while (done < take) {
-      const bytes = await new Promise<number>((resolve, reject) => {
-        fs.write(
-          this.fd,
-          chunk,
-          done,
-          take - done,
-          this.range.start + this.written + done,
-          (err, n) => (err ? reject(err) : resolve(n))
-        )
-      })
-      done += bytes
-    }
-  }
 }

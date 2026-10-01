@@ -29,6 +29,10 @@ export interface MockFtpServerOptions {
    * 클라이언트는 자체 서명 인증서라 rejectUnauthorized: false로 붙어야 한다.
    */
   tls?: boolean
+  /** RETR 데이터를 ms마다 bytes씩만 보낸다(느린 WAN 구간). */
+  retrPace?: { bytes: number; ms: number }
+  /** STOR 데이터를 ms마다 bytes씩만 읽는다(느린 업링크). 클라이언트 쪽 소켓 버퍼에 데이터가 쌓인다. */
+  storPace?: { bytes: number; ms: number }
 }
 
 export interface MockFtpServer {
@@ -117,6 +121,7 @@ export function startMockFtpServer(options: MockFtpServerOptions): Promise<MockF
       const socket = new Promise<net.Socket>((resolve) => {
         dataServer.once('connection', (s) => {
           track(s)
+          log.push('! data connected')
           resolve(s)
         })
       })
@@ -159,10 +164,12 @@ export function startMockFtpServer(options: MockFtpServerOptions): Promise<MockF
           })
           return
         }
-        const end = Math.min(pos + CHUNK, file.length)
+        const pace = options.retrPace
+        const end = Math.min(pos + (pace ? pace.bytes : CHUNK), file.length)
         const ok = data.write(file.subarray(pos, end))
         pos = end
-        if (ok) setImmediate(tick)
+        if (pace) setTimeout(tick, pace.ms)
+        else if (ok) setImmediate(tick)
         else data.once('drain', tick)
       }
       tick()
@@ -199,6 +206,20 @@ export function startMockFtpServer(options: MockFtpServerOptions): Promise<MockF
         if (!sent150) early = true
         chunks.push(chunk)
       })
+      const pace = options.storPace
+      if (pace) {
+        // 멈춘 소켓에서 ms마다 bytes까지만 꺼낸다. read()도 'data'를 내므로 위 리스너가 그대로 모은다.
+        data.pause()
+        const timer = setInterval(() => {
+          let got = 0
+          while (got < pace.bytes && data.readableLength > 0) {
+            got += (data.read(Math.min(pace.bytes - got, data.readableLength)) as Buffer).length
+          }
+          // 버퍼가 비면 read()가 소켓 읽기를 다시 걸고, EOF 뒤라면 'end'를 낸다
+          if (data.readableLength === 0) data.read()
+        }, pace.ms)
+        void ended.then(() => clearInterval(timer))
+      }
       if (options.delay150Ms) await new Promise((r) => setTimeout(r, options.delay150Ms))
       if (early) {
         log.push('! early data')

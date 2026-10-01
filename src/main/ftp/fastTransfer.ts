@@ -5,16 +5,19 @@
 //
 // vsftpd/ProFTPD/Pure-FTPd처럼 데이터 연결을 accept한 뒤에야 150을 보내는 서버에서 파일마다 1 RTT를 줄인다.
 // FileZilla와 같은 순서다(명령과 connect를 함께 보내고, 연결되면 1yz를 기다리지 않고 쓴다). 다운로드는
-// 서버가 보내기 전에는 할 일이 없어 이득이 1~3%뿐이라 basic-ftp 경로를 그대로 쓴다.
+// 서버가 보내기 전에는 할 일이 없어 이득이 1~3%뿐이라 명령 순서는 basic-ftp 그대로다. 대신 평문 FTP
+// 다운로드는 segmentWriter.downloadInto가 데이터 소켓을 바꿔 끼워 풀의 슬랩에 바로 받는다.
+//
+// 표준 순서로 보낼 때(uploadStandard)도 basic-ftp의 읽기 스트림 대신 같은 버퍼 링(RingSource)으로 읽는다.
+// Electron에서는 조각마다 새 버퍼를 잡는 비용이 커서, 두 경로 모두 풀에서 빌린 버퍼만 쓴다.
 //
 // 결과 규칙은 basic-ftp TransferResolver와 같다: 데이터 전송 완료와 226을 모두 받아야 resolve하고, 응답
 // 에러는 FTPError로, 소켓 에러는 closeWithError로 끝난다. 공개되지 않은 basic-ftp 모듈을 직접 가져오므로
 // basic-ftp 버전을 올릴 때는 fastTransfer.test.ts의 버전 확인 테스트가 다시 검토하도록 막는다.
 import { open as fsOpen } from 'fs/promises'
-import { createReadStream } from 'fs'
+import { read as fsRead } from 'fs'
 import type { Socket } from 'net'
 import { connect as tlsConnect, TLSSocket } from 'tls'
-import { pipeline, type Readable } from 'stream'
 import { FTPError, type Client, type FTPContext, type FTPResponse } from 'basic-ftp'
 import {
   enterPassiveModeIPv4,
@@ -27,8 +30,193 @@ import { TransferWatchdog } from 'basic-ftp/dist/TransferWatchdog'
 import { ipIsPrivateV4Address, isLoopback } from 'basic-ftp/dist/netUtils'
 import type { ProgressTracker } from 'basic-ftp/dist/ProgressTracker'
 
+/**
+ * 업로드 읽기 버퍼 하나의 크기와 전송 하나가 동시에 쥐는 버퍼 수(2 MiB). 버퍼는 읽는 중이거나 소켓이 보내는
+ * 중이고, 소켓의 쓰기 콜백이 온 뒤에야 다음 읽기에 쓴다. Electron 루프백 512 MiB 실측: 1 MiB 조각을 새로
+ * 할당하던 방식 0.34 s, 256 KiB x 8 링 0.12 s(1 MiB x 4도 같고, 4 MiB x 3은 0.13 s).
+ */
+export const UPLOAD_BUFFER = 256 * 1024
+export const UPLOAD_BUFFERS = 8
+/**
+ * 소켓의 쓰기 대기열이 이만큼 차 있으면 다음 버퍼를 넘기기 전에 기다린다(읽기는 링 안에서 계속 앞서 간다).
+ * basic-ftp의 진행률과 watchdog은 대기열까지 센 bytesWritten을 보므로, 대기열이 링 전체(2 MiB)까지 쌓이면
+ * 느린 업링크에서 진행률이 서버보다 그만큼 앞서고 작은 파일은 곧바로 100%로 보인다.
+ */
+const UPLOAD_QUEUED_MAX = 2 * UPLOAD_BUFFER
+/**
+ * 한 스트림 다운로드와 구간의 쓰기 버퍼. 쓰기 하나가 진행되는 동안 쌓인 조각을 SegmentWriter._writev가
+ * 한 번에 writev한다. 슬랩으로 받는 평문 FTP에서는 슬랩 수가 메모리를 묶으므로 TLS 스트림 경로에서만 뜻이 있다.
+ */
+export const DOWNLOAD_WRITE_BUFFER = 4 * 1024 * 1024
+
 type PassiveMode = 'EPSV' | 'PASV' | 'PASV_NAT'
 type Task = { resolve: (res: FTPResponse) => void; reject: (err: Error) => void }
+
+/**
+ * 크기가 같은 버퍼를 전송끼리 돌려 쓰는 풀. Electron(V8 메모리 케이지)에서는 새 버퍼 할당 한 번이 크기와
+ * 상관없이 0.2 ms 안팎이라(Node 22는 1 us) 조각마다 새로 잡으면 그 자체가 병목이다. 풀은 max개까지만 쥔다.
+ */
+export class BufferPool {
+  private free: Buffer[] = []
+
+  constructor(
+    readonly size: number,
+    private readonly max: number
+  ) {}
+
+  take(): Buffer {
+    return this.free.pop() ?? Buffer.allocUnsafeSlow(this.size)
+  }
+
+  give(buffer: Buffer): void {
+    if (this.free.length < this.max) this.free.push(buffer)
+  }
+}
+
+const uploadBuffers = new BufferPool(UPLOAD_BUFFER, 4 * UPLOAD_BUFFERS)
+
+/**
+ * fd를 처음부터 소켓으로 보낸다. 위치 지정 읽기를 파일 순서대로 UPLOAD_BUFFERS개까지 걸어 두어 앞 버퍼를
+ * 소켓이 보내는 동안 다음 버퍼가 준비된다. 버퍼는 풀에서 빌려 소켓의 쓰기 콜백(libuv가 쓰기를 마쳤거나 소켓이
+ * 닫혀 취소함, TLS면 평문이 OpenSSL로 복사된 뒤)이 온 뒤에만 돌려주므로 소켓이 아직 참조하는 버퍼를 다시
+ * 읽기에 쓰지 않는다.
+ * 읽기는 연 뒤 본 크기(size)에 맞춰 남은 바이트 + 1까지만 요청한다. 더한 1 바이트 덕분에 크기가 그대로면
+ * 마지막 읽기가 짧게 끝나 파일 끝을 알고, 꽉 차면 파일이 커진 것이라 거기서 멈춘다. 짧게 읽힌 뒤에 걸어 둔
+ * 읽기는 버린다. bytesRead는 보낸 바이트 수라 호출자가 파일이 바뀌었는지 확인할 수 있다.
+ */
+class RingSource {
+  bytesRead = 0
+  /** 다음 읽기의 파일 위치 */
+  private position = 0
+  /** 이 전송이 풀에서 빌린 버퍼 수(읽는 중 + 소켓이 보내는 중) */
+  private held = 0
+  /** 전송이 끝났거나 settle됨. 더 읽지도 보내지도 않는다. */
+  private stopped = false
+  /** 버퍼가 모자라 기다리는 pump를 깨운다 */
+  private wake: (() => void) | undefined
+  /** 걸어 둔 읽기와 요청한 길이. 파일 순서대로다. */
+  private reads: Array<{ buffer: Buffer; length: number; done: Promise<number> }> = []
+  /** 끝나지 않은 모든 읽기(큐에서 꺼내 기다리는 것 포함). fd를 닫기 전에 기다린다. */
+  private inflight = new Set<Promise<number>>()
+  private errorHandler: ((err: Error) => void) | undefined
+
+  constructor(
+    private readonly fd: number,
+    private readonly size: number
+  ) {}
+
+  /** 로컬 파일 읽기 에러. start의 콜백보다 먼저 불린다(스트림의 'error'와 pipeline 콜백 순서). */
+  onError(handler: (err: Error) => void): void {
+    this.errorHandler = handler
+  }
+
+  /** 소켓으로 보내고 socket.end가 끝나면(pipeline의 finish와 같다) callback()한다. 실패는 callback(err). */
+  start(socket: Socket, callback: (err?: Error | null) => void): void {
+    let settled = false
+    const finish = (err?: Error | null): void => {
+      if (settled) return
+      settled = true
+      socket.removeListener('error', finish)
+      callback(err)
+    }
+    socket.on('error', finish)
+    this.pump(socket).then(
+      () => {
+        if (!settled) socket.end((err?: Error | null) => finish(err))
+      },
+      (err: Error) => {
+        socket.destroy()
+        finish(err)
+      }
+    )
+  }
+
+  /** 걸어 둔 읽기가 모두 끝나면 resolve한다. 호출자는 이것을 기다린 뒤에 fd를 닫는다. */
+  async settle(): Promise<void> {
+    this.stopped = true
+    const reads = this.reads
+    this.reads = []
+    this.wakeUp()
+    await Promise.allSettled([...this.inflight])
+    for (const read of reads) this.release(read.buffer)
+  }
+
+  private release(buffer: Buffer): void {
+    this.held--
+    uploadBuffers.give(buffer)
+    this.wakeUp()
+  }
+
+  private wakeUp(): void {
+    const wake = this.wake
+    this.wake = undefined
+    wake?.()
+  }
+
+  private issue(): void {
+    while (!this.stopped && this.held < UPLOAD_BUFFERS && this.position <= this.size) {
+      const buffer = uploadBuffers.take()
+      this.held++
+      const position = this.position
+      const length = Math.min(buffer.length, this.size - position + 1)
+      this.position += length
+      const done = new Promise<number>((resolve, reject) =>
+        fsRead(this.fd, buffer, 0, length, position, (err, n) => (err ? reject(err) : resolve(n)))
+      )
+      this.inflight.add(done)
+      // 앞 버퍼를 기다리는 동안 뒤 읽기가 먼저 실패해도 처리되지 않은 reject로 끝나지 않게 한다
+      done.then(
+        () => this.inflight.delete(done),
+        () => this.inflight.delete(done)
+      )
+      this.reads.push({ buffer, length, done })
+    }
+  }
+
+  private async pump(socket: Socket): Promise<void> {
+    try {
+      for (;;) {
+        if (this.stopped) throw new Error('Upload stopped')
+        if (socket.destroyed) throw new Error('Data socket closed')
+        this.issue()
+        const read = this.reads.shift()
+        if (!read) {
+          // size + 1 바이트까지 다 읽혔다: 파일이 커졌다. 호출자가 bytesRead로 알아챈다.
+          if (this.position > this.size) return
+          await new Promise<void>((resolve) => (this.wake = resolve))
+          continue
+        }
+        let n: number
+        try {
+          n = await read.done
+        } catch (err) {
+          this.release(read.buffer)
+          this.errorHandler?.(err as Error)
+          throw err
+        }
+        // 앞서 넘긴 버퍼의 쓰기 콜백(release)이 대기열이 줄었을 때 깨운다
+        while (
+          n > 0 &&
+          !this.stopped &&
+          !socket.destroyed &&
+          socket.writableLength >= UPLOAD_QUEUED_MAX
+        ) {
+          await new Promise<void>((resolve) => (this.wake = resolve))
+        }
+        if (n > 0 && !this.stopped) {
+          this.bytesRead += n
+          socket.write(read.buffer.subarray(0, n), () => this.release(read.buffer))
+        } else {
+          this.release(read.buffer)
+        }
+        if (n < read.length) return
+      }
+    } finally {
+      // 짧게 읽힌 뒤에 걸어 둔 읽기는 버린다(읽는 사이 파일이 커졌으면 틈이 생기므로). 버퍼는 settle이 거둔다.
+      this.stopped = true
+    }
+  }
+}
 
 /** basic-ftp가 Client 안에 두는 진행률 추적기. 공개 타입에는 protected라 여기서만 좁혀 쓴다. */
 interface ClientInternals {
@@ -177,7 +365,7 @@ function run(
   target: { host: string; port: number },
   command: string,
   name: string,
-  source: Readable
+  source: RingSource
 ): Promise<FTPResponse> {
   const ftp = client.ftp
   const r = new Resolver(ftp, (client as unknown as ClientInternals)._progressTracker)
@@ -210,9 +398,8 @@ function run(
   }
 
   // 로컬 파일 에러는 basic-ftp처럼 연결을 닫는다: 1xx 뒤에 데이터가 끊기면 서버의 426이 다음 응답에 섞인다.
-  // 1xx 전에는 pipeline이 데이터 소켓의 에러(550 거부의 RST 등)를 source로 전파한 것일 수 있으므로
-  // 닫지 않는다. 그 에러는 pipeline 콜백이 onEarlyDataError로 넘겨 제어 응답이 결과를 정한다.
-  source.on('error', (err) => {
+  // 1xx 전에는 닫지 않는다. 그 에러는 start 콜백이 onEarlyDataError로 넘겨 제어 응답이 결과를 정한다.
+  source.onError((err) => {
     sourceError ??= err
     if (handedOver) ftp.closeWithError(err)
   })
@@ -234,7 +421,7 @@ function run(
     const go = (): void => {
       if (r.settled || dataError) return
       r.onDataStart(data, name)
-      pipeline(source, data, (err) => {
+      source.start(data, (err) => {
         if (!err) r.onDataDone(task)
         else if (handedOver) r.onError(task, err)
         else onEarlyDataError(err)
@@ -326,46 +513,97 @@ function run(
   return result
 }
 
-/** client.uploadFrom(localPath, remotePath)와 같은 결과를 빠른 경로로 낸다. */
+/** client.uploadFrom(source, remotePath)와 같은 결과를 빠른 경로로 낸다. */
 async function uploadFile(
   client: Client,
-  localPath: string,
   remotePath: string,
   mode: PassiveMode,
-  expected: number,
-  fd: number
+  source: RingSource
 ): Promise<FTPResponse> {
   const validPath = await client.protectWhitespace(remotePath)
   const target = await requestPassive(client.ftp, mode)
-  const source = createReadStream('', { fd, autoClose: false })
-  const res = await run(client, target, `STOR ${validPath}`, validPath, source)
-  // basic-ftp _uploadLocalFile: 읽는 도중 로컬 파일이 바뀌어 덜 보냈으면 성공으로 치지 않는다
-  if (source.bytesRead !== expected) {
-    throw new Error(
-      `Local file "${localPath}" changed while it was being uploaded to "${remotePath}": expected to send ${expected} bytes but sent ${source.bytesRead}. The remote file is incomplete.`
-    )
-  }
-  return res
+  return run(client, target, `STOR ${validPath}`, validPath, source)
 }
 
 /**
- * `client.uploadFrom(localPath, remotePath)`와 같은 결과. 이 클라이언트에서 아직 수동 모드를 고르지
- * 않았으면 표준 경로로 보낸다. 빈 파일도 표준 경로로 보낸다: FTPS에서 명령과 연결 순서가 표준과 다르면
+ * client.uploadFrom(source, remotePath)의 표준 경로(basic-ftp _uploadFromStream + uploadFrom)를 RingSource로
+ * 실행한다: prepareTransfer로 데이터 연결을 연 뒤 STOR, 첫 1xx에서 보내기 시작한다. 결과 규칙도 같다.
+ */
+async function uploadStandard(
+  client: Client,
+  remotePath: string,
+  source: RingSource
+): Promise<FTPResponse> {
+  const ftp = client.ftp
+  // basic-ftp _uploadFromStream: 로컬 읽기 에러는 연결을 닫는다
+  source.onError((err) => ftp.closeWithError(err))
+  const validPath = await client.protectWhitespace(remotePath)
+  await client.prepareTransfer(ftp)
+  const r = new Resolver(ftp, (client as unknown as ClientInternals)._progressTracker)
+  let started = false
+  return ftp.handle(`STOR ${validPath}`, (res, task) => {
+    if (res instanceof Error) {
+      r.onError(task, res)
+    } else if (res.code === 150 || res.code === 125) {
+      // 두 번째 1xx로 다시 보내면 원격 파일이 망가진다
+      if (started) return
+      started = true
+      const data = ftp.dataSocket
+      if (!data) {
+        r.onError(task, new Error('Upload should begin but no data connection is available.'))
+        return
+      }
+      const go = (): void => {
+        r.onDataStart(data, validPath)
+        source.start(data, (err) => (err ? r.onError(task, err) : r.onDataDone(task)))
+      }
+      // TLS면 handshake가 끝나야 쓸 수 있다
+      if (data instanceof TLSSocket && data.getCipher() === undefined)
+        data.once('secureConnect', go)
+      else go()
+    } else if (res.code >= 200 && res.code < 300) {
+      r.onControlDone(task, res)
+    } else if (res.code >= 300 && res.code < 400) {
+      ftp.closeWithError(
+        new Error(`Unexpected FTP response is requesting an answer: ${res.message}`)
+      )
+    }
+  })
+}
+
+/**
+ * `client.uploadFrom(localPath, remotePath)`와 같은 결과를 풀에서 빌린 버퍼 링(RingSource)으로 낸다.
+ * allowFast가 거짓이거나 이 클라이언트에서 아직 수동 모드를 고르지 않았으면 표준 경로(uploadStandard)로
+ * 보낸다. 빈 파일도 표준 경로로 보낸다: FTPS에서 명령과 연결 순서가 표준과 다르면
  * handshake 직후 close_notify만 받은 서버(pyftpdlib)가 decode_error로 끊는다.
  */
 export async function fastUpload(
   client: Client,
   localPath: string,
-  remotePath: string
+  remotePath: string,
+  allowFast = true
 ): Promise<FTPResponse> {
-  const mode = knownPassiveMode(client)
-  if (!mode) return client.uploadFrom(localPath, remotePath)
-
   const fd = await fsOpen(localPath, 'r')
   try {
     const expected = (await fd.stat()).size
-    if (expected === 0) return await client.uploadFrom(localPath, remotePath)
-    return await uploadFile(client, localPath, remotePath, mode, expected, fd.fd)
+    const source = new RingSource(fd.fd, expected)
+    try {
+      const mode = allowFast ? knownPassiveMode(client) : null
+      const res =
+        !mode || expected === 0
+          ? await uploadStandard(client, remotePath, source)
+          : await uploadFile(client, remotePath, mode, source)
+      // basic-ftp _uploadLocalFile: 읽는 도중 로컬 파일이 바뀌어 덜 보냈으면 성공으로 치지 않는다
+      if (source.bytesRead !== expected) {
+        throw new Error(
+          `Local file "${localPath}" changed while it was being uploaded to "${remotePath}": expected to send ${expected} bytes but sent ${source.bytesRead}. The remote file is incomplete.`
+        )
+      }
+      return res
+    } finally {
+      // 전송이 실패로 끝나면 걸어 둔 읽기가 남아 있을 수 있다. 그 읽기가 끝난 뒤에 fd를 닫는다.
+      await source.settle()
+    }
   } finally {
     await fd.close().catch(() => {})
   }

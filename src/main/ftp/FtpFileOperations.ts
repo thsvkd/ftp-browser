@@ -1,6 +1,10 @@
+import { close, open } from 'fs'
+import { stat, unlink } from 'fs/promises'
+import { promisify } from 'util'
 import type { Client } from 'basic-ftp'
 import { FtpConnectionManager } from './FtpConnectionManager'
 import { fastUpload } from './fastTransfer'
+import { SegmentWriter, downloadInto } from './segmentWriter'
 
 export interface ProgressInfo {
   bytes: number
@@ -86,6 +90,44 @@ export async function removeRemoteDirRecursive(
   }
 }
 
+// 작은 파일을 많이 받을 때는 파일마다의 open/close 비용이 보인다. fs/promises의 FileHandle은 콜백 fd보다
+// 무겁다(Electron 43, 8 KB x 2000개를 연결 16개로: FileHandle 336 ms, fd 319 ms). basic-ftp도 fd를 쓴다.
+const openFd = promisify(open)
+const closeFd = promisify(close)
+
+/**
+ * basic-ftp `downloadTo(localPath, remotePath)`(startAt 0)와 같다. 파일 전체를 끝 없는 최종 구간으로 보는
+ * SegmentWriter에 받아, 평문 FTP면 데이터 소켓이 슬랩에 바로 읽어 넣고(downloadInto) TLS면 스트림 경로로
+ * 받은 조각을 DOWNLOAD_WRITE_BUFFER까지 모아 한 번에 쓴다. 성공이든 실패든 진행 중인 쓰기가 끝난 뒤에
+ * 파일을 닫는다(닫힌 fd 번호가 재사용된 뒤 늦은 쓰기가 다른 파일을 덮지 않게).
+ */
+async function downloadToFile(
+  client: Client,
+  localPath: string,
+  remotePath: string
+): Promise<void> {
+  const fd = await openFd(localPath, 'w')
+  const writer = new SegmentWriter(fd, { start: 0, end: Number.MAX_SAFE_INTEGER, final: true })
+  // basic-ftp가 리스너를 뗀 뒤 남은 쓰기가 실패해도 프로세스가 죽지 않게 한다. 전송 실패는 downloadTo가 알린다.
+  writer.on('error', () => {})
+  let error: unknown = null
+  try {
+    await downloadInto(client, writer, remotePath)
+  } catch (err) {
+    error = err
+  }
+  await writer.stop()
+  await closeFd(fd).catch(() => {})
+  if (error === null) return
+  // basic-ftp와 같이 아무것도 받지 못한 새 파일만 지운다
+  const size = await stat(localPath).then(
+    (s) => s.size,
+    () => -1
+  )
+  if (size === 0) await unlink(localPath).catch(() => {})
+  throw error
+}
+
 export class FtpFileOperations {
   constructor(private manager: FtpConnectionManager) {}
 
@@ -93,6 +135,7 @@ export class FtpFileOperations {
    * `client`를 주면 그 클라이언트에서 직접 실행한다(전송 풀의 전용 연결). 메인 클라이언트의
    * 직렬 큐(`runOnMainClient`)를 거치지 않으므로 탐색 명령과 서로 막지 않는다.
    * `fast`면 그 클라이언트에서 빠른 업로드(fastTransfer)를 쓴다. 메인 클라이언트는 항상 표준 경로다.
+   * 어느 쪽이든 fastUpload가 큰 단위로 읽는다.
    */
   async upload(
     localPath: string,
@@ -108,8 +151,7 @@ export class FtpFileOperations {
         })
       }
       try {
-        if (client && fast) await fastUpload(c, localPath, remotePath)
-        else await c.uploadFrom(localPath, remotePath)
+        await fastUpload(c, localPath, remotePath, Boolean(client && fast))
       } finally {
         c.trackProgress()
       }
@@ -131,7 +173,7 @@ export class FtpFileOperations {
         })
       }
       try {
-        await c.downloadTo(localPath, remotePath)
+        await downloadToFile(c, localPath, remotePath)
       } finally {
         c.trackProgress()
       }

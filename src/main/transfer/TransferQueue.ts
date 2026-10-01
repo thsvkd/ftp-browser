@@ -3,9 +3,19 @@ import { randomUUID } from 'crypto'
 import { open, unlink, type FileHandle } from 'fs/promises'
 import { FTPError, type Client, type FTPResponse } from 'basic-ftp'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
-import { isFastFlowSuspect } from '../ftp/fastTransfer'
+import { DOWNLOAD_WRITE_BUFFER, isFastFlowSuspect } from '../ftp/fastTransfer'
 import { LIMIT, type TransferClientPool } from './TransferClientPool'
-import { planSegments, SegmentWriter, SEGMENT_MIN, type SegmentRange } from './segmentedDownload'
+import {
+  FAST_STREAM_BPS,
+  LAN_RTT_MS,
+  LAN_WRITE_BUFFER,
+  planSegments,
+  PROBE_MS,
+  SegmentWriter,
+  downloadInto,
+  SEGMENT_MIN,
+  type SegmentRange
+} from './segmentedDownload'
 import { classifyError, isRetryableError } from '../utils/errorClassifier'
 import type {
   TransferJob,
@@ -56,6 +66,14 @@ interface SegmentedDownload {
   restart: boolean
   /** closeSegmented가 이미 시작됨. 멈춘 쪽과 마지막 구간 쪽이 모두 부를 수 있어 한 번만 돈다. */
   closing: boolean
+  /** LAN이라 한 스트림으로 받기 시작했고 아직 속도를 판정하지 않음. 판정은 한 번뿐이다. */
+  probing: boolean
+}
+
+/** LAN 한 스트림의 속도 측정 기준점. writer마다 따로 두어, 판정 전 재시도면 측정도 다시 시작한다. */
+interface StreamProbe {
+  t0?: number
+  b0: number
 }
 
 /** 스케줄러가 풀 슬롯 하나에서 실행하는 단위. 보통 작업 하나가 항목 하나이고, 분할 다운로드는 구간마다 하나다. */
@@ -394,6 +412,9 @@ export class TransferQueue extends EventEmitter {
    * 분할할 만한 다운로드면 SIZE로 실제 크기를 받고, 로컬 파일을 그 크기로 만든 뒤 앞 구간들을
    * 큐 맨 앞에 넣는다. 머리 항목이 받을 마지막 구간을 돌려준다. 분할하지 않으면 null이고,
    * 그러면 호출자가 같은 클라이언트로 한 스트림 다운로드를 한다.
+   *
+   * SIZE 응답이 LAN_RTT_MS보다 빠르면(LAN) 나누지 않고 파일 전체 [0, size)를 한 구간으로 돌려준다.
+   * 그 스트림이 느리면 probeStream이 남은 부분만 나눈다.
    */
   private async startSegmented(job: TransferJob, client: Client): Promise<SegmentItem | null> {
     if (
@@ -406,15 +427,20 @@ export class TransferQueue extends EventEmitter {
     }
 
     let size: number
+    let rtt: number
     try {
+      const sent = performance.now()
       size = await client.size(job.remotePath)
+      rtt = performance.now() - sent
     } catch (err) {
       // SIZE를 지원하지 않는 서버는 한 스트림으로 받는다. 취소로 끊긴 것이면 그대로 올린다.
       if (isCancelled(job)) throw err
       return null
     }
-    const ranges = planSegments(size, this.pool.limit)
+    let ranges = planSegments(size, this.pool.limit)
     if (ranges.length === 0) return null
+    const lan = rtt < LAN_RTT_MS
+    if (lan) ranges = [{ start: 0, end: size, final: true }]
 
     const file = await open(job.localPath, 'w')
     try {
@@ -433,7 +459,8 @@ export class TransferQueue extends EventEmitter {
       running: 0,
       stopped: false,
       restart: false,
-      closing: false
+      closing: false,
+      probing: lan
     }
     this.segmented.set(job.id, state)
     // 앞 구간을 큐 맨 앞에 넣어, 비는 슬롯이 뒤의 작은 파일보다 먼저 이 구간들을 받게 한다.
@@ -465,13 +492,23 @@ export class TransferQueue extends EventEmitter {
 
     state.running++
     this.addLease(job.id, client)
-    const writer = new SegmentWriter(state.file.fd, range, (bytes) => {
-      job.transferredBytes += bytes
-      this.markDirty(job)
-    })
+    const probe: StreamProbe = { b0: 0 }
+    const writer = new SegmentWriter(
+      state.file.fd,
+      range,
+      (bytes) => {
+        job.transferredBytes += bytes
+        this.markDirty(job)
+        if (state.probing) this.probeStream(item, writer, probe)
+      },
+      state.probing ? LAN_WRITE_BUFFER : DOWNLOAD_WRITE_BUFFER
+    )
+    // 슬랩 경로는 150 전에도 쓰기를 시작한다. 제어 응답이 먼저 실패해 basic-ftp가 리스너를 뗀 뒤 그 쓰기가
+    // 실패해도 프로세스가 죽지 않게 한다(downloadToFile과 같다). 전송 실패는 downloadInto가 알린다.
+    writer.on('error', () => {})
     let error: unknown = null
     try {
-      await client.downloadTo(writer, job.remotePath, range.start)
+      await downloadInto(client, writer, job.remotePath, range.start)
     } catch (err) {
       error = err
     }
@@ -486,6 +523,38 @@ export class TransferQueue extends EventEmitter {
 
     if (!state.stopped) this.settleSegment(item, writer, error)
     if (state.stopped && state.running === 0) await this.closeSegmented(job, state)
+  }
+
+  /**
+   * LAN 한 스트림의 속도를 첫 쓰기 완료부터 PROBE_MS 동안 재고 한 번 판정한다. FAST_STREAM_BPS보다 느리면
+   * 이미 받아 둔 끝 뒤의 남은 부분을 planSegments로 나눈다. 머리 스트림은 클라이언트를 버리지 않고 첫 조각까지
+   * 이어 받고, 나머지 조각은 큐 맨 앞에 넣는다.
+   */
+  private probeStream(item: SegmentItem, writer: SegmentWriter, probe: StreamProbe): void {
+    const { job } = item
+    const { range, state } = item.segment
+    const now = performance.now()
+    if (probe.t0 === undefined) {
+      probe.t0 = now
+      probe.b0 = writer.written
+      return
+    }
+    if (now - probe.t0 < PROBE_MS) return
+    state.probing = false
+    if (state.stopped) return
+    if (((writer.written - probe.b0) * 1000) / (now - probe.t0) >= FAST_STREAM_BPS) return
+
+    const pos = range.start + writer.written + writer.writableLength
+    // 파일 전체가 이미 분할 기준 이상이므로 남은 부분은 크기 기준 없이 나눈다
+    const rest = planSegments(state.size - pos, this.pool.limit, 0)
+    if (rest.length < 2) return
+    writer.splitAt(pos + rest[0].end)
+    state.remaining += rest.length - 1
+    for (let i = rest.length - 1; i >= 1; i--) {
+      const piece = { start: pos + rest[i].start, end: pos + rest[i].end, final: rest[i].final }
+      this.pushFront({ job, segment: { range: piece, state, retries: 0 } })
+    }
+    this.pump()
   }
 
   /** 끝난 구간의 결과를 반영한다: 완료 집계, REST 문제면 한 스트림 전환, 그 외 실패는 재시도/실패. */

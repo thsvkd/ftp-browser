@@ -1,12 +1,24 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import * as fs from 'fs'
+import * as net from 'net'
+import * as os from 'os'
+import * as path from 'path'
+import { Writable } from 'stream'
 import { FtpFileOperations } from './FtpFileOperations'
-import { fastUpload } from './fastTransfer'
+import { fastUpload, DOWNLOAD_WRITE_BUFFER } from './fastTransfer'
+import { SegmentWriter } from './segmentWriter'
 import type { Client } from 'basic-ftp'
 import type { FtpConnectionManager, FtpMutationEvent } from './FtpConnectionManager'
 
-vi.mock('./fastTransfer', () => ({ fastUpload: vi.fn().mockResolvedValue(undefined) }))
+// 업로드는 fastUpload를 흉내 낸다. 실제 읽기 동작은 fastTransfer.test.ts가 목 서버로 확인한다.
+vi.mock('./fastTransfer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./fastTransfer')>()),
+  fastUpload: vi.fn().mockResolvedValue(undefined)
+}))
 
 interface MockClient {
+  /** 평문 제어 연결. downloadInto가 데이터 소켓 생성 함수를 바꿔 끼운다. */
+  ftp: { socket: object; _newSocket: () => net.Socket }
   uploadFrom: ReturnType<typeof vi.fn>
   downloadTo: ReturnType<typeof vi.fn>
   remove: ReturnType<typeof vi.fn>
@@ -17,6 +29,10 @@ interface MockClient {
   trackProgress: ReturnType<typeof vi.fn>
 }
 
+function plainContext(): MockClient['ftp'] {
+  return { socket: {}, _newSocket: () => new net.Socket() }
+}
+
 function createMockManager(): {
   manager: FtpConnectionManager
   client: MockClient
@@ -24,6 +40,7 @@ function createMockManager(): {
   runOnMainClient: ReturnType<typeof vi.fn>
 } {
   const mockClient: MockClient = {
+    ftp: plainContext(),
     uploadFrom: vi.fn().mockResolvedValue(undefined),
     downloadTo: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
@@ -54,6 +71,9 @@ describe('FtpFileOperations', () => {
   let emit: ReturnType<typeof createMockManager>['emit']
   let runOnMainClient: ReturnType<typeof createMockManager>['runOnMainClient']
 
+  /** 다운로드는 로컬 파일을 직접 열므로 실제 임시 폴더에 받는다 */
+  let tmp: string
+
   beforeEach(() => {
     vi.clearAllMocks()
     const mock = createMockManager()
@@ -61,12 +81,22 @@ describe('FtpFileOperations', () => {
     emit = mock.emit
     runOnMainClient = mock.runOnMainClient
     ops = new FtpFileOperations(mock.manager)
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fileops-'))
+  })
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true })
   })
 
   describe('upload', () => {
-    it('should call uploadFrom on the client', async () => {
+    it('should upload through fastUpload on the main client with the fast flow off', async () => {
       await ops.upload('/local/file.jpg', '/remote/file.jpg')
-      expect(mockClient.uploadFrom).toHaveBeenCalledWith('/local/file.jpg', '/remote/file.jpg')
+      expect(fastUpload).toHaveBeenCalledWith(
+        mockClient,
+        '/local/file.jpg',
+        '/remote/file.jpg',
+        false
+      )
     })
 
     it('should set up progress tracking when callback is provided', async () => {
@@ -79,7 +109,7 @@ describe('FtpFileOperations', () => {
     })
 
     it('should clean up progress tracking even on error', async () => {
-      mockClient.uploadFrom.mockRejectedValueOnce(new Error('Upload failed'))
+      vi.mocked(fastUpload).mockRejectedValueOnce(new Error('Upload failed'))
 
       await expect(ops.upload('/local/file.jpg', '/remote/file.jpg', vi.fn())).rejects.toThrow(
         'Upload failed'
@@ -91,17 +121,95 @@ describe('FtpFileOperations', () => {
   })
 
   describe('download', () => {
-    it('should call downloadTo on the client', async () => {
-      await ops.download('/remote/file.jpg', '/local/file.jpg')
-      expect(mockClient.downloadTo).toHaveBeenCalledWith('/local/file.jpg', '/remote/file.jpg')
+    /** downloadTo가 받은 Writable에 data를 쓰고 끝내는 흉내(basic-ftp는 finish 뒤에 resolve한다) */
+    function serve(client: MockClient, data: Buffer): Writable[] {
+      const targets: Writable[] = []
+      client.downloadTo.mockImplementation(async (target: Writable) => {
+        targets.push(target)
+        await new Promise<void>((resolve, reject) => {
+          target.on('error', reject)
+          target.end(data, () => resolve())
+        })
+      })
+      return targets
+    }
+
+    it('should download from offset 0 into a SegmentWriter over the whole local file', async () => {
+      const localPath = path.join(tmp, 'file.jpg')
+      const data = Buffer.alloc(5000, 9)
+      const targets = serve(mockClient, data)
+
+      await ops.download('/remote/file.jpg', localPath)
+
+      expect(mockClient.downloadTo).toHaveBeenCalledWith(
+        expect.any(SegmentWriter),
+        '/remote/file.jpg',
+        0
+      )
+      // FTPS는 스트림 경로라 TLS 레코드(16 KiB)를 이 버퍼까지 모아 한 번에 쓴다
+      expect(targets[0].writableHighWaterMark).toBe(DOWNLOAD_WRITE_BUFFER)
+      expect(DOWNLOAD_WRITE_BUFFER).toBe(4 * 1024 * 1024)
+      expect(fs.readFileSync(localPath).equals(data)).toBe(true)
+    })
+
+    it('should remove an empty local file when the download fails before any data', async () => {
+      const localPath = path.join(tmp, 'file.jpg')
+      mockClient.downloadTo.mockRejectedValueOnce(new Error('550 No such file'))
+
+      await expect(ops.download('/remote/file.jpg', localPath)).rejects.toThrow('550')
+      expect(fs.existsSync(localPath)).toBe(false)
+    })
+
+    it('should keep a partly downloaded local file when the download fails midway', async () => {
+      const localPath = path.join(tmp, 'file.jpg')
+      mockClient.downloadTo.mockImplementationOnce(async (target: Writable) => {
+        await new Promise<void>((resolve) => target.write(Buffer.alloc(100, 1), () => resolve()))
+        throw new Error('reset')
+      })
+
+      await expect(ops.download('/remote/file.jpg', localPath)).rejects.toThrow('reset')
+      expect(fs.statSync(localPath).size).toBe(100)
+    })
+
+    /** 첫 조각은 바로 쓰기에 들어가고 나머지는 버퍼에 쌓이도록 기다리지 않고 여러 조각을 쓴다 */
+    function writeUnawaited(target: Writable): Buffer[] {
+      const parts = [0, 1, 2, 3].map((i) => Buffer.alloc(256 * 1024, i + 1))
+      for (const part of parts) target.write(part)
+      return parts
+    }
+
+    it('should let the in-flight write land and drop the rest before a failed download settles', async () => {
+      const localPath = path.join(tmp, 'file.jpg')
+      let parts: Buffer[] = []
+      mockClient.downloadTo.mockImplementationOnce(async (target: Writable) => {
+        parts = writeUnawaited(target)
+        throw new Error('reset')
+      })
+
+      await expect(ops.download('/remote/file.jpg', localPath)).rejects.toThrow('reset')
+
+      // 파일을 닫기 전에 진행 중이던 쓰기가 끝났고, 그 뒤의 조각은 쓰지 않았다
+      expect(fs.readFileSync(localPath).equals(parts[0])).toBe(true)
+    })
+
+    it('should settle when the transfer destroys the writer with an error', async () => {
+      const localPath = path.join(tmp, 'file.jpg')
+      mockClient.downloadTo.mockImplementationOnce(async (target: Writable) => {
+        // stream.pipeline은 데이터 소켓이 실패하면 대상 스트림을 에러로 destroy한다
+        writeUnawaited(target)
+        target.destroy(new Error('socket reset'))
+        throw new Error('socket reset')
+      })
+
+      await expect(ops.download('/remote/file.jpg', localPath)).rejects.toThrow('socket reset')
     })
 
     it('should clean up progress tracking on error', async () => {
       mockClient.downloadTo.mockRejectedValueOnce(new Error('Download failed'))
 
-      await expect(ops.download('/remote/file.jpg', '/local/file.jpg', vi.fn())).rejects.toThrow(
-        'Download failed'
-      )
+      await expect(
+        ops.download('/remote/file.jpg', path.join(tmp, 'file.jpg'), vi.fn())
+      ).rejects.toThrow('Download failed')
 
       expect(mockClient.trackProgress).toHaveBeenLastCalledWith()
     })
@@ -211,6 +319,7 @@ describe('FtpFileOperations', () => {
   describe('explicit client parameter', () => {
     function createOwnClient(): MockClient {
       return {
+        ftp: plainContext(),
         uploadFrom: vi.fn().mockResolvedValue(undefined),
         downloadTo: vi.fn().mockResolvedValue(undefined),
         remove: vi.fn(),
@@ -230,9 +339,8 @@ describe('FtpFileOperations', () => {
       const own = createOwnClient()
       await ops.upload('/local/a.txt', '/remote/a.txt', undefined, asClient(own))
 
-      expect(own.uploadFrom).toHaveBeenCalledTimes(1)
-      expect(own.uploadFrom.mock.calls[0]).toEqual(['/local/a.txt', '/remote/a.txt'])
-      expect(mockClient.uploadFrom).not.toHaveBeenCalled()
+      expect(fastUpload).toHaveBeenCalledTimes(1)
+      expect(fastUpload).toHaveBeenCalledWith(own, '/local/a.txt', '/remote/a.txt', false)
       expect(runOnMainClient).not.toHaveBeenCalled()
     })
 
@@ -241,8 +349,7 @@ describe('FtpFileOperations', () => {
       const onProgress = vi.fn()
       await ops.upload('/local/a.txt', '/remote/a.txt', onProgress, asClient(own), true)
 
-      expect(fastUpload).toHaveBeenCalledWith(own, '/local/a.txt', '/remote/a.txt')
-      expect(own.uploadFrom).not.toHaveBeenCalled()
+      expect(fastUpload).toHaveBeenCalledWith(own, '/local/a.txt', '/remote/a.txt', true)
       expect(own.trackProgress).toHaveBeenNthCalledWith(1, expect.any(Function))
       expect(own.trackProgress).toHaveBeenLastCalledWith()
     })
@@ -250,15 +357,14 @@ describe('FtpFileOperations', () => {
     it('keeps the standard path on the main client even when the fast flow is asked', async () => {
       await ops.upload('/local/a.txt', '/remote/a.txt', undefined, undefined, true)
 
-      expect(mockClient.uploadFrom).toHaveBeenCalledWith('/local/a.txt', '/remote/a.txt')
-      expect(fastUpload).not.toHaveBeenCalled()
+      expect(fastUpload).toHaveBeenCalledWith(mockClient, '/local/a.txt', '/remote/a.txt', false)
     })
 
     it('downloads on the given client without touching the main client', async () => {
       const own = createOwnClient()
-      await ops.download('/remote/a.txt', '/local/a.txt', undefined, asClient(own))
+      await ops.download('/remote/a.txt', path.join(tmp, 'a.txt'), undefined, asClient(own))
 
-      expect(own.downloadTo.mock.calls[0]).toEqual(['/local/a.txt', '/remote/a.txt'])
+      expect(own.downloadTo.mock.calls[0]).toEqual([expect.any(Writable), '/remote/a.txt', 0])
       expect(mockClient.downloadTo).not.toHaveBeenCalled()
       expect(runOnMainClient).not.toHaveBeenCalled()
     })
@@ -266,8 +372,9 @@ describe('FtpFileOperations', () => {
     it('sets progress tracking and clears it afterwards', async () => {
       const own = createOwnClient()
       const onProgress = vi.fn()
-      own.uploadFrom.mockImplementationOnce(async () => {
+      vi.mocked(fastUpload).mockImplementationOnce(async () => {
         own.trackProgress.mock.calls[0][0]({ bytes: 5, bytesOverall: 9 })
+        return { code: 226, message: '226 OK' }
       })
       await ops.upload('/local/a.txt', '/remote/a.txt', onProgress, asClient(own))
 
@@ -279,14 +386,14 @@ describe('FtpFileOperations', () => {
       const own = createOwnClient()
       own.downloadTo.mockRejectedValueOnce(new Error('boom'))
       await expect(
-        ops.download('/remote/a.txt', '/local/a.txt', vi.fn(), asClient(own))
+        ops.download('/remote/a.txt', path.join(tmp, 'a.txt'), vi.fn(), asClient(own))
       ).rejects.toThrow('boom')
       expect(own.trackProgress).toHaveBeenLastCalledWith()
     })
 
     it('still emits the upload mutation, but not one for download', async () => {
       const own = createOwnClient()
-      await ops.download('/remote/a.txt', '/local/a.txt', undefined, asClient(own))
+      await ops.download('/remote/a.txt', path.join(tmp, 'a.txt'), undefined, asClient(own))
       expect(emit.mock.calls.filter((c) => c[0] === 'mutation')).toHaveLength(0)
 
       await ops.upload('/local/a.txt', '/remote/a.txt', undefined, asClient(own))
@@ -306,7 +413,7 @@ describe('FtpFileOperations', () => {
     })
 
     it('does NOT emit a mutation when upload fails', async () => {
-      mockClient.uploadFrom.mockRejectedValueOnce(new Error('boom'))
+      vi.mocked(fastUpload).mockRejectedValueOnce(new Error('boom'))
       await expect(ops.upload('/local/a.txt', '/remote/a.txt')).rejects.toThrow('boom')
       expect(lastMutation()).toBeUndefined()
     })
@@ -325,7 +432,7 @@ describe('FtpFileOperations', () => {
     })
 
     it('does NOT emit a mutation for download (read-only)', async () => {
-      await ops.download('/remote/a.txt', '/local/a.txt')
+      await ops.download('/remote/a.txt', path.join(tmp, 'a.txt'))
       expect(lastMutation()).toBeUndefined()
     })
 

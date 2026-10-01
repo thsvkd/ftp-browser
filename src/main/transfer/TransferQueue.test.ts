@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { unlink } from 'fs/promises'
 import * as fs from 'fs'
+import * as net from 'net'
 import * as os from 'os'
 import * as path from 'path'
 import { Readable, type Writable } from 'stream'
 import { pipeline } from 'stream/promises'
-import { FTPError } from 'basic-ftp'
+import { FTPError, type Client } from 'basic-ftp'
 import { TransferQueue } from './TransferQueue'
-import { planSegments } from './segmentedDownload'
+import { planSegments, LAN_RTT_MS } from './segmentedDownload'
 import { LIMIT, MAX_TRANSFER_CLIENTS, TransferClientPool } from './TransferClientPool'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
 import type { FtpConnectionManager } from '../ftp/FtpConnectionManager'
@@ -19,22 +20,27 @@ vi.mock('fs/promises', async (importOriginal) => ({
 }))
 
 // 테스트가 fastSuspects에 넣은 에러만 빠른 업로드 탓으로 본다. 진짜 판정은 fastTransfer.test.ts가 다룬다.
+// 업로드는 받은 클라이언트의 uploadFrom으로 넘겨 어느 클라이언트로 갔는지만 본다(읽기는 fastTransfer.test.ts).
 const { fastSuspects } = vi.hoisted(() => ({ fastSuspects: new WeakSet<object>() }))
 vi.mock('../ftp/fastTransfer', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../ftp/fastTransfer')>()),
+  fastUpload: (client: Client, localPath: string, remotePath: string) =>
+    client.uploadFrom(localPath, remotePath),
   isFastFlowSuspect: (err: unknown) => err instanceof Error && fastSuspects.has(err)
 }))
 
 // 분할 기준(64 MiB)을 4000바이트로, 구간 크기를 1000바이트로 낮춘다. 기존 테스트의 작업(최대 1024바이트)은
-// 기준 아래라 그대로 한 스트림으로 돈다.
+// 기준 아래라 그대로 한 스트림으로 돈다. LAN 한 스트림의 속도 판정은 20 ms 뒤에 한다.
 const SEG_MIN = 4000
+const PROBE = 20
 vi.mock('./segmentedDownload', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./segmentedDownload')>()
   return {
     ...actual,
     SEGMENT_MIN: 4000,
-    planSegments: vi.fn((size: number, limit: number) =>
-      actual.planSegments(size, limit, 4000, 1000)
+    PROBE_MS: 20,
+    planSegments: vi.fn((size: number, limit: number, minSize = 4000) =>
+      actual.planSegments(size, limit, minSize, 1000)
     )
   }
 })
@@ -796,6 +802,7 @@ describe('TransferQueue', () => {
       const createSecondaryClient = vi.fn(async () => {
         const client = createFakeClient()
         return Object.assign(client, {
+          ftp: { socket: {}, _newSocket: () => new net.Socket() },
           trackProgress: vi.fn(),
           uploadFrom: vi.fn().mockResolvedValue({}),
           downloadTo: vi.fn().mockResolvedValue({})
@@ -852,21 +859,29 @@ describe('TransferQueue', () => {
       const { pool: realPool, manager, createSecondaryClient } = createRealPool()
       const fileOps = new FtpFileOperations(manager as unknown as FtpConnectionManager)
       queue = new TransferQueue(fileOps, realPool)
+      // 실제 fileOps의 다운로드는 로컬 파일을 직접 연다. 올릴 파일은 비워 둔다.
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tq-real-'))
+      const local = (list: ReturnType<typeof items>): ReturnType<typeof items> =>
+        list.map((item) => ({ ...item, localPath: path.join(dir, item.fileName) }))
+      const uploads = local(items(12, 'u'))
+      for (const item of uploads) fs.writeFileSync(item.localPath, '')
 
-      queue.enqueueBatch('upload', items(12, 'u'))
-      queue.enqueueBatch('download', items(12, 'd'))
-      await vi.advanceTimersByTimeAsync(100)
+      queue.enqueueBatch('upload', uploads)
+      queue.enqueueBatch('download', local(items(12, 'd')))
+      await vi.waitFor(() =>
+        expect(queue.getAll().every((job) => job.status === 'completed')).toBe(true)
+      )
+      fs.rmSync(dir, { recursive: true, force: true })
 
-      expect(queue.getAll().every((job) => job.status === 'completed')).toBe(true)
       expect(manager.runOnMainClient).not.toHaveBeenCalled()
       expect(createSecondaryClient.mock.calls.length).toBeLessThanOrEqual(MAX_TRANSFER_CLIENTS)
       const clients = (await Promise.all(
         createSecondaryClient.mock.results.map((r) => r.value)
       )) as unknown as Array<Record<string, ReturnType<typeof vi.fn>>>
-      const uploads = clients.reduce((n, c) => n + c.uploadFrom.mock.calls.length, 0)
-      const downloads = clients.reduce((n, c) => n + c.downloadTo.mock.calls.length, 0)
-      expect(uploads).toBe(12)
-      expect(downloads).toBe(12)
+      const uploaded = clients.reduce((n, c) => n + c.uploadFrom.mock.calls.length, 0)
+      const downloaded = clients.reduce((n, c) => n + c.downloadTo.mock.calls.length, 0)
+      expect(uploaded).toBe(12)
+      expect(downloaded).toBe(12)
     })
   })
 
@@ -1233,6 +1248,8 @@ describe('TransferQueue', () => {
     const source = Buffer.from(Array.from({ length: SEG_MIN }, (_, i) => (i * 7 + 3) % 256))
 
     interface SegmentClient extends FakeClient {
+      /** 평문 제어 연결. downloadInto가 데이터 소켓 생성 함수를 바꿔 끼운다(이 가짜 downloadTo는 쓰지 않는다). */
+      ftp: { socket: object; _newSocket: () => net.Socket }
       size: ReturnType<typeof vi.fn>
       downloadTo: ReturnType<typeof vi.fn>
     }
@@ -1243,12 +1260,16 @@ describe('TransferQueue', () => {
       ignoreRest: boolean
       /** 첫 청크를 보낸 뒤 멈춰 둘 게이트 */
       holds: Map<number, Deferred>
+      /** 게이트 뒤에 둘째 청크를 보내고 한 번 멈춰 둘 게이트. 판정 순간의 버퍼를 둘째 청크로 고정한다. */
+      stalls: Map<number, Deferred>
       /** 첫 청크(와 게이트) 뒤에 한 번 던질 에러 */
       failures: Map<number, unknown>
       /** 한 바이트도 보내기 전에 던질 에러(REST 거부 등) */
       rejections: Map<number, unknown>
       /** 전송 시작 순서: 구간은 'seg <start>' */
       events: string[]
+      /** SIZE 응답 시간. 기본은 LAN 기준의 두 배라 기존 분할 경로(WAN)를 탄다. 0이면 LAN으로 본다. */
+      sizeDelayMs: number
     }
 
     let dir: string
@@ -1258,6 +1279,7 @@ describe('TransferQueue', () => {
     /** basic-ftp처럼 데이터 소켓을 Writable로 pipeline하고, 스트림이 끊기면 클라이언트를 닫는 가짜 클라이언트 */
     function createSegmentClient(): SegmentClient {
       const client = createFakeClient() as SegmentClient
+      client.ftp = { socket: {}, _newSocket: () => new net.Socket() }
       let abort: (err: Error) => void = () => {}
       const aborted = new Promise<never>((_, reject) => {
         abort = reject
@@ -1267,7 +1289,10 @@ describe('TransferQueue', () => {
         client.closed = true
         abort(Object.assign(new Error('socket closed'), { code: 'ECONNRESET' }))
       })
-      client.size = vi.fn(async () => source.length)
+      client.size = vi.fn(async () => {
+        if (server.sizeDelayMs > 0) await new Promise((r) => setTimeout(r, server.sizeDelayMs))
+        return source.length
+      })
       client.downloadTo = vi.fn(async (writer: Writable, _remote: string, start = 0) => {
         server.events.push(`seg ${start}`)
         const rejection = server.rejections.get(start)
@@ -1277,12 +1302,20 @@ describe('TransferQueue', () => {
           yield body.subarray(0, CHUNK)
           const hold = server.holds.get(start)
           if (hold) await Promise.race([hold.promise, aborted])
+          let next = CHUNK
+          const stall = server.stalls.get(start)
+          if (stall) {
+            server.stalls.delete(start)
+            yield body.subarray(CHUNK, 2 * CHUNK)
+            next = 2 * CHUNK
+            await Promise.race([stall.promise, aborted])
+          }
           const failure = server.failures.get(start)
           if (failure) {
             server.failures.delete(start)
             throw failure
           }
-          for (let i = CHUNK; i < body.length; i += CHUNK) yield body.subarray(i, i + CHUNK)
+          for (let i = next; i < body.length; i += CHUNK) yield body.subarray(i, i + CHUNK)
         }
         try {
           await pipeline(Readable.from(chunks()), writer)
@@ -1317,9 +1350,11 @@ describe('TransferQueue', () => {
       server = {
         ignoreRest: false,
         holds: new Map(),
+        stalls: new Map(),
         failures: new Map(),
         rejections: new Map(),
-        events: []
+        events: [],
+        sizeDelayMs: 2 * LAN_RTT_MS
       }
       pool.acquire.mockImplementation(async () => {
         const client = createSegmentClient()
@@ -1383,6 +1418,22 @@ describe('TransferQueue', () => {
       expect(pool.releaseAfterError).not.toHaveBeenCalled()
       expect(big().retryCount).toBeUndefined()
       expect(mockFileOps.download).not.toHaveBeenCalled()
+    })
+
+    it('should keep a fallback error listener on a range writer whose transfer failed before any data', async () => {
+      // 제어 응답이 먼저 실패하면 basic-ftp는 pipeline을 걸지 않고 자기 'error' 리스너도 뗀다
+      server.rejections.set(
+        1334,
+        new FTPError({ code: 425, message: "425 Can't open data connection" })
+      )
+
+      enqueueBig()
+      await vi.waitFor(() => expect(big().status).toBe('completed'))
+
+      const failed = segmentClients().find((c) => c.downloadTo.mock.calls[0]?.[2] === 1334)!
+      const writer = failed.downloadTo.mock.calls[0][0] as Writable
+      // 슬랩 경로는 150 전에도 디스크 쓰기를 시작하므로 그 쓰기의 에러가 뒤늦게 올 수 있다
+      expect(() => writer.emit('error', new Error('EIO: i/o error, write'))).not.toThrow()
     })
 
     it('should report progress as the sum of all ranges', async () => {
@@ -1656,6 +1707,149 @@ describe('TransferQueue', () => {
 
       expect(big().error).toBe('Downloaded file size does not match the server')
       await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+    })
+
+    describe('on a LAN (SIZE answers faster than LAN_RTT_MS)', () => {
+      /**
+       * 첫 청크 뒤 PROBE_MS보다 오래 멈춘 머리 스트림은 둘째 청크에서 느리다고 판정된다. 판정 순간 받아 둔
+       * 끝은 300(쓴 200 + 쓰고 있는 100)이고, 남은 3700바이트를 3개로 나눠 머리가 첫 조각 [300, 1534)까지
+       * 이어 받는다. 새 구간은 [1534, 2767) [2767, 4000)이다.
+       */
+      const CUT = 1534
+      const REST_STARTS = [CUT, 2767]
+
+      beforeEach(() => {
+        server.sizeDelayMs = 0
+      })
+
+      /**
+       * 가짜 시간을 흘리지 않고 작업이 끝나기를 기다린다. vi.waitFor는 확인할 때마다 가짜 시간을 앞당겨,
+       * 빠른 스트림도 느리다고 판정하게 만든다.
+       */
+      function settled(): Promise<void> {
+        return new Promise((resolve) => {
+          const check = (): void => {
+            const status = big()?.status
+            if (status === 'completed' || status === 'failed') {
+              queue.off('queue:updated', check)
+              resolve()
+            }
+          }
+          queue.on('queue:updated', check)
+        })
+      }
+
+      /** 분할 뒤 머리 스트림을 둘째 청크에서 멈춰 둔 게이트 */
+      let headStall: Deferred
+
+      /** 머리 스트림을 첫 청크 뒤에 PROBE_MS보다 오래 멈췄다가 둘째 청크에서 판정하게 하고, 분할을 기다린다. */
+      async function splitSlowHead(): Promise<string> {
+        const hold = deferred()
+        headStall = deferred()
+        server.holds.set(0, hold)
+        server.stalls.set(0, headStall)
+        const id = enqueueBig()
+        await vi.waitFor(() => expect(big().transferredBytes).toBe(CHUNK))
+        await vi.advanceTimersByTimeAsync(PROBE * 2)
+        hold.resolve()
+        await vi.waitFor(() => expect(server.events).toHaveLength(3))
+        return id
+      }
+
+      it('should receive the whole file over one stream on one client', async () => {
+        const done = settled()
+        enqueueBig()
+        await done
+
+        expect(big().status).toBe('completed')
+        expect(server.events).toEqual(['seg 0'])
+        const [head] = segmentClients()
+        expect(pool.clients).toHaveLength(1)
+        expect(head.size).toHaveBeenCalledWith('/remote/big.bin')
+        expect(head.downloadTo.mock.calls[0].slice(1)).toEqual(['/remote/big.bin', 0])
+        expect(pool.release).toHaveBeenCalledWith(head)
+        expect(mockFileOps.download).not.toHaveBeenCalled()
+        expect(fs.readFileSync(localPath).equals(source)).toBe(true)
+        expect(big().transferredBytes).toBe(SEG_MIN)
+      })
+
+      it('should split the rest when the one stream is slow, keeping the head on its first piece', async () => {
+        await splitSlowHead()
+
+        expect(server.events).toEqual(['seg 0', ...REST_STARTS.map((s) => `seg ${s}`)])
+        headStall.resolve()
+        await vi.waitFor(() => expect(big().status).toBe('completed'))
+
+        const [head] = segmentClients()
+        expect(head.downloadTo).toHaveBeenCalledTimes(1)
+        // 머리는 CUT에서 끊겨 끝난다: 앞 구간처럼 성공이고 끊긴 클라이언트는 버린다
+        expect(pool.discard).toHaveBeenCalledWith(head)
+        expect(pool.releaseAfterError).not.toHaveBeenCalled()
+        expect(fs.readFileSync(localPath).equals(source)).toBe(true)
+        expect(big().transferredBytes).toBe(SEG_MIN)
+        expect(big().retryCount).toBeUndefined()
+      })
+
+      it('should close the head client and unlink the file on cancel before the verdict', async () => {
+        server.holds.set(0, deferred())
+        const id = enqueueBig()
+        await vi.waitFor(() => expect(big().transferredBytes).toBe(CHUNK))
+
+        queue.cancel(id)
+        await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+
+        const [head] = segmentClients()
+        expect(head.close).toHaveBeenCalled()
+        expect(pool.discard).toHaveBeenCalledWith(head)
+        expect(server.events).toEqual(['seg 0'])
+        expect(big().status).toBe('cancelled')
+      })
+
+      it('should close every client and unlink the file on cancel after the split', async () => {
+        for (const start of REST_STARTS) server.holds.set(start, deferred())
+        const id = await splitSlowHead()
+
+        queue.cancel(id)
+        await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+
+        const clients = segmentClients()
+        expect(clients).toHaveLength(3)
+        for (const client of clients) {
+          expect(client.close).toHaveBeenCalled()
+          expect(pool.discard).toHaveBeenCalledWith(client)
+        }
+        expect(big().status).toBe('cancelled')
+      })
+
+      it('should retry only [0, cut) when the head fails after the split', async () => {
+        server.failures.set(0, Object.assign(new Error('reset'), { code: 'ECONNRESET' }))
+        await splitSlowHead()
+        headStall.resolve()
+
+        await vi.waitFor(() => expect(big().retryCount).toBe(1))
+        await vi.advanceTimersByTimeAsync(2000)
+        await vi.waitFor(() => expect(big().status).toBe('completed'))
+
+        expect(server.events.filter((e) => e === 'seg 0')).toHaveLength(2)
+        const retried = segmentClients().find(
+          (c, i) => i > 0 && c.downloadTo.mock.calls[0]?.[2] === 0
+        )!
+        // 재시도한 머리는 CUT에서 끊겨 끝난다(최종 구간이면 226으로 끝나 풀에 돌려준다)
+        expect(pool.discard).toHaveBeenCalledWith(retried)
+        expect(fs.readFileSync(localPath).equals(source)).toBe(true)
+        expect(big().transferredBytes).toBe(SEG_MIN)
+      })
+
+      it('should re-run one stream when the server ignores REST on the split ranges', async () => {
+        server.ignoreRest = true
+        await splitSlowHead()
+        await vi.waitFor(() => expect(big().status).toBe('completed'))
+
+        expect(pool.segmentedBroken).toBe(true)
+        expect(mockFileOps.download).toHaveBeenCalledTimes(1)
+        expect(big().retryCount).toBeUndefined()
+        expect(big().transferredBytes).toBe(SEG_MIN)
+      })
     })
   })
 

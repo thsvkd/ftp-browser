@@ -7,6 +7,7 @@ import { Client } from 'basic-ftp'
 import { TransferQueue } from './TransferQueue'
 import { TransferClientPool } from './TransferClientPool'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
+import { SegmentWriter } from '../ftp/segmentWriter'
 import type { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { startMockFtpServer, type MockFtpServer } from './__fixtures__/mockFtpServer'
 
@@ -14,11 +15,13 @@ const MiB = 1024 * 1024
 const FILE_SIZE = 5 * MiB
 
 // 64 MiB 기준을 1 MiB로 낮추고 구간 크기를 1.25 MiB로 잡아, 5 MiB 파일이 4구간으로 나뉘게 한다.
+// 루프백의 SIZE 응답은 LAN 기준보다 빨라 한 스트림으로 받으므로, LAN 판정을 꺼 분할 경로를 본다.
 vi.mock('./segmentedDownload', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./segmentedDownload')>()
   return {
     ...actual,
     SEGMENT_MIN: 1024 * 1024,
+    LAN_RTT_MS: 0,
     planSegments: (size: number, limit: number) =>
       actual.planSegments(size, limit, 1024 * 1024, (5 * 1024 * 1024) / 4)
   }
@@ -91,6 +94,7 @@ describe('segmented download against a mock FTP server', () => {
 
   it('should download a 5 MiB file in 4 segments that hashes the same as the source', async () => {
     const queue = await setup(false)
+    const createSocket = vi.spyOn(SegmentWriter.prototype, 'createSocket')
     const localPath = await download(queue)
 
     expect(sha256(fs.readFileSync(localPath))).toBe(sha256(source))
@@ -105,6 +109,9 @@ describe('segmented download against a mock FTP server', () => {
     ).toEqual([1, 2, 3].map((i) => (FILE_SIZE / 4) * i))
     expect(queue.getAll()[0].transferredBytes).toBe(FILE_SIZE)
     expect(pool.segmentedBroken).toBe(false)
+    // 평문 FTP의 구간은 데이터 소켓이 슬랩에 바로 읽어 넣는다
+    expect(createSocket).toHaveBeenCalledTimes(4)
+    createSocket.mockRestore()
   })
 
   it('should fall back to one stream and still match the source when the server ignores REST', async () => {
