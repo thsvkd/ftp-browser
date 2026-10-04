@@ -57,7 +57,11 @@ const INVOKE_CHANNELS = [
   'update:check',
   'update:download',
   'update:setAutoUpdate',
-  'update:install'
+  'update:install',
+  // Built-in MCP server
+  'mcp:getState',
+  'mcp:setEnabled',
+  'mcp:regenerateToken'
 ] as const
 
 const EVENT_CHANNELS = [

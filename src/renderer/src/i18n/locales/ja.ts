@@ -192,6 +192,17 @@ export const ja = {
   'settings.clearCache': 'キャッシュをクリア',
   'settings.clearingCache': 'クリアしています…',
   'settings.updates': 'アップデート',
+  'settings.mcp': 'エージェントアクセス(MCP)',
+  'settings.mcpEnable': 'MCP サーバーを有効にする',
+  'settings.mcpDescription':
+    'Claude Code などの AI エージェントが、接続中のサーバーのフォルダー一覧、画像のプレビュー、転送一覧を見られるようになります。変更はできません。',
+  'settings.mcpRunning': '{{url}} で実行中',
+  'settings.mcpStartFailed': 'サーバーを起動できませんでした。{{reason}}',
+  'settings.mcpCopyCommand': 'Claude Code コマンドをコピー',
+  'settings.mcpCommandCopied': 'Claude Code コマンドをコピーしました',
+  'settings.mcpRegenerateToken': 'トークンを再発行',
+  'settings.mcpTokenRegenerated':
+    'トークンを再発行しました。古いトークンを使うエージェントは接続できなくなります。',
 
   'update.version': 'バージョン {{version}}',
   'update.versionUnknown': 'バージョン',

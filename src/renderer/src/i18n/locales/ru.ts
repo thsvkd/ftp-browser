@@ -231,6 +231,17 @@ export const ru = {
   'settings.clearCache': 'Очистить кэш',
   'settings.clearingCache': 'Очистка…',
   'settings.updates': 'Обновления',
+  'settings.mcp': 'Доступ для агентов (MCP)',
+  'settings.mcpEnable': 'Включить MCP-сервер',
+  'settings.mcpDescription':
+    'ИИ-агенты, например Claude Code, смогут просматривать папки, превью изображений и список передач на подключённом сервере. Изменять что-либо они не могут.',
+  'settings.mcpRunning': 'Работает по адресу {{url}}',
+  'settings.mcpStartFailed': 'Не удалось запустить сервер. {{reason}}',
+  'settings.mcpCopyCommand': 'Скопировать команду для Claude Code',
+  'settings.mcpCommandCopied': 'Команда для Claude Code скопирована',
+  'settings.mcpRegenerateToken': 'Выпустить новый токен',
+  'settings.mcpTokenRegenerated':
+    'Новый токен выпущен. Агенты со старым токеном больше не смогут подключиться.',
 
   'update.version': 'Версия {{version}}',
   'update.versionUnknown': 'Версия',

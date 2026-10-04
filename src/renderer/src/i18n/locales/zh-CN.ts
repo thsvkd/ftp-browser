@@ -187,6 +187,16 @@ export const zhCN = {
   'settings.clearCache': '清除缓存',
   'settings.clearingCache': '正在清除…',
   'settings.updates': '更新',
+  'settings.mcp': '智能体访问（MCP）',
+  'settings.mcpEnable': '启用 MCP 服务器',
+  'settings.mcpDescription':
+    'Claude Code 等 AI 智能体可以查看所连接服务器上的文件夹列表、图片预览和传输列表，但无法做任何更改。',
+  'settings.mcpRunning': '正在 {{url}} 运行',
+  'settings.mcpStartFailed': '无法启动服务器。{{reason}}',
+  'settings.mcpCopyCommand': '复制 Claude Code 命令',
+  'settings.mcpCommandCopied': '已复制 Claude Code 命令',
+  'settings.mcpRegenerateToken': '重新生成令牌',
+  'settings.mcpTokenRegenerated': '已重新生成令牌。使用旧令牌的智能体将无法再连接。',
 
   'update.version': '版本 {{version}}',
   'update.versionUnknown': '版本',

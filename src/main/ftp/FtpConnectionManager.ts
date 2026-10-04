@@ -7,7 +7,8 @@ import {
   type FtpConnectPayload,
   type FtpFileEntry,
   type FtpListResult,
-  type FtpConnectionState
+  type FtpConnectionState,
+  type ConnectionStatus
 } from '@shared/types/ftp'
 
 /**
@@ -35,6 +36,8 @@ export class FtpConnectionManager extends EventEmitter {
   private _host = ''
   private _port = 0
   private _config: FtpConnectPayload | null = null
+  /** 마지막으로 알린 connectionStatus. MCP get_status가 렌더러와 같은 값을 보여 주도록 기억한다. */
+  private _status: ConnectionStatus = 'disconnected'
   /**
    * connect()와 disconnect()가 교차될 때 in-flight access()가 늦게 성공해도
    * connected로 커밋되지 않도록 한다. disconnect(그리고 새 connect)마다 증가.
@@ -218,6 +221,15 @@ export class FtpConnectionManager extends EventEmitter {
     return this._port
   }
 
+  /** 연결에 쓴 사용자 이름. 연결 전이면 빈 문자열. */
+  getUser(): string {
+    return this._config?.user ?? ''
+  }
+
+  getStatus(): ConnectionStatus {
+    return this._status
+  }
+
   /** 이 연결에서 허용하는 동시 전송 연결 수. 연결 전이거나 값이 없으면 기본값. */
   getMaxTransfers(): number {
     return normalizeMaxTransfers(this._config?.maxTransfers)
@@ -247,6 +259,7 @@ export class FtpConnectionManager extends EventEmitter {
   }
 
   private emitStatus(status: FtpConnectionState['status'], host?: string, error?: string): void {
+    this._status = status
     const state: FtpConnectionState = { status, host, error }
     this.emit('connectionStatus', state)
   }

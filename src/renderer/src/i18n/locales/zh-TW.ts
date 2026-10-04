@@ -187,6 +187,16 @@ export const zhTW = {
   'settings.clearCache': '清除快取',
   'settings.clearingCache': '正在清除…',
   'settings.updates': '更新',
+  'settings.mcp': '代理程式存取（MCP）',
+  'settings.mcpEnable': '啟用 MCP 伺服器',
+  'settings.mcpDescription':
+    'Claude Code 等 AI 代理程式可以查看所連線伺服器上的資料夾清單、圖片預覽和傳輸清單，但無法做任何變更。',
+  'settings.mcpRunning': '正在 {{url}} 執行',
+  'settings.mcpStartFailed': '無法啟動伺服器。{{reason}}',
+  'settings.mcpCopyCommand': '複製 Claude Code 指令',
+  'settings.mcpCommandCopied': '已複製 Claude Code 指令',
+  'settings.mcpRegenerateToken': '重新產生權杖',
+  'settings.mcpTokenRegenerated': '已重新產生權杖。使用舊權杖的代理程式將無法再連線。',
 
   'update.version': '版本 {{version}}',
   'update.versionUnknown': '版本',

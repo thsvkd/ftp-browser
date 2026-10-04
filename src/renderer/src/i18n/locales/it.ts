@@ -203,6 +203,17 @@ export const it = {
   'settings.clearCache': 'Svuota cache',
   'settings.clearingCache': 'Svuotamento…',
   'settings.updates': 'Aggiornamenti',
+  'settings.mcp': 'Accesso degli agenti (MCP)',
+  'settings.mcpEnable': 'Attiva il server MCP',
+  'settings.mcpDescription':
+    'Gli agenti IA come Claude Code possono elencare le cartelle, vedere le anteprime delle immagini e consultare i trasferimenti del server connesso. Non possono modificare nulla.',
+  'settings.mcpRunning': 'In esecuzione su {{url}}',
+  'settings.mcpStartFailed': 'Impossibile avviare il server. {{reason}}',
+  'settings.mcpCopyCommand': 'Copia il comando per Claude Code',
+  'settings.mcpCommandCopied': 'Comando per Claude Code copiato',
+  'settings.mcpRegenerateToken': 'Rigenera token',
+  'settings.mcpTokenRegenerated':
+    'Token rigenerato. Gli agenti che usano il token precedente non possono più connettersi.',
 
   'update.version': 'Versione {{version}}',
   'update.versionUnknown': 'Versione',

@@ -207,6 +207,17 @@ export const fr = {
   'settings.clearCache': 'Vider le cache',
   'settings.clearingCache': 'Vidage…',
   'settings.updates': 'Mises à jour',
+  'settings.mcp': 'Accès des agents (MCP)',
+  'settings.mcpEnable': 'Activer le serveur MCP',
+  'settings.mcpDescription':
+    'Les agents d’IA comme Claude Code peuvent lister les dossiers, voir les aperçus d’images et consulter les transferts du serveur connecté. Ils ne peuvent rien modifier.',
+  'settings.mcpRunning': 'En cours d’exécution sur {{url}}',
+  'settings.mcpStartFailed': 'Impossible de démarrer le serveur. {{reason}}',
+  'settings.mcpCopyCommand': 'Copier la commande Claude Code',
+  'settings.mcpCommandCopied': 'Commande Claude Code copiée',
+  'settings.mcpRegenerateToken': 'Régénérer le jeton',
+  'settings.mcpTokenRegenerated':
+    'Jeton régénéré. Les agents qui utilisent l’ancien jeton ne peuvent plus se connecter.',
 
   'update.version': 'Version {{version}}',
   'update.versionUnknown': 'Version',

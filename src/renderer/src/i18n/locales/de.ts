@@ -208,6 +208,17 @@ export const de = {
   'settings.clearCache': 'Cache leeren',
   'settings.clearingCache': 'Wird geleert…',
   'settings.updates': 'Updates',
+  'settings.mcp': 'Agentenzugriff (MCP)',
+  'settings.mcpEnable': 'MCP-Server aktivieren',
+  'settings.mcpDescription':
+    'KI-Agenten wie Claude Code können auf dem verbundenen Server Ordner auflisten, Bildvorschauen ansehen und Übertragungen sehen. Ändern können sie nichts.',
+  'settings.mcpRunning': 'Läuft unter {{url}}',
+  'settings.mcpStartFailed': 'Der Server konnte nicht gestartet werden. {{reason}}',
+  'settings.mcpCopyCommand': 'Claude-Code-Befehl kopieren',
+  'settings.mcpCommandCopied': 'Claude-Code-Befehl kopiert',
+  'settings.mcpRegenerateToken': 'Token neu erzeugen',
+  'settings.mcpTokenRegenerated':
+    'Neues Token erzeugt. Agenten mit dem alten Token können sich nicht mehr verbinden.',
 
   'update.version': 'Version {{version}}',
   'update.versionUnknown': 'Version',

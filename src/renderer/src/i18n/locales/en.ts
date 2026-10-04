@@ -205,6 +205,17 @@ export const en = {
   'settings.clearCache': 'Clear cache',
   'settings.clearingCache': 'Clearing…',
   'settings.updates': 'Updates',
+  'settings.mcp': 'Agent access (MCP)',
+  'settings.mcpEnable': 'Enable MCP server',
+  'settings.mcpDescription':
+    'AI agents such as Claude Code can list folders, view image previews and see transfers on the server you are connected to. They cannot change anything.',
+  'settings.mcpRunning': 'Running at {{url}}',
+  'settings.mcpStartFailed': "Couldn't start the server. {{reason}}",
+  'settings.mcpCopyCommand': 'Copy Claude Code command',
+  'settings.mcpCommandCopied': 'Claude Code command copied',
+  'settings.mcpRegenerateToken': 'Regenerate token',
+  'settings.mcpTokenRegenerated':
+    'Token regenerated. Agents using the old token can no longer connect.',
 
   'update.version': 'Version {{version}}',
   'update.versionUnknown': 'Version',

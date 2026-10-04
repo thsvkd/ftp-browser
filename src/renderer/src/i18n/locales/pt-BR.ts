@@ -203,6 +203,17 @@ export const ptBR = {
   'settings.clearCache': 'Limpar cache',
   'settings.clearingCache': 'Limpando…',
   'settings.updates': 'Atualizações',
+  'settings.mcp': 'Acesso de agentes (MCP)',
+  'settings.mcpEnable': 'Ativar servidor MCP',
+  'settings.mcpDescription':
+    'Agentes de IA como o Claude Code podem listar pastas, ver prévias de imagens e consultar as transferências do servidor conectado. Eles não podem alterar nada.',
+  'settings.mcpRunning': 'Em execução em {{url}}',
+  'settings.mcpStartFailed': 'Não foi possível iniciar o servidor. {{reason}}',
+  'settings.mcpCopyCommand': 'Copiar comando do Claude Code',
+  'settings.mcpCommandCopied': 'Comando do Claude Code copiado',
+  'settings.mcpRegenerateToken': 'Gerar novo token',
+  'settings.mcpTokenRegenerated':
+    'Novo token gerado. Agentes que usam o token antigo não conseguem mais se conectar.',
 
   'update.version': 'Versão {{version}}',
   'update.versionUnknown': 'Versão',

@@ -47,6 +47,9 @@ type InvokeChannel =
   | 'update:download'
   | 'update:setAutoUpdate'
   | 'update:install'
+  | 'mcp:getState'
+  | 'mcp:setEnabled'
+  | 'mcp:regenerateToken'
 
 type EventChannel =
   | 'ftp:connectionStatus'

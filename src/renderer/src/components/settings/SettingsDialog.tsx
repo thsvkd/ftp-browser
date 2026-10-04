@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useEscapeKey } from '@renderer/hooks/useEscapeKey'
 import { X, Database, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import {
   useSettingsStore,
   GALLERY_THUMB_MIN,
@@ -11,6 +12,7 @@ import { installUpdate } from '@renderer/lib/installUpdate'
 import { LOCALES, useLocale, useT, type LanguageSetting } from '@renderer/i18n'
 import type { IpcResult } from '@shared/types/ipc'
 import type { UpdateState } from '@shared/types/update'
+import type { McpState } from '@shared/types/mcp'
 
 interface SettingsDialogProps {
   open: boolean
@@ -37,6 +39,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
   const [clearing, setClearing] = useState(false)
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
+  const [mcpState, setMcpState] = useState<McpState | null>(null)
   // 톱니 버튼으로 열면 포커스가 창 밖에 남으므로, 포커스와 관계없이 Esc로 닫는다.
   useEscapeKey(onClose, open)
 
@@ -52,14 +55,20 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
     if (result.success) setUpdateState(result.data)
   }, [])
 
+  const fetchMcpState = useCallback(async () => {
+    const result = await window.api.invoke<IpcResult<McpState>>('mcp:getState')
+    if (result.success) setMcpState(result.data)
+  }, [])
+
   useEffect(() => {
     if (!open) return
     void fetchCacheStats()
     void fetchUpdateState()
+    void fetchMcpState()
     return window.api.on('update:stateChanged', (...args: unknown[]) => {
       setUpdateState(args[0] as UpdateState)
     })
-  }, [open, fetchCacheStats, fetchUpdateState])
+  }, [open, fetchCacheStats, fetchUpdateState, fetchMcpState])
 
   if (!open) return null
 
@@ -81,6 +90,25 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   const setAutoUpdate = async (enabled: boolean): Promise<void> => {
     const result = await window.api.invoke<IpcResult<UpdateState>>('update:setAutoUpdate', enabled)
     if (result.success) setUpdateState(result.data)
+  }
+
+  const setMcpEnabled = async (enabled: boolean): Promise<void> => {
+    const result = await window.api.invoke<IpcResult<McpState>>('mcp:setEnabled', enabled)
+    if (result.success) setMcpState(result.data)
+  }
+
+  // 명령에 토큰이 들어 있으므로 화면에 보여 주지 않고 클립보드로만 꺼낸다.
+  const copyMcpCommand = async (): Promise<void> => {
+    if (!mcpState?.command) return
+    await navigator.clipboard.writeText(mcpState.command)
+    toast.success(t('settings.mcpCommandCopied'))
+  }
+
+  const regenerateMcpToken = async (): Promise<void> => {
+    const result = await window.api.invoke<IpcResult<McpState>>('mcp:regenerateToken')
+    if (!result.success) return
+    setMcpState(result.data)
+    toast.success(t('settings.mcpTokenRegenerated'))
   }
 
   const downloadingLabel = (percent = 0): string =>
@@ -139,7 +167,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
           </button>
         </div>
 
-        <div className="space-y-6">
+        <div className="max-h-[calc(100vh_-_12rem)] space-y-6 overflow-y-auto">
           <section>
             <label className="flex items-center justify-between">
               <span className="text-sm text-gray-700">{t('settings.language')}</span>
@@ -293,6 +321,52 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 className="h-4 w-4 shrink-0 rounded accent-blue-600 disabled:cursor-not-allowed"
               />
             </label>
+          </section>
+
+          {/* Agent access (MCP) */}
+          <section>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+              {t('settings.mcp')}
+            </h3>
+            <label className="flex cursor-pointer items-center justify-between gap-4 py-1">
+              <span className="text-sm text-gray-700">
+                {t('settings.mcpEnable')}
+                <span className="block text-xs text-gray-400">{t('settings.mcpDescription')}</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={mcpState?.enabled ?? false}
+                disabled={!mcpState}
+                onChange={(e) => void setMcpEnabled(e.target.checked)}
+                className="h-4 w-4 shrink-0 rounded accent-blue-600 disabled:cursor-not-allowed"
+              />
+            </label>
+            {mcpState?.enabled && (
+              <>
+                <p
+                  className={`mt-1 break-all text-xs ${mcpState.error ? 'text-red-600' : 'text-gray-400'}`}
+                >
+                  {mcpState.error
+                    ? t('settings.mcpStartFailed', { reason: mcpState.error })
+                    : t('settings.mcpRunning', { url: mcpState.url })}
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => void copyMcpCommand()}
+                    disabled={!mcpState.command}
+                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {t('settings.mcpCopyCommand')}
+                  </button>
+                  <button
+                    onClick={() => void regenerateMcpToken()}
+                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    {t('settings.mcpRegenerateToken')}
+                  </button>
+                </div>
+              </>
+            )}
           </section>
         </div>
 

@@ -7,6 +7,7 @@ import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useOperationStore } from '@renderer/stores/useOperationStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { ConfirmDialog } from '@renderer/components/common/ConfirmDialog'
+import type { McpState } from '@shared/types/mcp'
 import { SettingsDialog } from './SettingsDialog'
 
 const mockInvoke = vi.fn()
@@ -228,6 +229,67 @@ describe('SettingsDialog updates', () => {
     // downloading은 설명과 버튼이 같은 문자열을 쓴다. selector로 설명 문단만 겨냥해야
     // updateDescription이 빈 문자열을 돌려줘도 버튼 쪽 텍스트에 가려지지 않는다.
     expect(await screen.findByText(expected, { selector: 'p' })).not.toBeNull()
+  })
+})
+
+describe('SettingsDialog agent access (MCP)', () => {
+  const url = 'http://127.0.0.1:47821/mcp'
+
+  function serveMcpState(
+    getState: () => McpState,
+    onSetEnabled?: (enabled: boolean) => void
+  ): void {
+    mockInvoke.mockImplementation((channel: string, ...args: unknown[]) => {
+      if (channel === 'mcp:setEnabled') onSetEnabled?.(args[0] as boolean)
+      if (channel === 'mcp:getState' || channel === 'mcp:setEnabled') {
+        return Promise.resolve({ success: true, data: getState() })
+      }
+      return Promise.resolve({ success: true, data: undefined })
+    })
+  }
+
+  it('turns the server on and shows its endpoint, or the reason it could not start', async () => {
+    // covers: Test-252
+    let state: McpState = { enabled: false, running: false, url }
+    serveMcpState(
+      () => state,
+      (enabled) => {
+        state = { enabled, running: enabled, url, command: 'claude mcp add …' }
+      }
+    )
+    const user = userEvent.setup()
+    const { unmount } = render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    const toggle = await screen.findByRole('checkbox', { name: /Enable MCP server/ })
+    await waitFor(() => expect((toggle as HTMLInputElement).disabled).toBe(false))
+    expect(screen.queryByText(`Running at ${url}`)).toBeNull()
+    await user.click(toggle)
+
+    expect(invokeCalls(mockInvoke, 'mcp:setEnabled')).toEqual([[true]])
+    expect(await screen.findByText(`Running at ${url}`)).not.toBeNull()
+    unmount()
+
+    const reason = 'listen EADDRINUSE: address already in use 127.0.0.1:47821'
+    state = { enabled: true, running: false, url, error: reason }
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    expect(await screen.findByText(`Couldn't start the server. ${reason}`)).not.toBeNull()
+  })
+
+  it('copies the registration command without ever showing the token', async () => {
+    // covers: Test-253
+    const token = 'tok_SECRET-value_123'
+    const command =
+      `claude mcp add --scope user --transport http ftp-browser ${url} ` +
+      `--header "Authorization: Bearer ${token}"`
+    serveMcpState(() => ({ enabled: true, running: true, url, command }))
+    const user = userEvent.setup()
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Copy Claude Code command' }))
+
+    await waitFor(async () => expect(await navigator.clipboard.readText()).toBe(command))
+    expect(document.body.textContent).not.toContain(token)
   })
 })
 

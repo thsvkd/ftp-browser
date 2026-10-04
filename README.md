@@ -24,6 +24,21 @@ Windows 설치판은 앱을 시작할 때 새 버전을 확인합니다. 설정�
 
 포터블 Windows 실행 파일과 macOS·Linux 패키지는 자동 업데이트 대상이 아닙니다. 새 버전은 GitHub Releases에서 직접 내려받아 설치해야 합니다. 자동 업데이트 기능이 처음 포함된 버전도 이전 버전에서 한 번 수동 설치해야 이후 릴리스부터 자동 업데이트를 받을 수 있습니다.
 
+## 에이전트 접근 (MCP)
+
+앱에 읽기 전용 MCP 서버가 들어 있어 Claude Code 같은 AI 에이전트가 앱이 연결 중인 FTP 서버의 폴더 목록, 이미지 미리보기, 전송 목록을 볼 수 있습니다. 기본으로 꺼져 있고, 에이전트는 연결을 바꾸거나 파일을 수정할 수 없습니다.
+
+1. 설정의 **Agent access (MCP)**에서 **Enable MCP server**를 켭니다. 서버는 이 컴퓨터(`http://127.0.0.1:47821/mcp`)에서만 열립니다.
+2. **Copy Claude Code command**로 복사한 명령을 터미널에서 실행합니다. 명령에 접속 토큰이 들어 있으므로 다른 사람과 공유하지 마세요.
+
+   ```sh
+   claude mcp add --scope user --transport http ftp-browser http://127.0.0.1:47821/mcp --header "Authorization: Bearer <TOKEN>"
+   ```
+
+3. 앱에서 FTP 서버에 연결한 뒤 에이전트에게 요청합니다. 앱이 꺼져 있거나 설정이 꺼져 있으면 에이전트는 접속하지 못합니다.
+
+**Regenerate token**을 누르면 이전 토큰은 바로 거부됩니다. `claude mcp remove ftp-browser`로 기존 등록을 지운 뒤 새 명령으로 다시 등록하세요.
+
 ## 자동 검증
 
 Pull request와 `main` 브랜치 변경은 GitHub Actions에서 Windows x64, Linux x64, macOS arm64 및 Intel로 각각 테스트합니다. 각 환경은 unpacked 앱을 패키징한 뒤 실제 Electron 프로세스를 실행해 renderer와 네이티브 모듈이 정상적으로 시작되는지 확인합니다. 태그 릴리스는 이 검증이 모두 통과한 뒤 같은 OS·아키텍처 조합의 설치 패키지를 각 네이티브 러너에서 만들고 하나의 GitHub Release에 함께 게시합니다.

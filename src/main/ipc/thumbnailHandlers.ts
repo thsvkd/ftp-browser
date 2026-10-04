@@ -7,11 +7,18 @@ import { ThumbnailQueue, ThumbnailRequest, ThumbnailResult } from '../thumbnail/
 import { ipcError } from '../utils/errorClassifier'
 import type { IpcResult } from '@shared/types/ipc'
 
+export interface ThumbnailHandlersResult {
+  queue: ThumbnailQueue
+  /** MCP 미리보기가 같은 캐시와 생성기를 쓰도록 내보낸다 */
+  cacheManager: CacheManager
+  generator: ThumbnailGenerator
+}
+
 export function registerThumbnailHandlers(
   win: BrowserWindow,
   db: Database.Database,
   ftpManager: FtpConnectionManager
-): ThumbnailQueue {
+): ThumbnailHandlersResult {
   const cacheManager = new CacheManager(db)
   const generator = new ThumbnailGenerator()
 
@@ -63,5 +70,5 @@ export function registerThumbnailHandlers(
     return { success: true, data: undefined }
   })
 
-  return queue
+  return { queue, cacheManager, generator }
 }

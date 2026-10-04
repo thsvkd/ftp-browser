@@ -190,6 +190,17 @@ export const ko = {
   'settings.clearCache': '캐시 지우기',
   'settings.clearingCache': '지우는 중…',
   'settings.updates': '업데이트',
+  'settings.mcp': '에이전트 접근(MCP)',
+  'settings.mcpEnable': 'MCP 서버 켜기',
+  'settings.mcpDescription':
+    'Claude Code 같은 AI 에이전트가 연결된 서버의 폴더 목록, 이미지 미리보기, 전송 목록을 볼 수 있습니다. 아무것도 바꿀 수 없습니다.',
+  'settings.mcpRunning': '{{url}}에서 실행 중',
+  'settings.mcpStartFailed': '서버를 시작하지 못했습니다. {{reason}}',
+  'settings.mcpCopyCommand': 'Claude Code 명령 복사',
+  'settings.mcpCommandCopied': 'Claude Code 명령을 복사했습니다',
+  'settings.mcpRegenerateToken': '토큰 재발급',
+  'settings.mcpTokenRegenerated':
+    '토큰을 재발급했습니다. 이전 토큰을 쓰는 에이전트는 더 이상 접속할 수 없습니다.',
 
   'update.version': '버전 {{version}}',
   'update.versionUnknown': '버전',

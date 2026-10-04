@@ -11,6 +11,10 @@ import { registerPreviewHandlers } from './ipc/previewHandlers'
 import { registerDragHandlers } from './ipc/dragHandlers'
 import { registerGalleryHandlers } from './ipc/galleryHandlers'
 import { registerUpdateHandlers } from './ipc/updateHandlers'
+import { registerMcpHandlers } from './ipc/mcpHandlers'
+import { McpService } from './mcp/McpService'
+import { createMcpToolServer } from './mcp/mcpTools'
+import { createThumbnailPreviewer } from './mcp/thumbnailPreviews'
 import { registerDevtools } from './debug/devtools'
 import { applyApplicationMenu } from './menu/appMenu'
 import { UpdateManager, isAutomaticUpdateSupported } from './update/UpdateManager'
@@ -113,11 +117,25 @@ app.whenReady().then(() => {
   const operationManager = registerOperationHandlers(win)
   const { manager, fileOps } = registerFtpHandlers(win, operationManager)
   registerLocalFsHandlers(win, operationManager)
-  registerTransferHandlers(win, fileOps, manager)
-  registerThumbnailHandlers(win, db, manager)
+  const transferQueue = registerTransferHandlers(win, fileOps, manager)
+  const { cacheManager, generator } = registerThumbnailHandlers(win, db, manager)
   registerPreviewHandlers(db, manager)
   registerDragHandlers(manager)
   registerGalleryHandlers(win, db, manager)
+
+  // 내장 MCP 서버는 GUI와 같은 연결·전송 큐·썸네일 캐시를 읽기 전용으로 쓴다(기본 꺼짐)
+  const previews = createThumbnailPreviewer(manager, generator, cacheManager)
+  const mcp = new McpService(db, () =>
+    createMcpToolServer({
+      version: app.getVersion(),
+      ftp: manager,
+      transfers: transferQueue,
+      previews
+    })
+  )
+  registerMcpHandlers(mcp)
+  void mcp.init()
+  app.on('will-quit', () => void mcp.stop())
 
   const automaticUpdateSupported = isAutomaticUpdateSupported({
     isPackaged: app.isPackaged,
