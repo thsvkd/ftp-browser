@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
@@ -39,8 +39,9 @@ export function RemoteExplorer(): React.JSX.Element {
   const [dragOverFolderPath, setDragOverFolderPath] = useState<string | null>(null)
   const dragCounterRef = useRef(0)
 
-  // 디렉토리 변경 시 선택 해제 + 대기 중인 썸네일/폴더 preview 요청 취소 + 캐시 무효화
-  useEffect(() => {
+  // 디렉토리 변경 시 선택 해제 + 대기 중인 썸네일/폴더 preview 요청 취소 + 캐시 무효화.
+  // layout effect라 자식 그리드의 썸네일 배치(passive effect)보다 먼저 취소가 나간다.
+  useLayoutEffect(() => {
     clearSelection()
     window.api.invoke('thumbnail:cancelAll')
     window.api.invoke('gallery:cancelAll')

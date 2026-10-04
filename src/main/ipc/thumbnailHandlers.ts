@@ -43,11 +43,14 @@ export function registerThumbnailHandlers(
     }
   })
 
+  // 원격 그리드의 뷰포트 배치(보이는 행 ± 한 화면, 가까운 순 priority). 단순 묶음 요청이 아니라
+  // 직전 배치를 **교체**한다: 직전 배치에서 아직 시작하지 않았고 이번에 빠진 항목은 버린다.
+  // 진행 중 다운로드와 단건 thumbnail:request 항목은 그대로 둔다(docs/handoff/thumbnail-viewport-priority.md).
   ipcMain.handle(
     'thumbnail:requestBatch',
     (_event, requests: ThumbnailRequest[]): IpcResult<string[]> => {
       try {
-        const keys = requests.map((req) => queue.request(req))
+        const keys = queue.requestBatch(requests)
         return { success: true, data: keys }
       } catch (err) {
         return ipcError(err)

@@ -7,6 +7,7 @@ import {
   GALLERY_CELL_PADDING,
   GALLERY_THUMB_STEP
 } from '@renderer/stores/useSettingsStore'
+import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { ThumbnailImage } from '@renderer/components/thumbnail/ThumbnailImage'
 import { RemoteFolderThumbnail } from '@renderer/components/thumbnail/RemoteFolderThumbnail'
 import { ImagePreviewModal } from '@renderer/components/thumbnail/ImagePreviewModal'
@@ -15,6 +16,8 @@ import { useScrollRestoration } from '@renderer/hooks/useScrollRestoration'
 import { useElementWidth } from '@renderer/hooks/useElementWidth'
 import { shouldDeferToNativeContextMenu } from '@renderer/lib/debugTools'
 import { itemIndicesInRect } from '@renderer/lib/gridGeometry'
+import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
+import { viewportThumbnailTargets } from '@renderer/lib/thumbnailViewport'
 import { currentPlatform, isToggleSelectModifier, isZoomModifier } from '@renderer/lib/platform'
 import { joinRemotePath } from '@renderer/lib/remoteDrop'
 import { filterHidden } from '@renderer/lib/utils'
@@ -97,7 +100,10 @@ export function FileGridView({
   const sortedNames = useMemo(() => sorted.map((e) => e.name), [sorted])
 
   const hasParentRow = currentPath !== '/'
-  const items: Array<FtpFileEntry | 'parent'> = hasParentRow ? ['parent', ...sorted] : sorted
+  const items = useMemo<Array<FtpFileEntry | 'parent'>>(
+    () => (hasParentRow ? ['parent', ...sorted] : sorted),
+    [hasParentRow, sorted]
+  )
 
   const containerWidth = useElementWidth(parentRef)
   const columnCount =
@@ -115,6 +121,42 @@ export function FileGridView({
     estimateSize: () => cellSize + GRID_GAP,
     overscan: 2
   })
+
+  // range는 getVirtualItems() 안에서 계산되므로 그 뒤에 읽는다(보이는 행만, overscan 제외).
+  const virtualRows = virtualizer.getVirtualItems()
+  const visibleStart = virtualizer.range?.startIndex
+  const visibleEnd = virtualizer.range?.endIndex
+
+  // 보이는 행 ± 한 화면 안의 이미지 썸네일을 가까운 순 배치 하나로 요청한다. main은 직전 배치를
+  // 교체하므로 지나간 영역의 미시작 요청은 버려진다(docs/handoff/thumbnail-viewport-priority.md).
+  useEffect(() => {
+    if (visibleStart === undefined || visibleEnd === undefined) return
+    const { thumbnails, errors, clearError } = useThumbnailStore.getState()
+    const targets = viewportThumbnailTargets(
+      items,
+      columnCount,
+      { startIndex: visibleStart, endIndex: visibleEnd },
+      visibleEnd - visibleStart + 1 // 마진: 위·아래로 한 화면
+    )
+    const inWindow = targets.map(({ entry, priority }) => {
+      const remotePath = joinRemotePath(currentPath, entry.name)
+      const { name: fileName, size: fileSize, modifiedAt } = entry
+      return {
+        key: generateCacheKeyRenderer(host, port, remotePath, fileSize, modifiedAt),
+        request: { remotePath, fileName, fileSize, modifiedAt, priority }
+      }
+    })
+    const windowKeys = new Set(inWindow.map((t) => t.key))
+    // 이미 받은 것은 다시 보내지 않고, 실패한 것은 창 안에 있는 동안 재시도하지 않는다
+    const requests = inWindow
+      .filter((t) => !thumbnails[t.key] && !errors[t.key])
+      .map((t) => t.request)
+    // 창을 벗어난 실패 항목은 에러를 지워, 다시 보일 때 재요청되게 한다(리마운트 재시도와 같은 효과)
+    for (const key of Object.keys(errors)) {
+      if (!windowKeys.has(key)) clearError(key)
+    }
+    window.api.invoke('thumbnail:requestBatch', requests)
+  }, [visibleStart, visibleEnd, items, columnCount, currentPath, host, port])
 
   // Keep the anchor cell visible when it changes from the keyboard (type-ahead).
   // Only reacts to the anchor itself so a refresh or zoom never yanks the scroll back.
@@ -266,7 +308,7 @@ export function FileGridView({
             }}
           />
         )}
-        {virtualizer.getVirtualItems().map((virtualRow) => {
+        {virtualRows.map((virtualRow) => {
           const startIdx = virtualRow.index * columnCount
           const rowItems = items.slice(startIdx, startIdx + columnCount)
 

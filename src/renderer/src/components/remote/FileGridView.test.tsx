@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, act, within } from '@testing-library/react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 import { useContextMenuStore, CONTEXT_MENU_OWNERS } from '@renderer/stores/useContextMenuStore'
@@ -9,7 +9,10 @@ import {
   GALLERY_THUMB_DEFAULT,
   GALLERY_THUMB_STEP
 } from '@renderer/stores/useSettingsStore'
+import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
+import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
 import {
+  invokeCalls,
   makeApiMock,
   queryMenu,
   remoteSelectedNames as selectedNames,
@@ -18,6 +21,7 @@ import {
 } from '@renderer/test/rendererTestUtils'
 import type { FtpFileEntry } from '@shared/types/ftp'
 import { FileGridView } from './FileGridView'
+import { RemoteExplorer } from './RemoteExplorer'
 
 // 원격 경로는 POSIX 고정이다. 로컬 패널과 달리 OS를 감지하지 않는다.
 const REMOTE_DIR = '/remote/dir'
@@ -156,5 +160,184 @@ describe('FileGridView — context menu ownership wiring', () => {
     })
 
     expect(queryMenu()).toBeNull()
+  })
+})
+
+// 핸드오프 thumbnail-viewport-priority C절. 그리드가 보이는 행 ± 한 화면을 배치로 요청한다.
+// stubGridLayout(1200×800) + 그리드 모드: 열 5개, 행 높이 204px(150 + 패딩 40 + 간격 14),
+// 맨 위에서 보이는 행 0~3 → 마진 4행. IntersectionObserver는 스텁하지 않는다(함정 4).
+describe('FileGridView — viewport thumbnail batches', () => {
+  const IMAGE_COUNT = 600
+  // 120행 × 204px - 뷰포트 800px. 보이는 행 116~119(인덱스 580~599).
+  const BOTTOM_SCROLL_TOP = 120 * 204 - 800
+
+  interface BatchItem {
+    remotePath: string
+    fileName: string
+    fileSize: number
+    modifiedAt: string
+    priority: number
+  }
+
+  function imageName(i: number): string {
+    return `img${String(i).padStart(3, '0')}.jpg`
+  }
+
+  function imageKey(i: number): string {
+    return generateCacheKeyRenderer('example.org', 21, `/${imageName(i)}`, 1000, MODIFIED_AT)
+  }
+
+  function setImageListing(): void {
+    useFtpStore.setState({
+      currentPath: '/',
+      loading: false,
+      entries: Array.from({ length: IMAGE_COUNT }, (_, i) => ({
+        ...ftpFile(imageName(i), 1000),
+        isImage: true
+      }))
+    })
+  }
+
+  function renderImages(): HTMLElement {
+    setImageListing()
+    const { container } = render(<FileGridView />)
+    const root = container.firstElementChild
+    if (!(root instanceof HTMLElement)) throw new Error('FileGridView rendered no root element')
+    return root
+  }
+
+  function lastBatch(): BatchItem[] {
+    const batches = invokeCalls(apiMock.invoke, 'thumbnail:requestBatch')
+    if (batches.length === 0) throw new Error('no thumbnail:requestBatch was sent')
+    return batches[batches.length - 1][0] as BatchItem[]
+  }
+
+  function indexOfName(name: string): number {
+    return Number(name.slice(3, 6))
+  }
+
+  async function scrollGridTo(root: HTMLElement, top: number): Promise<void> {
+    await act(async () => {
+      root.scrollTop = top
+      root.dispatchEvent(new Event('scroll'))
+    })
+  }
+
+  beforeEach(() => {
+    useThumbnailStore.setState({ thumbnails: {}, errors: {} })
+  })
+
+  it('requests the visible rows first and one screen of margin rows after them', () => {
+    // covers: Test-273
+    renderImages()
+
+    const batch = lastBatch()
+    expect(batch.map((r) => r.fileName)).toEqual(Array.from({ length: 40 }, (_, i) => imageName(i)))
+    expect(batch.map((r) => r.priority)).toEqual([
+      ...Array<number>(20).fill(0),
+      ...Array<number>(5).fill(1),
+      ...Array<number>(5).fill(2),
+      ...Array<number>(5).fill(3),
+      ...Array<number>(5).fill(4)
+    ])
+    expect(batch[0]).toEqual({
+      remotePath: '/img000.jpg',
+      fileName: 'img000.jpg',
+      fileSize: 1000,
+      modifiedAt: MODIFIED_AT,
+      priority: 0
+    })
+    // 셀이 스스로 요청하지 않는다. 남아 있으면 지나간 셀이 다시 큐를 채운다.
+    expect(invokeCalls(apiMock.invoke, 'thumbnail:request')).toEqual([])
+  })
+
+  it('replaces the batch with the newly visible rows after a jump to the bottom', async () => {
+    // covers: Test-274
+    const root = renderImages()
+
+    await scrollGridTo(root, BOTTOM_SCROLL_TOP)
+
+    const batch = lastBatch()
+    expect(batch.filter((r) => r.priority === 0).map((r) => r.fileName)).toEqual(
+      Array.from({ length: 20 }, (_, k) => imageName(580 + k))
+    )
+    expect(batch.filter((r) => indexOfName(r.fileName) < 500)).toEqual([])
+  })
+
+  it('leaves out entries whose thumbnail or error is already in the store', () => {
+    // covers: Test-275
+    useThumbnailStore.setState({
+      thumbnails: {
+        [imageKey(0)]: { dataUrl: 'data:image/jpeg;base64,AA==', width: 1, height: 1 }
+      },
+      errors: { [imageKey(1)]: 'Download timeout' }
+    })
+    renderImages()
+
+    const names = lastBatch().map((r) => r.fileName)
+    expect(names).not.toContain(imageName(0))
+    expect(names).not.toContain(imageName(1))
+    expect(names[0]).toBe(imageName(2))
+  })
+
+  it('clears a failed item’s error once it leaves the window so it is requested on return', async () => {
+    // covers: Test-276
+    useThumbnailStore.setState({ errors: { [imageKey(1)]: 'Download timeout' } })
+    const root = renderImages()
+    // 창 안에 있는 동안에는 에러를 유지하고 다시 요청하지 않는다.
+    expect(useThumbnailStore.getState().errors[imageKey(1)]).toBe('Download timeout')
+    expect(lastBatch().map((r) => r.fileName)).not.toContain(imageName(1))
+
+    await scrollGridTo(root, BOTTOM_SCROLL_TOP)
+    expect(useThumbnailStore.getState().errors[imageKey(1)]).toBeUndefined()
+
+    await scrollGridTo(root, 0)
+    expect(lastBatch().find((r) => r.fileName === imageName(1))).toMatchObject({ priority: 0 })
+  })
+
+  it('sends the new folder’s batch after the directory change cancels the old work', async () => {
+    // covers: Test-278
+    useSettingsStore.setState({ remoteViewMode: 'grid' })
+    setImageListing()
+    render(<RemoteExplorer />)
+
+    // 로딩 표시 없이 경로가 바뀌어 그리드가 그대로 남는 경우. 그리드의 배치 effect(자식)가
+    // 탐색기의 cancelAll(부모)보다 먼저 돌면 새 폴더의 배치가 곧바로 지워진다.
+    await act(async () => {
+      useFtpStore.setState({
+        currentPath: '/sub',
+        entries: [{ ...ftpFile('new000.jpg', 1000), isImage: true }]
+      })
+    })
+
+    const channels = apiMock.invoke.mock.calls.map((call) => call[0])
+    const lastCancel = channels.lastIndexOf('thumbnail:cancelAll')
+    expect(lastCancel).toBeGreaterThanOrEqual(0)
+    const after = apiMock.invoke.mock.calls.slice(lastCancel + 1)
+    const batches = after.filter((call) => call[0] === 'thumbnail:requestBatch')
+    expect(batches.map((call) => (call[1] as BatchItem[]).map((r) => r.remotePath))).toContainEqual(
+      ['/sub/new000.jpg']
+    )
+  })
+
+  it('retries a failed cell immediately on click', () => {
+    // covers: Test-277
+    useThumbnailStore.setState({ errors: { [imageKey(1)]: 'Download timeout' } })
+    renderImages()
+
+    fireEvent.click(within(gridCell(imageName(1))).getByText('↻'))
+
+    expect(invokeCalls(apiMock.invoke, 'thumbnail:request')).toEqual([
+      [
+        {
+          remotePath: '/img001.jpg',
+          fileName: 'img001.jpg',
+          fileSize: 1000,
+          modifiedAt: MODIFIED_AT,
+          priority: 0
+        }
+      ]
+    ])
+    expect(useThumbnailStore.getState().errors[imageKey(1)]).toBeUndefined()
   })
 })
