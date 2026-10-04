@@ -289,6 +289,76 @@ describe('fastUpload against a mock FTP server', () => {
       }, 20_000)
     }
 
+    interface ProgressReport {
+      bytes: number
+      /** 보고 순간 데이터 소켓이 OS에 넘긴 바이트 */
+      accepted: number
+      /** 보고 순간 데이터 소켓의 쓰기 대기열 */
+      queued: number
+    }
+
+    /**
+     * 서버가 느리게 읽는 업로드 하나의 진행률 보고를, 그 순간의 데이터 소켓 상태와 함께 모은다. basic-ftp는
+     * 500 ms마다 보고하므로 대기열이 찬 순간을 여러 번 보도록 20 ms로 줄인다.
+     */
+    async function uploadSlowly(fast: boolean, name: string): Promise<ProgressReport[]> {
+      await connect({ storPace: { bytes: 64 * 1024, ms: 10 } })
+      if (fast) await prime()
+      const file = localFile(name, 24 * B)
+      ;(
+        client as unknown as { _progressTracker: { intervalMs: number } }
+      )._progressTracker.intervalMs = 20
+      const original = net.Socket.prototype.write
+      /** 데이터 버퍼를 쓴 소켓. 제어 명령은 빼므로 이 업로드의 데이터 소켓 하나뿐이다. */
+      const dataSockets = new Set<net.Socket>()
+      const write = vi.spyOn(net.Socket.prototype, 'write').mockImplementation(function (
+        this: net.Socket,
+        ...args: unknown[]
+      ) {
+        if (Buffer.isBuffer(args[0]) && args[0].length > 1024) dataSockets.add(this)
+        return (original as (...a: unknown[]) => boolean).apply(this, args)
+      })
+      const reports: ProgressReport[] = []
+      client.trackProgress((info) => {
+        const [data] = dataSockets
+        if (!data) return
+        reports.push({
+          bytes: info.bytes,
+          accepted: data.bytesWritten - data.writableLength,
+          queued: data.writableLength
+        })
+      })
+
+      try {
+        await fastUpload(client, file.path, `/${name}`, fast)
+      } finally {
+        client.trackProgress()
+        write.mockRestore()
+      }
+
+      expect(sha256(server.stored.get(`/${name}`)!)).toBe(sha256(file.data))
+      expect(dataSockets.size).toBe(1)
+      return reports
+    }
+
+    for (const fast of [false, true]) {
+      it(`should report only the bytes the data socket has handed to the OS (fast=${fast})`, async () => {
+        // covers: Test-300
+        const reports = await uploadSlowly(fast, 'accepted.bin')
+
+        // 대기열이 찬 동안의 보고가 없으면 이 테스트는 아무것도 보이지 못한다
+        expect(reports.some((report) => report.queued > 0)).toBe(true)
+        for (const report of reports) expect(report.bytes).toBe(report.accepted)
+      }, 20_000)
+
+      it(`should report the whole file as the last upload progress (fast=${fast})`, async () => {
+        // covers: Test-301
+        const reports = await uploadSlowly(fast, 'last.bin')
+
+        expect(reports.at(-1)?.bytes).toBe(24 * B)
+      }, 20_000)
+    }
+
     it('should read a file smaller than one buffer with a single read into a pooled buffer', async () => {
       await connect()
       const file = localFile('small.bin', 8192)

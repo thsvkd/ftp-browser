@@ -151,6 +151,7 @@ export const ja = {
   'job.completed': '完了',
   'job.failed': '失敗',
   'job.cancelled': 'キャンセル済み',
+  'job.finishing': '完了処理中…',
 
   'transfer.title': '転送',
   'transfer.titleActive': '転送({{number}} 件処理中)',

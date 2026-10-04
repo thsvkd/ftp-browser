@@ -148,6 +148,7 @@ export const zhTW = {
   'job.completed': '已完成',
   'job.failed': '失敗',
   'job.cancelled': '已取消',
+  'job.finishing': '正在完成…',
 
   'transfer.title': '傳輸',
   'transfer.titleActive': '傳輸（{{number}} 個進行中）',

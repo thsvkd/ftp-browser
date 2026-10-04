@@ -31,6 +31,14 @@ function percent(transferred: number, total: number): number {
   return Math.min(100, Math.max(0, Math.round((transferred / total) * 100)))
 }
 
+/**
+ * 진행 중인 행의 퍼센트. 바이트를 다 넘겨도 그 데이터가 서버에 닿고 서버가 226으로 답해야 완료이므로,
+ * 완료 전에는 100%를 보이지 않는다.
+ */
+function livePercent(value: number): number {
+  return Math.min(99, value)
+}
+
 function groupJobs(jobs: TransferJob[]): TransferGroup[] {
   const groups = new Map<string, TransferGroup>()
 
@@ -82,7 +90,9 @@ function JobRow({
   nested?: boolean
   cancel: (id: string) => Promise<void>
 }): React.JSX.Element {
-  const jobPercent = percent(job.transferredBytes, job.totalBytes)
+  const jobPercent = livePercent(percent(job.transferredBytes, job.totalBytes))
+  // 바이트를 모두 넘기고 서버의 226을 기다린다: 남은 데이터가 서버로 가고 서버가 파일을 마무리하는 중
+  const finishing = job.status === 'active' && job.transferredBytes >= job.totalBytes
   const t = useT()
 
   return (
@@ -105,7 +115,9 @@ function JobRow({
           {formatBytes(job.transferredBytes)} / {formatBytes(job.totalBytes)}
         </span>
       )}
-      <span className={statusColor(job.status)}>{t(`job.${job.status}`)}</span>
+      <span className={statusColor(job.status)}>
+        {t(finishing ? 'job.finishing' : `job.${job.status}`)}
+      </span>
       {(job.status === 'pending' || job.status === 'active') && (
         <button
           type="button"
@@ -137,10 +149,19 @@ function BatchRows({
         : Math.min(job.totalBytes, Math.max(0, job.transferredBytes))),
     0
   )
-  const overallPercent =
+  const overallPercent = livePercent(
     totalBytes > 0
       ? percent(transferredBytes, totalBytes)
       : percent(jobs.filter((job) => job.status === 'completed').length, jobs.length)
+  )
+  // 대기 중인 파일이 없고 진행 중인 파일이 모두 바이트를 다 넘겼다: 남은 것은 서버 쪽 마무리뿐
+  const finishing =
+    status === 'active' &&
+    jobs.every(
+      (job) =>
+        job.status !== 'pending' &&
+        (job.status !== 'active' || job.transferredBytes >= job.totalBytes)
+    )
   const completedCount = jobs.filter((job) => job.status === 'completed').length
   const isLive = status === 'active' || status === 'pending'
   // 파일과 파일 사이(다음 파일 시작 전, 재시도 대기 중)나 대기 중인 배치에서도 두 번째 줄을
@@ -169,7 +190,9 @@ function BatchRows({
             {formatBytes(transferredBytes)} / {formatBytes(totalBytes)}
           </span>
         )}
-        <span className={statusColor(status)}>{t(`job.${status}`)}</span>
+        <span className={statusColor(status)}>
+          {t(finishing ? 'job.finishing' : `job.${status}`)}
+        </span>
         {isLive && (
           <button
             type="button"

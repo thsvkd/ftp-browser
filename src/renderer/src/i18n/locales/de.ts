@@ -161,6 +161,7 @@ export const de = {
   'job.completed': 'Abgeschlossen',
   'job.failed': 'Fehlgeschlagen',
   'job.cancelled': 'Abgebrochen',
+  'job.finishing': 'Wird abgeschlossen…',
 
   'transfer.title': 'Übertragungen',
   'transfer.titleActive': 'Übertragungen ({{number}} aktiv)',

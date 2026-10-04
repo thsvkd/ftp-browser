@@ -157,6 +157,7 @@ export const ptBR = {
   'job.completed': 'Concluído',
   'job.failed': 'Falhou',
   'job.cancelled': 'Cancelado',
+  'job.finishing': 'Finalizando…',
 
   'transfer.title': 'Transferências',
   'transfer.titleActive': 'Transferências (ativas: {{number}})',

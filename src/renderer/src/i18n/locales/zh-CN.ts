@@ -148,6 +148,7 @@ export const zhCN = {
   'job.completed': '已完成',
   'job.failed': '失败',
   'job.cancelled': '已取消',
+  'job.finishing': '正在完成…',
 
   'transfer.title': '传输',
   'transfer.titleActive': '传输（{{number}} 个进行中）',

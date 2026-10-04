@@ -151,6 +151,7 @@ export const ko = {
   'job.completed': '완료',
   'job.failed': '실패',
   'job.cancelled': '취소됨',
+  'job.finishing': '마무리 중…',
 
   'transfer.title': '전송',
   'transfer.titleActive': '전송(진행 중 {{number}}개)',

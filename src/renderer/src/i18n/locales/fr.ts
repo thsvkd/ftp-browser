@@ -161,6 +161,7 @@ export const fr = {
   'job.completed': 'Terminé',
   'job.failed': 'Échec',
   'job.cancelled': 'Annulé',
+  'job.finishing': 'Finalisation…',
 
   'transfer.title': 'Transferts',
   'transfer.titleActive': 'Transferts ({{number}} en cours)',

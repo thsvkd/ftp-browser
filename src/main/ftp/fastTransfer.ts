@@ -39,8 +39,8 @@ export const UPLOAD_BUFFER = 256 * 1024
 export const UPLOAD_BUFFERS = 8
 /**
  * 소켓의 쓰기 대기열이 이만큼 차 있으면 다음 버퍼를 넘기기 전에 기다린다(읽기는 링 안에서 계속 앞서 간다).
- * basic-ftp의 진행률과 watchdog은 대기열까지 센 bytesWritten을 보므로, 대기열이 링 전체(2 MiB)까지 쌓이면
- * 느린 업링크에서 진행률이 서버보다 그만큼 앞서고 작은 파일은 곧바로 100%로 보인다.
+ * basic-ftp의 watchdog은 대기열까지 센 bytesWritten을 보므로, 대기열이 링 전체(2 MiB)까지 쌓이면 느린
+ * 업링크에서 서버보다 그만큼 앞선다. 진행률은 acceptedBytes가 대기열을 빼고 센다.
  */
 const UPLOAD_QUEUED_MAX = 2 * UPLOAD_BUFFER
 /**
@@ -224,6 +224,24 @@ interface ClientInternals {
 }
 
 /**
+ * ProgressTracker에 넘길 업로드 데이터 소켓의 대리. 진행률은 OS가 받아 간 바이트만 센다: bytesWritten은 아직
+ * 소켓 쓰기 대기열에 있는 바이트까지 세므로 느린 링크에서 서버보다 그만큼 앞서고, 연결 수만큼 쌓여 배치가 일찍
+ * 100%로 보인다. finish 뒤에는 대기열이 비어 마지막 보고는 파일 크기 그대로다. OS 버퍼 너머는 알 수 없다.
+ */
+function acceptedBytes(socket: Socket): Socket {
+  const view = {
+    get bytesRead(): number {
+      return socket.bytesRead
+    },
+    get bytesWritten(): number {
+      return socket.bytesWritten - socket.writableLength
+    }
+  }
+  // ProgressTracker는 이 두 값만 읽는다
+  return view as Socket
+}
+
+/**
  * 빠른 경로의 전송 단계에서 1xx 전에 난 에러. isFastFlowSuspect는 이 에러만 빠른 경로 탓으로 본다.
  * 1xx 뒤의 에러는 표준 경로에서도 똑같이 나는 전송 중 에러라 평소대로 재시도한다.
  */
@@ -304,7 +322,7 @@ class Resolver {
     this.watchdog.start(data, 'upload', this.ftp.timeout, () => {
       this.ftp.closeWithError(new Error('Timeout (data socket)'))
     })
-    this.progress.start(data, name, 'upload')
+    this.progress.start(acceptedBytes(data), name, 'upload')
   }
 
   /** 1xx 전에 데이터 쪽이 끊김: 결과는 제어 응답이 정하므로 제어 연결의 timeout 감시만 되돌린다. */

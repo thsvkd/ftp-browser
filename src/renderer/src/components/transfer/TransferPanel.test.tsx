@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { makeApiMock } from '@renderer/test/rendererTestUtils'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
@@ -96,6 +96,183 @@ describe('TransferPanel batch progress', () => {
       screen.getByRole('progressbar', { name: 'only.jpg progress' }).getAttribute('aria-valuenow')
     ).toBe('40')
     expect(screen.getAllByRole('progressbar')).toHaveLength(1)
+  })
+
+  it('shows at most 99% for a file whose bytes are all sent but that is not completed yet', async () => {
+    // covers: Test-302
+    useTransferStore.setState({
+      jobs: [job({ id: 'single', fileName: 'only.jpg', status: 'active', transferredBytes: 100 })]
+    })
+
+    render(<TransferPanel />)
+    await userEvent.setup().click(screen.getByText(/Transfers/))
+
+    expect(
+      screen.getByRole('progressbar', { name: 'only.jpg progress' }).getAttribute('aria-valuenow')
+    ).toBe('99')
+    expect(screen.getByText('99%')).toBeTruthy()
+  })
+
+  it('shows at most 99% for a live batch that rounds up to 100%', async () => {
+    // covers: Test-303
+    useTransferStore.setState({
+      jobs: [
+        job({
+          id: 'done',
+          batchId: 'b',
+          fileName: 'a.jpg',
+          status: 'completed',
+          totalBytes: 996,
+          transferredBytes: 996
+        }),
+        job({
+          id: 'last',
+          batchId: 'b',
+          fileName: 'b.jpg',
+          status: 'active',
+          totalBytes: 4,
+          transferredBytes: 2
+        })
+      ]
+    })
+
+    render(<TransferPanel />)
+    await userEvent.setup().click(screen.getByText(/Transfers/))
+
+    expect(
+      screen
+        .getByRole('progressbar', { name: 'Overall transfer progress' })
+        .getAttribute('aria-valuenow')
+    ).toBe('99')
+  })
+})
+
+describe('TransferPanel finishing state', () => {
+  /** 배치 첫 줄(전체 진행률 줄) */
+  async function renderBatchHeader(): Promise<HTMLElement> {
+    render(<TransferPanel />)
+    await userEvent.setup().click(screen.getByText(/Transfers/))
+    return screen.getByText(/^Overall/).parentElement as HTMLElement
+  }
+
+  it('shows Finishing on a batch whose remaining files have all their bytes sent', async () => {
+    // covers: Test-304
+    useTransferStore.setState({
+      jobs: [
+        job({ id: 'done', batchId: 'b', fileName: 'a.jpg', status: 'completed' }),
+        job({
+          id: 'sent',
+          batchId: 'b',
+          fileName: 'b.jpg',
+          status: 'active',
+          transferredBytes: 100
+        })
+      ]
+    })
+
+    const header = await renderBatchHeader()
+
+    expect(within(header).getByText('Finishing…')).toBeTruthy()
+    expect(within(header).queryByText('In progress')).toBeNull()
+  })
+
+  it('keeps In progress on a batch that still has a queued file', async () => {
+    // covers: Test-305
+    useTransferStore.setState({
+      jobs: [
+        job({
+          id: 'sent',
+          batchId: 'b',
+          fileName: 'a.jpg',
+          status: 'active',
+          transferredBytes: 100
+        }),
+        job({ id: 'next', batchId: 'b', fileName: 'b.jpg', status: 'pending' })
+      ]
+    })
+
+    const header = await renderBatchHeader()
+
+    expect(within(header).getByText('In progress')).toBeTruthy()
+    expect(within(header).queryByText('Finishing…')).toBeNull()
+  })
+
+  it('keeps In progress on a batch with an active file that still has bytes to send', async () => {
+    // covers: Test-306
+    useTransferStore.setState({
+      jobs: [
+        job({
+          id: 'sent',
+          batchId: 'b',
+          fileName: 'a.jpg',
+          status: 'active',
+          transferredBytes: 100
+        }),
+        job({
+          id: 'sending',
+          batchId: 'b',
+          fileName: 'b.jpg',
+          status: 'active',
+          transferredBytes: 40
+        })
+      ]
+    })
+
+    const header = await renderBatchHeader()
+
+    expect(within(header).getByText('In progress')).toBeTruthy()
+    expect(within(header).queryByText('Finishing…')).toBeNull()
+  })
+
+  it('shows Finishing on a single file only once all of its bytes are sent', async () => {
+    // covers: Test-307
+    useTransferStore.setState({
+      jobs: [job({ id: 'single', fileName: 'only.jpg', status: 'active', transferredBytes: 100 })]
+    })
+    render(<TransferPanel />)
+    await userEvent.setup().click(screen.getByText(/Transfers/))
+
+    expect(screen.getByText('Finishing…')).toBeTruthy()
+    expect(screen.queryByText('In progress')).toBeNull()
+
+    act(() =>
+      useTransferStore.setState({
+        jobs: [job({ id: 'single', fileName: 'only.jpg', status: 'active', transferredBytes: 99 })]
+      })
+    )
+
+    expect(screen.getByText('In progress')).toBeTruthy()
+    expect(screen.queryByText('Finishing…')).toBeNull()
+  })
+
+  it('shows Completed, not Finishing, on a completed file row and a completed batch row', async () => {
+    // covers: Test-308
+    useTransferStore.setState({
+      jobs: [
+        job({ id: 'single', fileName: 'single.jpg', status: 'completed', transferredBytes: 100 }),
+        job({
+          id: 'a',
+          batchId: 'b',
+          fileName: 'a.jpg',
+          status: 'completed',
+          transferredBytes: 100
+        }),
+        job({
+          id: 'c',
+          batchId: 'b',
+          fileName: 'c.jpg',
+          status: 'completed',
+          transferredBytes: 100
+        })
+      ]
+    })
+
+    const header = await renderBatchHeader()
+    const fileRow = screen.getByText('single.jpg').parentElement as HTMLElement
+
+    expect(within(header).getByText('Completed')).toBeTruthy()
+    expect(within(fileRow).getByText('Completed')).toBeTruthy()
+    expect(screen.queryByText('Finishing…')).toBeNull()
   })
 })
 

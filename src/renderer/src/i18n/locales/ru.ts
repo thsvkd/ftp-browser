@@ -173,6 +173,7 @@ export const ru = {
   'job.completed': 'Завершено',
   'job.failed': 'Ошибка',
   'job.cancelled': 'Отменено',
+  'job.finishing': 'Завершение…',
 
   'transfer.title': 'Передачи',
   'transfer.titleActive': 'Передачи (активных: {{number}})',

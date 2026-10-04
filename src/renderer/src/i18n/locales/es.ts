@@ -160,6 +160,7 @@ export const es = {
   'job.completed': 'Completado',
   'job.failed': 'Error',
   'job.cancelled': 'Cancelado',
+  'job.finishing': 'Finalizando…',
 
   'transfer.title': 'Transferencias',
   'transfer.titleActive': 'Transferencias ({{number}} activas)',

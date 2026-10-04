@@ -158,6 +158,7 @@ export const it = {
   'job.completed': 'Completato',
   'job.failed': 'Non riuscito',
   'job.cancelled': 'Annullato',
+  'job.finishing': 'Finalizzazione…',
 
   'transfer.title': 'Trasferimenti',
   'transfer.titleActive': 'Trasferimenti (attivi: {{number}})',
