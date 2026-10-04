@@ -169,6 +169,7 @@ export const ja = {
   'operation.deletingNamed': '「{{name}}」を削除しています',
   'operation.deleting_other': '{{count}} 個の項目を削除しています',
   'operation.fileProgress_other': '{{completed}} / {{count}} ファイル',
+  'operation.cancel': 'キャンセル：{{operation}}',
 
   'preview.failed': 'プレビューを読み込めませんでした。{{reason}}',
   'preview.none': 'プレビューはありません',
@@ -203,6 +204,8 @@ export const ja = {
   'settings.mcpRegenerateToken': 'トークンを再発行',
   'settings.mcpTokenRegenerated':
     'トークンを再発行しました。古いトークンを使うエージェントは接続できなくなります。',
+  'settings.mcpToggleFailed': 'エージェントアクセスを変更できませんでした',
+  'settings.mcpCopyFailed': 'コマンドをコピーできませんでした',
 
   'update.version': 'バージョン {{version}}',
   'update.versionUnknown': 'バージョン',

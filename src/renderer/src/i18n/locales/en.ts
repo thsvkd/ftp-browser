@@ -183,6 +183,7 @@ export const en = {
   'operation.deleting_other': 'Deleting {{count}} items',
   'operation.fileProgress_one': '{{completed}} / {{count}} file',
   'operation.fileProgress_other': '{{completed}} / {{count}} files',
+  'operation.cancel': 'Cancel: {{operation}}',
 
   'preview.failed': "Couldn't load the preview. {{reason}}",
   'preview.none': 'No preview available',
@@ -216,6 +217,8 @@ export const en = {
   'settings.mcpRegenerateToken': 'Regenerate token',
   'settings.mcpTokenRegenerated':
     'Token regenerated. Agents using the old token can no longer connect.',
+  'settings.mcpToggleFailed': "Couldn't change agent access",
+  'settings.mcpCopyFailed': "Couldn't copy the command",
 
   'update.version': 'Version {{version}}',
   'update.versionUnknown': 'Version',

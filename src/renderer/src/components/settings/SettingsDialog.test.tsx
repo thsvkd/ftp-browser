@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useOperationStore } from '@renderer/stores/useOperationStore'
@@ -9,6 +10,10 @@ import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { ConfirmDialog } from '@renderer/components/common/ConfirmDialog'
 import type { McpState } from '@shared/types/mcp'
 import { SettingsDialog } from './SettingsDialog'
+
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), success: vi.fn() }
+}))
 
 const mockInvoke = vi.fn()
 
@@ -290,6 +295,59 @@ describe('SettingsDialog agent access (MCP)', () => {
 
     await waitFor(async () => expect(await navigator.clipboard.readText()).toBe(command))
     expect(document.body.textContent).not.toContain(token)
+  })
+
+  it('shows an error toast when toggling or copying fails instead of failing silently', async () => {
+    // covers: Test-294
+    const command = 'claude mcp add …'
+    let setEnabled: () => Promise<unknown> = () =>
+      Promise.resolve({ success: false, error: 'SQLITE_BUSY: database is locked' })
+    mockInvoke.mockImplementation((channel: string) => {
+      if (channel === 'mcp:getState') {
+        return Promise.resolve({
+          success: true,
+          data: { enabled: true, running: true, url, command }
+        })
+      }
+      if (channel === 'mcp:setEnabled') return setEnabled()
+      return Promise.resolve({ success: true, data: undefined })
+    })
+    const user = userEvent.setup()
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+    const toggle = await screen.findByRole('checkbox', { name: /Enable MCP server/ })
+    await waitFor(() => expect((toggle as HTMLInputElement).disabled).toBe(false))
+
+    // 1) 실패 결과
+    await user.click(toggle)
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Couldn't change agent access", {
+        description: 'SQLITE_BUSY: database is locked'
+      })
+    )
+    expect((toggle as HTMLInputElement).checked).toBe(true)
+
+    // 2) invoke 자체의 reject
+    vi.mocked(toast.error).mockClear()
+    setEnabled = () => Promise.reject(new Error('IPC channel closed'))
+    await user.click(toggle)
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Couldn't change agent access", {
+        description: 'IPC channel closed'
+      })
+    )
+
+    // 3) 클립보드 쓰기 거부
+    vi.mocked(toast.error).mockClear()
+    vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(
+      new Error('Document is not focused.')
+    )
+    await user.click(screen.getByRole('button', { name: 'Copy Claude Code command' }))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Couldn't copy the command", {
+        description: 'Document is not focused.'
+      })
+    )
+    expect(toast.success).not.toHaveBeenCalled()
   })
 })
 

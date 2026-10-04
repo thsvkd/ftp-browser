@@ -169,6 +169,8 @@ describe('LocalFileContextMenu — menu composition', () => {
     setup({ entries: [fileEntry('a.txt')], selected: [], entry: null, connected: true })
 
     expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['New folder…'])
+    // menuitem으로 바뀐 뒤에도 "다른 항목 없음"이 약해지지 않도록 button role도 없음을 본다.
+    expect(screen.queryAllByRole('button')).toEqual([])
   })
 
   it('omits Upload while FTP is disconnected', async () => {

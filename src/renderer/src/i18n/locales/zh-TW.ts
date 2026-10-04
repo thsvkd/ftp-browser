@@ -166,6 +166,7 @@ export const zhTW = {
   'operation.deletingNamed': '正在刪除「{{name}}」',
   'operation.deleting_other': '正在刪除 {{count}} 個項目',
   'operation.fileProgress_other': '{{completed}} / {{count}} 個檔案',
+  'operation.cancel': '取消：{{operation}}',
 
   'preview.failed': '無法載入預覽。{{reason}}',
   'preview.none': '沒有可用的預覽',
@@ -197,6 +198,8 @@ export const zhTW = {
   'settings.mcpCommandCopied': '已複製 Claude Code 指令',
   'settings.mcpRegenerateToken': '重新產生權杖',
   'settings.mcpTokenRegenerated': '已重新產生權杖。使用舊權杖的代理程式將無法再連線。',
+  'settings.mcpToggleFailed': '無法變更代理程式存取設定',
+  'settings.mcpCopyFailed': '無法複製指令',
 
   'update.version': '版本 {{version}}',
   'update.versionUnknown': '版本',

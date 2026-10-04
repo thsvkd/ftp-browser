@@ -169,6 +169,7 @@ export const ko = {
   'operation.deletingNamed': "'{{name}}' 삭제 중",
   'operation.deleting_other': '항목 {{count}}개 삭제 중',
   'operation.fileProgress_other': '파일 {{count}}개 중 {{completed}}개',
+  'operation.cancel': '취소: {{operation}}',
 
   'preview.failed': '미리 보기를 불러오지 못했습니다. {{reason}}',
   'preview.none': '미리 보기 없음',
@@ -201,6 +202,8 @@ export const ko = {
   'settings.mcpRegenerateToken': '토큰 재발급',
   'settings.mcpTokenRegenerated':
     '토큰을 재발급했습니다. 이전 토큰을 쓰는 에이전트는 더 이상 접속할 수 없습니다.',
+  'settings.mcpToggleFailed': '에이전트 접근 설정을 바꾸지 못했습니다',
+  'settings.mcpCopyFailed': '명령을 복사하지 못했습니다',
 
   'update.version': '버전 {{version}}',
   'update.versionUnknown': '버전',

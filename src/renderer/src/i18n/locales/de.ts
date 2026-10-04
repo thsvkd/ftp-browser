@@ -184,6 +184,7 @@ export const de = {
   'operation.deleting_other': '{{count}} Elemente werden gelöscht',
   'operation.fileProgress_one': '{{completed}} / {{count}} Datei',
   'operation.fileProgress_other': '{{completed}} / {{count}} Dateien',
+  'operation.cancel': 'Abbrechen: {{operation}}',
 
   'preview.failed': 'Die Vorschau konnte nicht geladen werden. {{reason}}',
   'preview.none': 'Keine Vorschau verfügbar',
@@ -219,6 +220,8 @@ export const de = {
   'settings.mcpRegenerateToken': 'Token neu erzeugen',
   'settings.mcpTokenRegenerated':
     'Neues Token erzeugt. Agenten mit dem alten Token können sich nicht mehr verbinden.',
+  'settings.mcpToggleFailed': 'Agentenzugriff konnte nicht geändert werden',
+  'settings.mcpCopyFailed': 'Befehl konnte nicht kopiert werden',
 
   'update.version': 'Version {{version}}',
   'update.versionUnknown': 'Version',

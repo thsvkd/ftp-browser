@@ -207,7 +207,7 @@ export function RemoteExplorer(): React.JSX.Element {
 
   if (connectionStatus !== 'connected') {
     return (
-      <div className="flex h-full flex-col">
+      <div role="region" aria-label={t('explorer.remote')} className="flex h-full flex-col">
         <div className="flex items-center border-b border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium uppercase text-gray-500">
           {t('explorer.remote')}
         </div>
@@ -217,7 +217,10 @@ export function RemoteExplorer(): React.JSX.Element {
   }
 
   return (
+    // Named region so agents can tell apart the controls both panes share (Back, view modes).
     <div
+      role="region"
+      aria-label={t('explorer.remote')}
       tabIndex={0}
       className={`relative flex h-full flex-col focus:outline-none ${isDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
       onMouseUp={handleMouseUp}

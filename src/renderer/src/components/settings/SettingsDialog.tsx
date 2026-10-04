@@ -93,14 +93,28 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   }
 
   const setMcpEnabled = async (enabled: boolean): Promise<void> => {
-    const result = await window.api.invoke<IpcResult<McpState>>('mcp:setEnabled', enabled)
-    if (result.success) setMcpState(result.data)
+    try {
+      const result = await window.api.invoke<IpcResult<McpState>>('mcp:setEnabled', enabled)
+      if (result.success) setMcpState(result.data)
+      else toast.error(t('settings.mcpToggleFailed'), { description: result.error })
+    } catch (err) {
+      toast.error(t('settings.mcpToggleFailed'), {
+        description: err instanceof Error ? err.message : String(err)
+      })
+    }
   }
 
   // 명령에 토큰이 들어 있으므로 화면에 보여 주지 않고 클립보드로만 꺼낸다.
   const copyMcpCommand = async (): Promise<void> => {
     if (!mcpState?.command) return
-    await navigator.clipboard.writeText(mcpState.command)
+    try {
+      await navigator.clipboard.writeText(mcpState.command)
+    } catch (err) {
+      toast.error(t('settings.mcpCopyFailed'), {
+        description: err instanceof Error ? err.message : String(err)
+      })
+      return
+    }
     toast.success(t('settings.mcpCommandCopied'))
   }
 

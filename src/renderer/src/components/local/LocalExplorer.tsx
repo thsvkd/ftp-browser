@@ -202,7 +202,10 @@ export function LocalExplorer(): React.JSX.Element {
   }
 
   return (
+    // Named region so agents can tell apart the controls both panes share (Back, view modes).
     <div
+      role="region"
+      aria-label={t('explorer.local')}
       tabIndex={0}
       className={`relative flex h-full flex-col focus:outline-none ${isDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
       onMouseUp={handleMouseUp}

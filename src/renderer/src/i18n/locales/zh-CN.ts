@@ -166,6 +166,7 @@ export const zhCN = {
   'operation.deletingNamed': '正在删除“{{name}}”',
   'operation.deleting_other': '正在删除 {{count}} 个项目',
   'operation.fileProgress_other': '{{completed}} / {{count}} 个文件',
+  'operation.cancel': '取消：{{operation}}',
 
   'preview.failed': '无法加载预览。{{reason}}',
   'preview.none': '无可用预览',
@@ -197,6 +198,8 @@ export const zhCN = {
   'settings.mcpCommandCopied': '已复制 Claude Code 命令',
   'settings.mcpRegenerateToken': '重新生成令牌',
   'settings.mcpTokenRegenerated': '已重新生成令牌。使用旧令牌的智能体将无法再连接。',
+  'settings.mcpToggleFailed': '无法更改智能体访问设置',
+  'settings.mcpCopyFailed': '无法复制命令',
 
   'update.version': '版本 {{version}}',
   'update.versionUnknown': '版本',

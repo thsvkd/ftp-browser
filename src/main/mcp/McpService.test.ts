@@ -180,6 +180,36 @@ describe('McpService HTTP boundary', () => {
     }
   })
 
+  it('accepts the Bearer scheme in any letter case but still checks the token', async () => {
+    // covers: Test-295
+    await service.setEnabled(true)
+    const token = tokenIn(db)!
+
+    for (const scheme of ['Bearer', 'bearer', 'BEARER', 'bEaReR']) {
+      expect(await postToolCall(port, { Authorization: `${scheme} ${token}` }), scheme).toBe(200)
+      expect(await postToolCall(port, { Authorization: `${scheme} x${token.slice(1)}` })).toBe(401)
+    }
+    expect(await postToolCall(port, { Authorization: `Basic ${token}` })).toBe(401)
+  })
+
+  it('shares one in-flight listen between overlapping enable and disable calls', async () => {
+    // covers: Test-296
+    const both = await Promise.all([service.setEnabled(true), service.setEnabled(true)])
+    for (const state of both) {
+      expect(state).toMatchObject({ enabled: true, running: true })
+      expect(state.error).toBeUndefined()
+    }
+    await service.setEnabled(false)
+
+    // 같은 틱의 켜기→끄기: 끄기가 진행 중인 listen을 기다려 닫아야 서버가 뒤늦게 열려 남지 않는다.
+    const on = service.setEnabled(true)
+    const off = service.setEnabled(false)
+    await Promise.all([on, off])
+
+    expect(service.getState()).toMatchObject({ enabled: false, running: false })
+    await expect(postToolCall(port, {})).rejects.toMatchObject({ code: 'ECONNREFUSED' })
+  })
+
   it('refuses connections after stop and listens again on every restart', async () => {
     // covers: Test-238
     for (let round = 0; round < 3; round++) {

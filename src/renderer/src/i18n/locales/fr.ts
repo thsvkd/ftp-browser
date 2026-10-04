@@ -184,6 +184,7 @@ export const fr = {
   'operation.deleting_other': 'Suppression de {{count}} éléments',
   'operation.fileProgress_one': '{{completed}} / {{count}} fichier',
   'operation.fileProgress_other': '{{completed}} / {{count}} fichiers',
+  'operation.cancel': 'Annuler : {{operation}}',
 
   'preview.failed': 'Impossible de charger l’aperçu. {{reason}}',
   'preview.none': 'Aucun aperçu disponible',
@@ -218,6 +219,8 @@ export const fr = {
   'settings.mcpRegenerateToken': 'Régénérer le jeton',
   'settings.mcpTokenRegenerated':
     'Jeton régénéré. Les agents qui utilisent l’ancien jeton ne peuvent plus se connecter.',
+  'settings.mcpToggleFailed': 'Impossible de modifier l’accès des agents',
+  'settings.mcpCopyFailed': 'Impossible de copier la commande',
 
   'update.version': 'Version {{version}}',
   'update.versionUnknown': 'Version',

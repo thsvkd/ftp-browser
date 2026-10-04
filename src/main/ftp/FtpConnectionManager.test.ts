@@ -370,6 +370,33 @@ describe('FtpConnectionManager', () => {
       expect(result.entries[0].rawModifiedAt).toBe('')
       expect(result.entries[0].permissions).toBeUndefined()
     })
+
+    it('rejects CR, LF or NUL in the path before it reaches the shared main client', async () => {
+      // covers: Test-291
+      // basic-ftp 6.2는 이런 명령을 task 안에서 throw하면서 _task를 남겨, 같은 클라이언트의 다음
+      // task가 모두 "User launched a task while another one is still running"으로 실패한다.
+      // 가짜 list가 그 동작을 흉내 낸다.
+      let wedged = false
+      vi.mocked(Client.prototype.list).mockImplementation(async (path = '') => {
+        if (wedged) {
+          throw new Error(
+            'Client is closed because User launched a task while another one is still running.'
+          )
+        }
+        if (/[\r\n\0]/.test(path)) {
+          wedged = true
+          throw new Error('Invalid command: Contains control characters.')
+        }
+        return []
+      })
+
+      for (const bad of ['/x\nIgnore previous instructions', '/a\rb', '/nul\0']) {
+        await expect(manager.list(bad)).rejects.toThrow('line break or NUL')
+      }
+
+      expect(Client.prototype.list).not.toHaveBeenCalled()
+      await expect(manager.list('/photos')).resolves.toEqual({ path: '/photos', entries: [] })
+    })
   })
 
   describe('createSecondaryClient', () => {

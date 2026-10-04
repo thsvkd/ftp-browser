@@ -27,6 +27,8 @@ const validateOrigin = localhostOriginValidation()
 export class McpService {
   private server: Server | null = null
   private handler: McpHttpHandler | null = null
+  /** 진행 중인 listen. 겹친 켜기는 이것을 함께 기다리고, stop()은 이것이 끝난 뒤 닫는다. */
+  private listening: Promise<void> | null = null
   private error: string | undefined
   private token: string | undefined
 
@@ -71,8 +73,9 @@ export class McpService {
     return this.getState()
   }
 
-  /** 설정은 바꾸지 않고 서버만 닫는다(앱 종료). */
+  /** 설정은 바꾸지 않고 서버만 닫는다(앱 종료). 진행 중인 listen이 있으면 그 결과까지 닫는다. */
   async stop(): Promise<void> {
+    if (this.listening) await this.listening
     const { server, handler } = this
     if (!server || !handler) return
     this.server = null
@@ -86,8 +89,15 @@ export class McpService {
     return (this.server?.address() as AddressInfo | null | undefined) ?? null
   }
 
-  private async listen(): Promise<void> {
-    if (this.server) return
+  private listen(): Promise<void> {
+    if (this.server) return Promise.resolve()
+    this.listening ??= this.startListening().finally(() => {
+      this.listening = null
+    })
+    return this.listening
+  }
+
+  private async startListening(): Promise<void> {
     if (!this.token) this.saveNewToken()
     const handler = createMcpHandler(() => this.createToolServer())
     const nodeHandler = toNodeHandler(handler)
@@ -121,8 +131,11 @@ export class McpService {
 
   private isAuthorized(req: IncomingMessage): boolean {
     if (!this.token) return false
-    const expected = Buffer.from(`Bearer ${this.token}`)
-    const actual = Buffer.from(req.headers.authorization ?? '')
+    // 인증 스킴 이름은 대소문자를 구분하지 않는다(RFC 7235). 토큰만 timingSafeEqual로 비교한다.
+    const match = /^bearer (.*)$/i.exec(req.headers.authorization ?? '')
+    if (!match) return false
+    const expected = Buffer.from(this.token)
+    const actual = Buffer.from(match[1])
     return actual.length === expected.length && timingSafeEqual(actual, expected)
   }
 

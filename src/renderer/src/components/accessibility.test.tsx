@@ -170,9 +170,27 @@ describe('GUI accessibility — icon-only buttons', () => {
     useOperationStore.setState({ jobs: [activeOperation] })
     render(<OperationPanel />)
 
-    await userEvent.setup().click(screen.getByRole('button', { name: en['common.cancel'] }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Cancel: Copying "a.jpg"' }))
 
     expect(invokeCalls(mockInvoke, 'operation:cancel')).toEqual([['op-1']])
+  })
+
+  it('names each active file operation cancel button after its operation', async () => {
+    // covers: Test-299
+    useOperationStore.setState({
+      jobs: [
+        activeOperation,
+        { ...activeOperation, id: 'op-2', kind: 'delete', itemName: undefined, itemCount: 3 }
+      ]
+    })
+    render(<OperationPanel />)
+
+    const cancelCopy = screen.getByRole('button', { name: 'Cancel: Copying "a.jpg"' })
+    const cancelDelete = screen.getByRole('button', { name: 'Cancel: Deleting 3 items' })
+    await userEvent.setup().click(cancelDelete)
+
+    expect(cancelCopy).not.toBe(cancelDelete)
+    expect(invokeCalls(mockInvoke, 'operation:cancel')).toEqual([['op-2']])
   })
 
   it('labels breadcrumb back/forward with aria-label and leaves no unnamed button', () => {
@@ -254,6 +272,24 @@ describe('GUI accessibility — context menus', () => {
       en['menu.newFolder'],
       en['menu.properties']
     ])
+  })
+})
+
+describe('GUI accessibility — pane landmarks', () => {
+  it('scopes the duplicated pane controls to a named remote or local region', () => {
+    // covers: Test-298
+    render(<AppShell />)
+
+    // 두 탐색기가 같은 이름의 컨트롤을 가지므로 문서 전체로는 구분할 수 없다.
+    expect(screen.getAllByRole('button', { name: en['explorer.back'] })).toHaveLength(2)
+    const remote = screen.getByRole('region', { name: en['explorer.remote'] })
+    const local = screen.getByRole('region', { name: en['explorer.local'] })
+    expect(remote).not.toBe(local)
+    for (const pane of [remote, local]) {
+      for (const name of [en['explorer.back'], en['explorer.forward'], en['view.list']]) {
+        expect(within(pane).getAllByRole('button', { name })).toHaveLength(1)
+      }
+    }
   })
 })
 

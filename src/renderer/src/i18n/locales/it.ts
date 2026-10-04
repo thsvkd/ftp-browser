@@ -181,6 +181,7 @@ export const it = {
   'operation.deleting_other': 'Eliminazione di {{count}} elementi in corso',
   'operation.fileProgress_one': '{{completed}} / {{count}} file',
   'operation.fileProgress_other': '{{completed}} / {{count}} file',
+  'operation.cancel': 'Annulla: {{operation}}',
 
   'preview.failed': 'Impossibile caricare l’anteprima. {{reason}}',
   'preview.none': 'Nessuna anteprima disponibile',
@@ -214,6 +215,8 @@ export const it = {
   'settings.mcpRegenerateToken': 'Rigenera token',
   'settings.mcpTokenRegenerated':
     'Token rigenerato. Gli agenti che usano il token precedente non possono più connettersi.',
+  'settings.mcpToggleFailed': 'Impossibile modificare l’accesso degli agenti',
+  'settings.mcpCopyFailed': 'Impossibile copiare il comando',
 
   'update.version': 'Versione {{version}}',
   'update.versionUnknown': 'Versione',

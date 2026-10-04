@@ -183,6 +183,7 @@ export const es = {
   'operation.deleting_other': 'Eliminando {{count}} elementos',
   'operation.fileProgress_one': '{{completed}} / {{count}} archivo',
   'operation.fileProgress_other': '{{completed}} / {{count}} archivos',
+  'operation.cancel': 'Cancelar: {{operation}}',
 
   'preview.failed': 'No se pudo cargar la vista previa. {{reason}}',
   'preview.none': 'No hay vista previa disponible',
@@ -218,6 +219,8 @@ export const es = {
   'settings.mcpRegenerateToken': 'Regenerar token',
   'settings.mcpTokenRegenerated':
     'Token regenerado. Los agentes que usan el token anterior ya no pueden conectarse.',
+  'settings.mcpToggleFailed': 'No se pudo cambiar el acceso de agentes',
+  'settings.mcpCopyFailed': 'No se pudo copiar el comando',
 
   'update.version': 'Versión {{version}}',
   'update.versionUnknown': 'Versión',

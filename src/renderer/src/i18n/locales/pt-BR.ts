@@ -180,6 +180,7 @@ export const ptBR = {
   'operation.deleting_other': 'Excluindo {{count}} itens',
   'operation.fileProgress_one': '{{completed}} / {{count}} arquivo',
   'operation.fileProgress_other': '{{completed}} / {{count}} arquivos',
+  'operation.cancel': 'Cancelar: {{operation}}',
 
   'preview.failed': 'Não foi possível carregar a visualização. {{reason}}',
   'preview.none': 'Nenhuma visualização disponível',
@@ -214,6 +215,8 @@ export const ptBR = {
   'settings.mcpRegenerateToken': 'Gerar novo token',
   'settings.mcpTokenRegenerated':
     'Novo token gerado. Agentes que usam o token antigo não conseguem mais se conectar.',
+  'settings.mcpToggleFailed': 'Não foi possível alterar o acesso de agentes',
+  'settings.mcpCopyFailed': 'Não foi possível copiar o comando',
 
   'update.version': 'Versão {{version}}',
   'update.versionUnknown': 'Versão',

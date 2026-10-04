@@ -160,6 +160,12 @@ export class FtpConnectionManager extends EventEmitter {
   }
 
   async list(remotePath: string): Promise<FtpListResult> {
+    // basic-ftp는 CR·LF·NUL이 든 명령을 task 안에서 throw하면서 task를 남겨 두어, 메인 클라이언트의
+    // 다음 작업이 "User launched a task while another one is still running"으로 실패한다.
+    // GUI든 MCP든 그런 경로는 클라이언트에 닿기 전에 거절한다.
+    if (/[\r\n\0]/.test(remotePath)) {
+      throw new Error('Invalid remote path: it contains a line break or NUL character.')
+    }
     const fileInfos: FileInfo[] = await this.runOnMainClient((client) => client.list(remotePath))
 
     const entries: FtpFileEntry[] = fileInfos.map((fi) => ({

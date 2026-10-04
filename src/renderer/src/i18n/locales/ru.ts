@@ -206,6 +206,7 @@ export const ru = {
   'operation.fileProgress_few': '{{completed}} / {{count}} файла',
   'operation.fileProgress_many': '{{completed}} / {{count}} файлов',
   'operation.fileProgress_other': '{{completed}} / {{count}} файла',
+  'operation.cancel': 'Отменить: {{operation}}',
 
   'preview.failed': 'Не удалось загрузить предпросмотр. {{reason}}',
   'preview.none': 'Предпросмотр недоступен',
@@ -242,6 +243,8 @@ export const ru = {
   'settings.mcpRegenerateToken': 'Выпустить новый токен',
   'settings.mcpTokenRegenerated':
     'Новый токен выпущен. Агенты со старым токеном больше не смогут подключиться.',
+  'settings.mcpToggleFailed': 'Не удалось изменить доступ для агентов',
+  'settings.mcpCopyFailed': 'Не удалось скопировать команду',
 
   'update.version': 'Версия {{version}}',
   'update.versionUnknown': 'Версия',

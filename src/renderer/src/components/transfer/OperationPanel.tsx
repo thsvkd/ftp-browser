@@ -123,7 +123,7 @@ export function OperationPanel(): React.JSX.Element | null {
                 <button
                   className="text-gray-400 hover:text-red-500"
                   onClick={() => cancel(job.id)}
-                  aria-label={t('common.cancel')}
+                  aria-label={t('operation.cancel', { operation: label })}
                 >
                   <X size={12} />
                 </button>
