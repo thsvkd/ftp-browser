@@ -78,6 +78,7 @@ export function StatusBar(): React.JSX.Element {
                 disabled={clearing}
                 className="ml-0.5 rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-red-500 disabled:opacity-50"
                 title={t('status.clearCache')}
+                aria-label={t('status.clearCache')}
               >
                 <Trash2 size={12} />
               </button>

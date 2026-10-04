@@ -50,12 +50,21 @@ export function FilePropertiesDialog({
       // 오버레이도 그리드 컨테이너의 DOM 자식이라, 막지 않으면 마퀴 선택 핸들러가 함께 돈다.
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="w-80 rounded-lg bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="file-properties-title"
+        className="w-80 rounded-lg bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
-          <h3 className="text-sm font-semibold text-gray-800">{t('properties.title')}</h3>
+          <h3 id="file-properties-title" className="text-sm font-semibold text-gray-800">
+            {t('properties.title')}
+          </h3>
           <button
             onClick={onClose}
             className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            aria-label={t('common.close')}
           >
             <X size={16} />
           </button>

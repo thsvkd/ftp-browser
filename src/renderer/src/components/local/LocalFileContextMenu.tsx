@@ -266,6 +266,8 @@ export function LocalFileContextMenu({
   return (
     <div
       ref={rootRef}
+      // 이름 입력 중에는 메뉴 항목 없이 입력창만 있으므로 menu가 아니다.
+      role={editing ? undefined : 'menu'}
       className="fixed z-50 min-w-[160px] rounded-md border border-gray-200 bg-white py-1 shadow-lg"
       // 첫 렌더는 앵커 그대로 두고 useLayoutEffect가 실측 후 보정한다. 보정은 페인트
       // 전에 끝나므로 잘린 위치가 화면에 보이지는 않는다.
@@ -300,6 +302,7 @@ export function LocalFileContextMenu({
             <>
               {canUpload && (
                 <button
+                  role="menuitem"
                   className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
                   onClick={handleUpload}
                 >
@@ -308,6 +311,7 @@ export function LocalFileContextMenu({
               )}
               {!isMulti && (
                 <button
+                  role="menuitem"
                   className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
                   onClick={startRename}
                 >
@@ -315,6 +319,7 @@ export function LocalFileContextMenu({
                 </button>
               )}
               <button
+                role="menuitem"
                 className="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
                 onClick={handleDelete}
               >
@@ -326,6 +331,7 @@ export function LocalFileContextMenu({
             </>
           )}
           <button
+            role="menuitem"
             className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
             onClick={startNewFolder}
           >
@@ -335,6 +341,7 @@ export function LocalFileContextMenu({
             <>
               <div className="my-1 border-t border-gray-100" />
               <button
+                role="menuitem"
                 className="w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50"
                 onClick={() => {
                   onShowProperties(entry)

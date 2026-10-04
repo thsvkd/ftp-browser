@@ -52,10 +52,11 @@ export function RemoteBreadcrumb(): React.JSX.Element {
   if (editing) {
     return (
       <div className="flex items-center border-b border-gray-200 bg-gray-50 px-1.5 py-1.5">
-        <button disabled className="rounded p-0.5 text-gray-300">
+        {/* 입력창이 옆으로 밀리지 않게 자리만 지키는 장식이라 접근성 트리에서 뺀다. */}
+        <button disabled aria-hidden="true" className="rounded p-0.5 text-gray-300">
           <ChevronLeft size={14} />
         </button>
-        <button disabled className="mr-1 rounded p-0.5 text-gray-300">
+        <button disabled aria-hidden="true" className="mr-1 rounded p-0.5 text-gray-300">
           <ChevronRight size={14} />
         </button>
         <input
@@ -82,6 +83,7 @@ export function RemoteBreadcrumb(): React.JSX.Element {
         disabled={!canGoBack}
         className={`rounded p-0.5 ${canGoBack ? 'text-gray-600 hover:bg-gray-200 hover:text-gray-900' : 'text-gray-300'}`}
         title={t('explorer.back')}
+        aria-label={t('explorer.back')}
       >
         <ChevronLeft size={14} />
       </button>
@@ -90,6 +92,7 @@ export function RemoteBreadcrumb(): React.JSX.Element {
         disabled={!canGoForward}
         className={`mr-1 rounded p-0.5 ${canGoForward ? 'text-gray-600 hover:bg-gray-200 hover:text-gray-900' : 'text-gray-300'}`}
         title={t('explorer.forward')}
+        aria-label={t('explorer.forward')}
       >
         <ChevronRight size={14} />
       </button>

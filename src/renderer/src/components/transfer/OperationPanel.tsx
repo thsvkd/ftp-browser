@@ -120,7 +120,11 @@ export function OperationPanel(): React.JSX.Element | null {
               )}
               <span className={statusColor(job.status)}>{t(`job.${job.status}`)}</span>
               {job.status === 'active' && (
-                <button className="text-gray-400 hover:text-red-500" onClick={() => cancel(job.id)}>
+                <button
+                  className="text-gray-400 hover:text-red-500"
+                  onClick={() => cancel(job.id)}
+                  aria-label={t('common.cancel')}
+                >
                   <X size={12} />
                 </button>
               )}

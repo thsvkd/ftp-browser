@@ -83,7 +83,7 @@ async function submitInlineName(
   trigger: 'Rename…' | 'New folder…',
   name: string
 ): Promise<void> {
-  await user.click(screen.getByRole('button', { name: trigger }))
+  await user.click(screen.getByRole('menuitem', { name: trigger }))
   const input = screen.getByRole('textbox')
   await user.clear(input)
   await user.type(input, `${name}{Enter}`)
@@ -181,12 +181,12 @@ describe('FileContextMenu — inline input affordances', () => {
     const user = userEvent.setup()
 
     renderMenu(ftpFile('a.txt'))
-    await user.click(screen.getByRole('button', { name: 'Rename…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename…' }))
     const renameLabel = textboxLabel()
     cleanup()
 
     renderMenu(null)
-    await user.click(screen.getByRole('button', { name: 'New folder…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'New folder…' }))
     const newFolderLabel = textboxLabel()
 
     expect(renameLabel).not.toBe('')
@@ -201,7 +201,7 @@ describe('FileContextMenu — inline input affordances', () => {
     const user = userEvent.setup()
 
     const { onClose } = renderMenu(null)
-    await user.click(screen.getByRole('button', { name: 'New folder…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'New folder…' }))
     await user.type(screen.getByRole('textbox'), 'New Docs{Escape}')
 
     expect(calls('ftp:mkdir')).toEqual([])
@@ -212,7 +212,7 @@ describe('FileContextMenu — inline input affordances', () => {
     // 대조군: 같은 이름을 Enter로 내면 호출된다. "항상 취소" 변형을 잡는다.
     cleanup()
     renderMenu(null)
-    await user.click(screen.getByRole('button', { name: 'New folder…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'New folder…' }))
     await user.type(screen.getByRole('textbox'), 'New Docs{Enter}')
 
     await waitFor(() => {
@@ -227,14 +227,14 @@ describe('FileContextMenu — inline input affordances', () => {
 
     // 1) 그대로 제출
     renderMenu(a)
-    await user.click(screen.getByRole('button', { name: 'Rename…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename…' }))
     await user.type(screen.getByRole('textbox'), '{Enter}')
     expect(calls('ftp:rename')).toEqual([])
 
     // 2) 비운 뒤 제출. no-op 제출 후의 잔여 상태에 기대지 않도록 새로 렌더한다.
     cleanup()
     renderMenu(a)
-    await user.click(screen.getByRole('button', { name: 'Rename…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename…' }))
     const input = screen.getByRole('textbox')
     await user.clear(input)
     await user.type(input, '{Enter}')
@@ -324,7 +324,7 @@ describe('FileContextMenu — viewport clamping', () => {
     expect(root.style.top).toBe('500px')
 
     viewportStub.setMenuSize({ width: 160, height: 60 })
-    await user.click(screen.getByRole('button', { name: 'Rename…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename…' }))
 
     expect(screen.getByRole('textbox')).not.toBeNull()
     expect(root.style.top).toBe('500px')
@@ -433,7 +433,7 @@ describe('FileContextMenu — download keeps remote names inside the chosen fold
     answerSaveDirectory('C:\\Downloads')
     renderMenu(ftpFile('..\\..\\evil.dll', 7))
 
-    await user.click(screen.getByRole('button', { name: en['menu.download'] }))
+    await user.click(screen.getByRole('menuitem', { name: en['menu.download'] }))
 
     await waitFor(() => expect(calls('transfer:enqueueBatch')).toHaveLength(1))
     expect(calls('transfer:enqueueBatch')[0][0]).toMatchObject({
@@ -455,7 +455,7 @@ describe('FileContextMenu — download keeps remote names inside the chosen fold
     answerSaveDirectory('/home/me')
     renderMenu(ftpFile('a:b'))
 
-    await user.click(screen.getByRole('button', { name: en['menu.download'] }))
+    await user.click(screen.getByRole('menuitem', { name: en['menu.download'] }))
 
     await waitFor(() => expect(calls('transfer:enqueueBatch')).toHaveLength(1))
     expect(calls('transfer:enqueueBatch')[0][0]).toMatchObject({
@@ -469,7 +469,7 @@ describe('FileContextMenu — download keeps remote names inside the chosen fold
     // Windows는 끝의 점을 버리므로 '...'는 '..'와 같은 곳을 가리킨다.
     renderMenu(ftpFile('...'))
 
-    await user.click(screen.getByRole('button', { name: en['menu.download'] }))
+    await user.click(screen.getByRole('menuitem', { name: en['menu.download'] }))
 
     await waitFor(() => {
       expect(toastError).toHaveBeenCalledWith(en['toast.unsafeNamesSkipped'], {

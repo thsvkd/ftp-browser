@@ -126,7 +126,7 @@ describe('LocalFileList — context menu wiring', () => {
     fireEvent.contextMenu(root)
 
     expect(queryMenu()).not.toBeNull()
-    expect(screen.queryByRole('button', { name: /^Delete/ })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /^Delete/ })).toBeNull()
   })
 
   it('selects an unselected row as the single selection when it is right-clicked', () => {
@@ -148,7 +148,7 @@ describe('LocalFileList — context menu wiring', () => {
     expect(selectedNames()).toEqual(['a.txt', 'b.txt'])
     // 메뉴가 실제로 열렸고 선택 전체를 대상으로 삼았음을 함께 본다.
     expect(queryMenu()).not.toBeNull()
-    expect(screen.queryByRole('button', { name: 'Delete (2)' })).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Delete (2)' })).not.toBeNull()
   })
 
   it('closes the context menu when a click lands outside it', () => {
@@ -191,7 +191,7 @@ describe('LocalFileList — context menu wiring', () => {
     renderList({ entries: [photo] })
 
     fireEvent.contextMenu(screen.getByText('photo.png'))
-    fireEvent.click(screen.getByRole('button', { name: 'Properties' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Properties' }))
 
     const panel = getPropertiesPanel('C:\\work\\photo.png')
     expect(propertyValue(panel, 'Name')).toBe('photo.png')

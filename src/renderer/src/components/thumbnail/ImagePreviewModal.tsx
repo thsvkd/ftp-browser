@@ -75,12 +75,16 @@ export function ImagePreviewModal({ entry, onClose }: ImagePreviewModalProps): R
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={entry.name}
         className="relative max-h-[90vh] max-w-[90vw] rounded-lg bg-white p-2 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           className="absolute -right-2 -top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-gray-800 text-sm text-white hover:bg-gray-600"
           onClick={onClose}
+          aria-label={t('common.close')}
         >
           x
         </button>

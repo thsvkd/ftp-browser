@@ -120,11 +120,16 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-dialog-title"
         className="w-[480px] rounded-lg bg-white p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{t('settings.title')}</h2>
+          <h2 id="settings-dialog-title" className="text-lg font-semibold">
+            {t('settings.title')}
+          </h2>
           <button
             onClick={onClose}
             className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"

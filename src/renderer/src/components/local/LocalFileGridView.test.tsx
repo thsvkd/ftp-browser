@@ -128,7 +128,7 @@ describe('LocalFileGridView — context menu wiring', () => {
     fireEvent.contextMenu(root)
 
     expect(queryMenu()).not.toBeNull()
-    expect(screen.queryByRole('button', { name: /^Delete/ })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /^Delete/ })).toBeNull()
   })
 
   it('selects an unselected cell as the single selection when it is right-clicked', () => {
@@ -150,7 +150,7 @@ describe('LocalFileGridView — context menu wiring', () => {
     expect(selectedNames()).toEqual(['a.txt', 'b.txt'])
     // 메뉴가 실제로 열렸고 선택 전체를 대상으로 삼았음을 함께 본다.
     expect(queryMenu()).not.toBeNull()
-    expect(screen.queryByRole('button', { name: 'Delete (2)' })).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Delete (2)' })).not.toBeNull()
   })
 
   it('closes the context menu when a click lands outside it', () => {
@@ -197,7 +197,7 @@ describe('LocalFileGridView — context menu wiring', () => {
     renderGrid({ selected: ['a.txt', 'b.txt', 'c.txt'] })
 
     fireEvent.contextMenu(gridCell('a.txt'))
-    const deleteButton = screen.getByRole('button', { name: 'Delete (3)' })
+    const deleteButton = screen.getByRole('menuitem', { name: 'Delete (3)' })
 
     // 마퀴 선택은 mousedown에 붙어 있고 메뉴는 그리드 컨테이너의 DOM 자식이다.
     // click만 쏘면 이 버그는 재현되지 않으므로 실제 입력 순서를 그대로 밟는다.

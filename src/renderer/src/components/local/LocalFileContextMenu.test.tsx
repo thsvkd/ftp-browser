@@ -132,9 +132,9 @@ describe('LocalFileContextMenu — menu composition', () => {
     const docs = dirEntry('docs')
     setup({ entries: [docs], selected: ['docs'], entry: docs, connected: true })
 
-    expect(screen.queryByRole('button', { name: /^Upload/ })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /^Upload/ })).toBeNull()
     // 메뉴 자체는 떠 있어야 한다 — Upload만 빠진 것임을 보인다.
-    expect(screen.queryByRole('button', { name: 'New folder…' })).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'New folder…' })).not.toBeNull()
   })
 
   it('omits Rename when several items are selected', async () => {
@@ -143,9 +143,9 @@ describe('LocalFileContextMenu — menu composition', () => {
     const b = fileEntry('b.txt')
     setup({ entries: [a, b], selected: ['a.txt', 'b.txt'], entry: a, connected: true })
 
-    expect(screen.queryByRole('button', { name: 'Rename…' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Rename…' })).toBeNull()
     // 메뉴가 아예 안 그려져도 통과하지 않도록, 다중 선택 메뉴가 떴음을 함께 본다.
-    expect(screen.queryByRole('button', { name: 'Delete (2)' })).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Delete (2)' })).not.toBeNull()
   })
 
   it('shows the selected count in the Delete label for a multi selection', async () => {
@@ -160,15 +160,15 @@ describe('LocalFileContextMenu — menu composition', () => {
       connected: true
     })
 
-    expect(screen.queryByRole('button', { name: 'Delete (3)' })).not.toBeNull()
-    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Delete (3)' })).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Delete' })).toBeNull()
   })
 
   it('shows only New Folder when nothing is selected', async () => {
     // covers: Test-52
     setup({ entries: [fileEntry('a.txt')], selected: [], entry: null, connected: true })
 
-    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['New folder…'])
+    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['New folder…'])
   })
 
   it('omits Upload while FTP is disconnected', async () => {
@@ -176,9 +176,9 @@ describe('LocalFileContextMenu — menu composition', () => {
     const a = fileEntry('a.txt')
     setup({ entries: [a], selected: ['a.txt'], entry: a, connected: false })
 
-    expect(screen.queryByRole('button', { name: /^Upload/ })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /^Upload/ })).toBeNull()
     // 연결 여부와 무관한 항목은 그대로 있어야 한다.
-    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Delete' })).not.toBeNull()
   })
 })
 
@@ -196,7 +196,7 @@ describe('LocalFileContextMenu — actions', () => {
       confirmBeforeDelete: false
     })
 
-    await user.click(screen.getByRole('button', { name: 'Delete (2)' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Delete (2)' }))
 
     await waitFor(() => {
       expect(invokeCalls('local:deleteBatch')).toHaveLength(1)
@@ -224,7 +224,7 @@ describe('LocalFileContextMenu — actions', () => {
       confirmBeforeDelete: true
     })
 
-    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Delete' }))
 
     // 주의점 2: LocalExplorer의 Delete 키 경로와 같은 확인 메시지 규칙이어야 한다.
     const request = useConfirmStore.getState().request
@@ -239,7 +239,7 @@ describe('LocalFileContextMenu — actions', () => {
     const a = fileEntry('a.txt')
     setup({ entries: [a], selected: ['a.txt'], entry: a, connected: true })
 
-    await user.click(screen.getByRole('button', { name: 'Rename…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename…' }))
     const input = screen.getByRole('textbox')
     await user.clear(input)
     await user.type(input, 'renamed.txt{Enter}')
@@ -256,7 +256,7 @@ describe('LocalFileContextMenu — actions', () => {
 
     // 1) 그대로 제출
     setup({ entries: [a], selected: ['a.txt'], entry: a, connected: true })
-    await user.click(screen.getByRole('button', { name: 'Rename…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename…' }))
     await user.type(screen.getByRole('textbox'), '{Enter}')
     expect(invokeCalls('local:rename')).toEqual([])
 
@@ -264,7 +264,7 @@ describe('LocalFileContextMenu — actions', () => {
     //    앞 시나리오의 잔여 상태에 기대지 않고 새로 렌더한다.
     cleanup()
     setup({ entries: [a], selected: ['a.txt'], entry: a, connected: true })
-    await user.click(screen.getByRole('button', { name: 'Rename…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename…' }))
     const input = screen.getByRole('textbox')
     await user.clear(input)
     await user.type(input, '{Enter}')
@@ -278,7 +278,7 @@ describe('LocalFileContextMenu — actions', () => {
     setup({ entries: [], selected: [], entry: null, connected: true })
 
     // 인라인 입력으로 받는다. window.prompt는 Electron이 예외를 던지므로 쓸 수 없다(§6).
-    await user.click(screen.getByRole('button', { name: 'New folder…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'New folder…' }))
     await user.type(screen.getByRole('textbox'), 'New Docs{Enter}')
 
     await waitFor(() => {
@@ -299,7 +299,7 @@ describe('LocalFileContextMenu — actions', () => {
       connected: true
     })
 
-    await user.click(screen.getByRole('button', { name: 'Upload (2)' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Upload (2)' }))
 
     await waitFor(() => {
       expect(mockEnqueueBatch).toHaveBeenCalledWith('upload', [
@@ -335,7 +335,7 @@ describe('LocalFileContextMenu — listing refresh', () => {
       confirmBeforeDelete: false
     })
 
-    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Delete' }))
 
     await waitFor(() => {
       expect(mockRefresh).toHaveBeenCalled()
@@ -349,7 +349,7 @@ describe('LocalFileContextMenu — listing refresh', () => {
     const a = fileEntry('a.txt')
     setup({ entries: [a], selected: ['a.txt'], entry: a, connected: true })
 
-    await user.click(screen.getByRole('button', { name: 'Rename…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename…' }))
     const input = screen.getByRole('textbox')
     await user.clear(input)
     await user.type(input, 'renamed.txt{Enter}')
@@ -364,7 +364,7 @@ describe('LocalFileContextMenu — listing refresh', () => {
     const user = userEvent.setup()
     setup({ entries: [], selected: [], entry: null, connected: true })
 
-    await user.click(screen.getByRole('button', { name: 'New folder…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'New folder…' }))
     await user.type(screen.getByRole('textbox'), 'New Docs{Enter}')
 
     await waitFor(() => {
@@ -381,7 +381,7 @@ describe('LocalFileContextMenu — failure handling and name validation', () => 
     trigger: 'Rename…' | 'New folder…',
     name: string
   ): Promise<void> {
-    await user.click(screen.getByRole('button', { name: trigger }))
+    await user.click(screen.getByRole('menuitem', { name: trigger }))
     const input = screen.getByRole('textbox')
     await user.clear(input)
     await user.type(input, `${name}{Enter}`)
@@ -401,7 +401,7 @@ describe('LocalFileContextMenu — failure handling and name validation', () => 
       confirmBeforeDelete: false
     })
 
-    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Delete' }))
 
     // 세 가지 정리가 모두 일어나야 한다. 하나라도 건너뛰면 메뉴가 열린 채 멈춘다.
     await waitFor(() => {
@@ -479,12 +479,12 @@ describe('LocalFileContextMenu — inline input affordances', () => {
     const a = fileEntry('a.txt')
 
     setup({ entries: [a], selected: ['a.txt'], entry: a, connected: true })
-    await user.click(screen.getByRole('button', { name: 'Rename…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename…' }))
     const renameLabel = textboxLabel()
     cleanup()
 
     setup({ entries: [], selected: [], entry: null, connected: true })
-    await user.click(screen.getByRole('button', { name: 'New folder…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'New folder…' }))
     const newFolderLabel = textboxLabel()
 
     expect(renameLabel).not.toBe('')
@@ -501,7 +501,7 @@ describe('LocalFileContextMenu — inline input affordances', () => {
     const user = userEvent.setup()
 
     const { onClose } = setup({ entries: [], selected: [], entry: null, connected: true })
-    await user.click(screen.getByRole('button', { name: 'New folder…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'New folder…' }))
     await user.type(screen.getByRole('textbox'), 'New Docs{Escape}')
 
     expect(invokeCalls('local:mkdir')).toEqual([])
@@ -510,7 +510,7 @@ describe('LocalFileContextMenu — inline input affordances', () => {
     // 대조군: 같은 이름을 Enter로 내면 호출된다. "항상 취소" 변형을 잡는다.
     cleanup()
     setup({ entries: [], selected: [], entry: null, connected: true })
-    await user.click(screen.getByRole('button', { name: 'New folder…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'New folder…' }))
     await user.type(screen.getByRole('textbox'), 'New Docs{Enter}')
 
     await waitFor(() => {
@@ -538,7 +538,7 @@ describe('LocalFileContextMenu — failed IPC results surface as toasts', () => 
       confirmBeforeDelete: false
     })
 
-    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Delete' }))
 
     await waitFor(() => {
       expect(toastError).toHaveBeenCalledWith('Failed to delete', {
@@ -554,7 +554,7 @@ describe('LocalFileContextMenu — failed IPC results surface as toasts', () => 
     const a = fileEntry('a.txt')
     setup({ entries: [a], selected: ['a.txt'], entry: a, connected: true })
 
-    await user.click(screen.getByRole('button', { name: 'Rename…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename…' }))
     const input = screen.getByRole('textbox')
     await user.clear(input)
     await user.type(input, 'b.txt{Enter}')
@@ -572,7 +572,7 @@ describe('LocalFileContextMenu — failed IPC results surface as toasts', () => 
     mockInvoke.mockResolvedValue({ success: false, error: 'EEXIST' })
     setup({ entries: [], selected: [], entry: null, connected: true })
 
-    await user.click(screen.getByRole('button', { name: 'New folder…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'New folder…' }))
     await user.type(screen.getByRole('textbox'), 'New Docs{Enter}')
 
     await waitFor(() => {
@@ -652,7 +652,7 @@ describe('LocalFileContextMenu — viewport clamping', () => {
     expect(root.style.top).toBe('500px')
 
     viewportStub.setMenuSize({ width: 160, height: 60 })
-    await user.click(screen.getByRole('button', { name: 'Rename…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename…' }))
 
     expect(screen.getByRole('textbox')).not.toBeNull()
     expect(root.style.top).toBe('500px')
