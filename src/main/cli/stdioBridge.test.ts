@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { PassThrough } from 'stream'
+import { createMcpHandler } from '@modelcontextprotocol/server'
+import { makeDeps } from '../mcp/__fixtures__/agentToolHarness'
+import { createMcpToolServer } from '../mcp/mcpTools'
 import { runStdioBridge } from './stdioBridge'
 import { deadUrl, startFakeAgentServer, type FakeAgentServer } from './__fixtures__/fakeAgentServer'
 
@@ -241,5 +244,97 @@ describe('ftpb mcp-stdio', () => {
       { jsonrpc: '2.0', id: 2, result: {} }
     ])
     expect(bridge.stderr()).toContain('not a JSON-RPC 2.0 message')
+  })
+
+  it("sends the stdio client's initialize clientInfo as the User-Agent from then on", async () => {
+    // covers: Test-664
+    const seen: Array<[string, string | null]> = []
+    const bridge = startBridge(
+      () => ({ url: server.url, token: server.token }),
+      async (input, init) => {
+        const { method } = JSON.parse(String(init?.body)) as { method: string }
+        seen.push([method, new Headers(init?.headers).get('user-agent')])
+        return globalThis.fetch(input, init)
+      }
+    )
+
+    bridge.send({ jsonrpc: '2.0', id: 'early', method: 'ping' })
+    bridge.send(INIT)
+    bridge.send({ jsonrpc: '2.0', method: 'notifications/initialized' })
+    bridge.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    bridge.send({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'get_status', arguments: {} }
+    })
+    await bridge.finish()
+
+    const agent = 'claude-desktop/1 (via ftpb mcp-stdio)'
+    expect(seen).toEqual([
+      ['ping', null],
+      ['initialize', agent],
+      ['notifications/initialized', agent],
+      ['tools/list', agent],
+      ['tools/call', agent]
+    ])
+  })
+
+  it('keeps only printable ASCII in that User-Agent, at most 100 characters, and sets none without a name', async () => {
+    // covers: Test-665
+    const agentFor = async (clientInfo: unknown): Promise<string | null> => {
+      const agents: Array<string | null> = []
+      const bridge = startBridge(
+        () => ({ url: server.url, token: server.token }),
+        async (input, init) => {
+          agents.push(new Headers(init?.headers).get('user-agent'))
+          return globalThis.fetch(input, init)
+        }
+      )
+      bridge.send({ ...INIT, params: { ...INIT.params, clientInfo } })
+      bridge.send({ jsonrpc: '2.0', id: 1, method: 'ping' })
+      await bridge.finish()
+      expect(agents).toHaveLength(2)
+      expect(agents[1]).toBe(agents[0])
+      return agents[1]
+    }
+
+    const hostile = 'claude\u0000-desk\ttop\r\nX-Evil: 1\u202e\u00e9'
+    expect(await agentFor({ name: hostile, version: '1.2\u0007' })).toBe(
+      'claude-desktopX-Evil: 1/1.2 (via ftpb mcp-stdio)'
+    )
+    expect(await agentFor({ name: 'cursor' })).toBe('cursor (via ftpb mcp-stdio)')
+    const long = await agentFor({ name: 'a'.repeat(300), version: '9'.repeat(50) })
+    expect(long).toHaveLength(100)
+    expect(long).toMatch(/^a+ \(via ftpb mcp-stdio\)$/)
+    const nameless = [undefined, { version: '1' }, { name: 42 }, { name: '\u65e5\u672c' }]
+    for (const clientInfo of nameless) {
+      expect(await agentFor(clientInfo), JSON.stringify(clientInfo)).toBeNull()
+    }
+  })
+
+  it('names a stdio client behind the bridge in the confirmation instead of "node"', async () => {
+    // covers: Test-666
+    const deps = makeDeps()
+    deps.confirm.mockResolvedValue('denied')
+    const handler = createMcpHandler(() => createMcpToolServer(deps))
+    const bridge = startBridge(
+      () => ({ url: 'http://localhost/mcp', token: 't' }),
+      async (input, init) => handler.fetch(new Request(input, init))
+    )
+
+    bridge.send(INIT)
+    bridge.send({ jsonrpc: '2.0', method: 'notifications/initialized' })
+    bridge.send({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'delete', arguments: { paths: ['/a.jpg'] } }
+    })
+    const lines = await bridge.finish()
+
+    expect(JSON.parse(lines[lines.length - 1])).toMatchObject({ id: 1, result: { isError: true } })
+    expect(deps.confirm).toHaveBeenCalledTimes(1)
+    expect(deps.confirm.mock.calls[0][0].client).toBe('claude-desktop/1 (via ftpb mcp-stdio)')
   })
 })

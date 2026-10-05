@@ -202,7 +202,7 @@ describe('tool registry', () => {
     expect(confirmRequests(win)[0]).toMatchObject({
       tool: 'delete',
       tier: 'D',
-      host: 'ftp.example.com'
+      host: 'ftp.example.com:2121'
     })
     broker.respond(confirmRequests(win)[0].id, true)
     const ok = await approved
@@ -313,7 +313,7 @@ describe('tool registry', () => {
       tool: 'upload',
       tier: 'X',
       client: 'agent-x',
-      host: 'ftp.example.com',
+      host: 'ftp.example.com:2121',
       totalItems: 25,
       totalBytes: 25_000
     })

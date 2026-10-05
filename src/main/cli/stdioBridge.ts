@@ -82,6 +82,29 @@ function isResponse(message: JsonRpcMessage): boolean {
   return 'id' in message && ('result' in message || 'error' in message)
 }
 
+const VIA = ' (via ftpb mcp-stdio)'
+/** Longest User-Agent the bridge sends. */
+const MAX_USER_AGENT = 100
+
+/**
+ * The User-Agent for a stdio client's `initialize` clientInfo:
+ * `<name>/<version> (via ftpb mcp-stdio)`, printable ASCII only and at most 100 characters.
+ * Handshake clients' later requests carry no clientInfo, so the app names the client by its
+ * User-Agent (otherwise just "node"). None without a name.
+ */
+function userAgentOf(message: JsonRpcMessage): string | undefined {
+  const info = (
+    message.params as { clientInfo?: { name?: unknown; version?: unknown } } | undefined
+  )?.clientInfo
+  const ascii = (value: unknown): string =>
+    typeof value === 'string' ? value.replace(/[^\x20-\x7e]/g, '').trim() : ''
+  const name = ascii(info?.name)
+  if (!name) return undefined
+  const version = ascii(info?.version)
+  const product = version ? `${name}/${version}` : name
+  return `${product.slice(0, MAX_USER_AGENT - VIA.length).trimEnd()}${VIA}`
+}
+
 export async function runStdioBridge(options: BridgeOptions): Promise<void> {
   const headers: Record<string, string> = {}
   const pending = new Set<Promise<void>>()
@@ -110,6 +133,11 @@ export async function runStdioBridge(options: BridgeOptions): Promise<void> {
       if (item.method === 'notifications/cancelled') {
         const requestId = (item.params as { requestId?: Id } | undefined)?.requestId
         if (requestId !== undefined) controllers.get(requestId)?.abort()
+      }
+      // Set before posting, so this initialize and every later message carry it.
+      if (item.method === 'initialize') {
+        const agent = userAgentOf(item)
+        if (agent) headers['User-Agent'] = agent
       }
     }
 

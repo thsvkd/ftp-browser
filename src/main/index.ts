@@ -23,6 +23,7 @@ import { JobHandles } from './mcp/jobHandles'
 import { ActionLock } from './mcp/toolRegistry'
 import { attachRemoteChangeForwarding, createAgentEventSink } from './agent/events'
 import { createAgentServices } from './agent/services'
+import { agentFolderPath } from './agent/services/paths'
 import { registerDevtools } from './debug/devtools'
 import { applyApplicationMenu } from './menu/appMenu'
 import { UpdateManager, isAutomaticUpdateSupported } from './update/UpdateManager'
@@ -158,7 +159,8 @@ app.whenReady().then(() => {
   const jobHandles = new JobHandles()
   const actionLock = new ActionLock()
   // 에이전트 폴더(§9 R2): 로컬에 쓰는 W 도구는 이 안에서만 W 정책을 따르고 밖이면 사용자에게 묻는다.
-  const agentLocalRoot = app.getPath('downloads')
+  // 다운로드 폴더가 홈·그 상위·루트면(user-dirs.dirs 없는 Linux) <home>/Downloads로 대신한다.
+  const agentLocalRoot = agentFolderPath(app.getPath('downloads'), app.getPath('home'))
   const previews = createThumbnailPreviewer(manager, generator, cacheManager)
   const mcp = new McpService(
     db,

@@ -67,13 +67,25 @@ export const serverSchema = z.object({
   lastConnected: z.string().optional()
 })
 
-/** 원격 도구는 계획 단계에서 연결을 확인한다. 실패할 일을 사용자에게 확인받지 않는다. */
+/**
+ * 확인 대화상자의 서버 줄. 같은 호스트의 다른 포트 서버를 가릴 수 있게 21이 아니면 `host:port`다
+ * (IPv6 리터럴은 `[host]:port`).
+ */
+export function hostLabel(host: string, port: number | undefined): string {
+  if (port === undefined || port === 21) return host
+  return host.includes(':') ? `[${host}]:${port}` : `${host}:${port}`
+}
+
+/**
+ * 원격 도구는 계획 단계에서 연결을 확인한다. 실패할 일을 사용자에게 확인받지 않는다.
+ * 확인 대화상자의 서버 줄(hostLabel)을 돌려준다.
+ */
 export function requireConnection(rt: ToolRuntime): string {
   const session = rt.deps.services.session.info()
   if (session.status !== 'connected') {
     throw new AgentError('NOT_CONNECTED', 'FTP Browser is not connected to a server.')
   }
-  return session.host ?? ''
+  return hostLabel(session.host ?? '', session.port)
 }
 
 /** 미리보기 목록은 앞부분만 담고 전체 개수를 함께 준다. */

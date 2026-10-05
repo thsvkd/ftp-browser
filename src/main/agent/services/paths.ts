@@ -66,6 +66,24 @@ export function isInsideFolder(
   return full === base || full.startsWith(base.endsWith(p.sep) ? base : base + p.sep)
 }
 
+/**
+ * §9 R2 에이전트 폴더. 다운로드 폴더가 홈 자신·홈의 상위·파일시스템 루트면 `<home>/Downloads`로 대신한다:
+ * user-dirs.dirs가 없는 Linux에서 Electron의 getPath('downloads')는 홈을 주므로, 그대로 쓰면 `~/.ssh`·
+ * 자동 실행 폴더가 묻지 않고 쓰이는 폴더 안이 된다(b12e936 E2E). 없는 폴더는 `download`가 만든다.
+ * 넓은 쪽으로 틀리면 안 되므로 macOS도 대소문자를 가리지 않고 비교한다.
+ */
+export function agentFolderPath(
+  downloads: string,
+  home: string,
+  platform: string = process.platform
+): string {
+  const p = platform === 'win32' ? path.win32 : path.posix
+  const fold = (s: string): string => (platform === 'darwin' ? s.toLowerCase() : s)
+  const full = p.resolve(downloads)
+  const tooWide = p.dirname(full) === full || isInsideFolder(fold(full), fold(home), platform)
+  return tooWide ? p.join(p.resolve(home), 'Downloads') : downloads
+}
+
 /** T9 */
 export function tooManyItems(): AgentError {
   return new AgentError(

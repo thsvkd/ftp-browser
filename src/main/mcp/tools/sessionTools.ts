@@ -4,7 +4,14 @@ import type { TransferStatus } from '@shared/types/transfer'
 import type { SavedServerInfo } from '../../agent/types'
 import { AGENT_FOLDER_RULE, actionTool, readTool, type ToolDefinition } from '../toolRegistry'
 import { codedError, jsonResult } from '../toolResults'
-import { READ_ONLY_RISK, remotePath, serverRef, serverSchema, serverSummary } from './shared'
+import {
+  READ_ONLY_RISK,
+  hostLabel,
+  remotePath,
+  serverRef,
+  serverSchema,
+  serverSummary
+} from './shared'
 
 const policyValue = z.enum(['allow', 'ask', 'deny'])
 const noControl = /^[^\p{Cc}]*$/u
@@ -128,7 +135,7 @@ const connect = actionTool({
     return {
       data: { server, path },
       preview: { server: serverSummary(server), ...(path !== undefined ? { path } : {}) },
-      confirm: { host: server.host, items, totalItems: items.length }
+      confirm: { host: hostLabel(server.host, server.port), items, totalItems: items.length }
     }
   },
   async run(_input, { server, path }, { deps }) {
@@ -153,12 +160,16 @@ const disconnect = actionTool({
   inputSchema: z.object({}),
   outputSchema: z.object({ disconnected: z.boolean(), host: z.string().optional() }),
   plan(_input, { deps }) {
-    const { status, host } = deps.services.session.info()
+    const { status, host, port } = deps.services.session.info()
     const connected = status === 'connected'
     return {
       data: host,
       preview: { connected, ...(host !== undefined ? { host } : {}) },
-      confirm: { ...(host !== undefined ? { host } : {}), items: [], totalItems: 0 }
+      confirm: {
+        ...(host !== undefined ? { host: hostLabel(host, port) } : {}),
+        items: [],
+        totalItems: 0
+      }
     }
   },
   async run(_input, host, { deps }) {
@@ -200,7 +211,11 @@ const openServerEditor = actionTool({
       user,
       secure
     }
-    return { data: request, preview: { ...request }, confirm: { host, items: [], totalItems: 0 } }
+    return {
+      data: request,
+      preview: { ...request },
+      confirm: { host: hostLabel(host, port), items: [], totalItems: 0 }
+    }
   },
   async run(_input, request, { deps }) {
     if (!deps.notify.openServerEditor(request)) {
@@ -244,7 +259,7 @@ const deleteServer = actionTool({
       data: server,
       preview: { server: serverSummary(server) },
       confirm: {
-        host: server.host,
+        host: hostLabel(server.host, server.port),
         items: [{ path: serverLabel(server), kind: 'file' }],
         totalItems: 1
       }

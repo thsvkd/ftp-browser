@@ -42,8 +42,8 @@ export interface McpToolDeps {
   /** §9 R1: R이 아닌 호출을 하나씩 지나게 한다. 앱에 하나만 둔다 */
   actionLock: ActionLock
   /**
-   * §9 R2 에이전트 폴더(앱은 app.getPath('downloads')). 로컬에 쓰는 W 도구는 이 안에서만 W 정책을
-   * 따르고 밖이면 사용자에게 묻는다
+   * §9 R2 에이전트 폴더(앱은 agentFolderPath로 고른 다운로드 폴더). 로컬에 쓰는 W 도구는
+   * 이 안에서만 W 정책을 따르고 밖이면 사용자에게 묻는다
    */
   localRoot: string
   /** 테스트가 줄이는 대기 시간 */

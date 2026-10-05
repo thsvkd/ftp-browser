@@ -9,6 +9,7 @@ vi.mock('electron', () => ({ app: { getPath: vi.fn(() => os.tmpdir()) } }))
 import { DEFAULT_AGENT_POLICY, type AgentPolicy } from '@shared/types/agent'
 import { LocalFileSystem } from '../local/LocalFileSystem'
 import { createAgentServices } from '../agent/services'
+import { agentFolderPath } from '../agent/services/paths'
 import { createHarness, type Harness } from '../agent/services/__fixtures__/fakes'
 import type { DownloadPlan, JobSnapshot } from '../agent/types'
 import { JobHandles } from './jobHandles'
@@ -537,6 +538,53 @@ describe('agent folder (spec §9 R2)', () => {
     })
     expect(client.getInstructions()).toContain('agent folder /home/u')
   })
+
+  it('asks before writing into ~/.config/autostart or ~/.ssh when the downloads path was home itself', async () => {
+    // covers: Test-663
+    // Electron on Linux without user-dirs.dirs returns $HOME for 'downloads' (b12e936 E2E).
+    const home = tmpDir()
+    const autostart = path.join(home, '.config', 'autostart')
+    const ssh = path.join(home, '.ssh')
+    const { harness, deps, asked, answer } = wire({ localRoot: agentFolderPath(home, home) })
+    harness.remote.addFile('/evil.desktop', 10)
+    const client = await connectClient(deps)
+
+    const download = client.callTool({
+      name: 'download',
+      arguments: { remotePaths: ['/evil.desktop'], localDir: autostart }
+    })
+    await vi.waitFor(() => expect(asked).toHaveLength(1))
+    answer('denied')
+    expect(textOf(await download)).toMatch(/^DENIED_BY_USER: /)
+    const mkdir = client.callTool({ name: 'create_local_directory', arguments: { path: ssh } })
+    await vi.waitFor(() => expect(asked).toHaveLength(2))
+    answer('denied')
+    expect(textOf(await mkdir)).toMatch(/^DENIED_BY_USER: /)
+
+    expect(asked.map((request) => [request.tool, request.tier])).toEqual([
+      ['download', 'W'],
+      ['create_local_directory', 'W']
+    ])
+    expect(asked[0].destination).toBe(autostart)
+    expect(harness.queue.enqueueBatch).not.toHaveBeenCalled()
+    expect(harness.deps.localFs.mkdir).not.toHaveBeenCalled()
+    expect(fs.existsSync(path.join(home, '.config'))).toBe(false)
+
+    // The fallback agent folder is <home>/Downloads: inside it W allow still runs without asking.
+    const inside = await client.callTool({
+      name: 'download',
+      arguments: { remotePaths: ['/evil.desktop'], localDir: path.join(home, 'Downloads', 'x') }
+    })
+    expect(inside.isError).toBeFalsy()
+    expect(asked).toHaveLength(2)
+    expect(harness.queue.enqueueBatch.mock.calls[0][1][0].localPath).toBe(
+      path.join(home, 'Downloads', 'x', 'evil.desktop')
+    )
+    const status = await client.callTool({ name: 'get_status', arguments: {} })
+    expect(status.structuredContent).toMatchObject({
+      agentFolder: { path: path.join(home, 'Downloads') }
+    })
+  })
 })
 
 describe('confirmation destination (spec §9 R4)', () => {
@@ -711,6 +759,63 @@ describe('confirmation and activity details', () => {
     expect(clients[1]).toBe('agent-x')
     expect(clients[2]).toBeUndefined()
     expect('client' in deps.confirm.mock.calls[2][0]).toBe(false)
+  })
+
+  it('names the server as host:port in confirmations unless the port is 21', async () => {
+    // covers: Test-667
+    // Two saved servers on one host with different ports both read "127.0.0.1" (b12e936 E2E).
+    const world = defaultWorld()
+    const deps = makeDeps(fakeServices(world))
+    deps.currentPolicy = { W: 'ask', D: 'ask', X: 'ask', C: 'ask' }
+    deps.confirm.mockResolvedValue('denied')
+    const client = await connectClient(deps)
+    const call = (
+      name: string,
+      args: Record<string, unknown>
+    ): ReturnType<typeof client.callTool> => client.callTool({ name, arguments: args })
+
+    // Connected to ftp.example.com:2121
+    await call('create_directory', { path: '/new' })
+    await call('rename', { from: '/a.jpg', to: '/b.jpg' })
+    await call('delete', { paths: ['/a.jpg'] })
+    await call('download', { remotePaths: ['/a.jpg'], localDir: '/home/u' })
+    await call('upload', { localPaths: ['/home/u/x.txt'], remoteDir: '/' })
+    await call('disconnect', {})
+    // Saved servers: Photos on 2121, backup.example.org on 21
+    await call('connect', { server: 'Photos' })
+    await call('connect', { server: 2 })
+    await call('delete_server', { server: 'Photos' })
+    await call('delete_server', { server: 2 })
+    await call('open_server_editor', { host: 'new.example.com', port: 2222 })
+    await call('open_server_editor', { host: 'new.example.com' })
+    await call('open_server_editor', { host: '::1', port: 2121 })
+    world.session = {
+      status: 'connected',
+      serverId: 2,
+      host: 'backup.example.org',
+      port: 21,
+      user: 'bob'
+    }
+    await call('delete', { paths: ['/a.jpg'] })
+    await call('disconnect', {})
+
+    expect(deps.confirm.mock.calls.map(([request]) => [request.tool, request.host])).toEqual([
+      ['create_directory', 'ftp.example.com:2121'],
+      ['rename', 'ftp.example.com:2121'],
+      ['delete', 'ftp.example.com:2121'],
+      ['download', 'ftp.example.com:2121'],
+      ['upload', 'ftp.example.com:2121'],
+      ['disconnect', 'ftp.example.com:2121'],
+      ['connect', 'ftp.example.com:2121'],
+      ['connect', 'backup.example.org'],
+      ['delete_server', 'ftp.example.com:2121'],
+      ['delete_server', 'backup.example.org'],
+      ['open_server_editor', 'new.example.com:2222'],
+      ['open_server_editor', 'new.example.com'],
+      ['open_server_editor', '[::1]:2121'],
+      ['delete', 'backup.example.org'],
+      ['disconnect', 'backup.example.org']
+    ])
   })
 
   it('leaves totalItems out of activity for tools that count nothing', async () => {
