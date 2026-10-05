@@ -520,7 +520,8 @@ describe('TransferQueue', () => {
           '/remote/file.jpg',
           '/local/file.jpg',
           expect.any(Function),
-          pool.clients[0]
+          pool.clients[0],
+          undefined
         )
       })
       expect(pool.release).toHaveBeenCalledWith(pool.clients[0])
@@ -854,6 +855,59 @@ describe('TransferQueue', () => {
 
       expect(mockFileOps.download).toHaveBeenCalledTimes(4)
       expect(queue.getAll()[0].status).toBe('failed')
+    })
+
+    it('should hand an exclusive download the same file claim on every attempt and a GUI download none', async () => {
+      // covers: Test-630
+      const download = mockFileOps.download as ReturnType<typeof vi.fn>
+      const seen: Array<[string, { created: boolean } | undefined]> = []
+      let failed = false
+      download.mockImplementation(
+        async (
+          remote: string,
+          _local: string,
+          _onProgress: unknown,
+          _client: unknown,
+          claim?: { created: boolean }
+        ) => {
+          seen.push([remote, claim && { ...claim }])
+          if (remote === '/remote/a.jpg' && !failed) {
+            // 첫 시도가 파일을 만들고 받다 끊긴다
+            failed = true
+            claim!.created = true
+            throw Object.assign(new Error('reset'), { code: 'ECONNRESET' })
+          }
+        }
+      )
+
+      queue.enqueueBatch(
+        'download',
+        [
+          {
+            localPath: '/local/a.jpg',
+            remotePath: '/remote/a.jpg',
+            fileName: 'a.jpg',
+            totalBytes: 10
+          }
+        ],
+        false,
+        undefined,
+        { exclusive: true }
+      )
+      queue.enqueue('download', '/local/b.jpg', '/remote/b.jpg', 'b.jpg', 10)
+      await settle()
+      await vi.advanceTimersByTimeAsync(2000)
+
+      expect(queue.getAll().map((job) => job.status)).toEqual(['completed', 'completed'])
+      expect(queue.getAll()[0].retryCount).toBe(1)
+      // 재시도는 자기가 만든 파일을 안다(그래서 'wx'로 실패하지 않고 그 파일을 다시 연다)
+      expect(seen).toEqual([
+        ['/remote/a.jpg', { created: false }],
+        ['/remote/b.jpg', undefined],
+        ['/remote/a.jpg', { created: true }]
+      ])
+      const claims = download.mock.calls.filter((call) => call[0] === '/remote/a.jpg')
+      expect(claims[1][4]).toBe(claims[0][4])
     })
   })
 
@@ -2060,7 +2114,8 @@ describe('TransferQueue', () => {
         '/remote/big.bin',
         localPath,
         expect.any(Function),
-        client
+        client,
+        undefined
       )
     })
 
@@ -2334,6 +2389,74 @@ describe('TransferQueue', () => {
       expect(server.events.sort()).toEqual(['seg 0', 'seg 1334', `seg ${FINAL}`])
       expect(big().retryCount).toBeUndefined()
       expect(fs.readFileSync(localPath).equals(source)).toBe(true)
+    })
+
+    describe('exclusive (agent) downloads', () => {
+      function enqueueExclusive(target: string, remotePath: string, totalBytes: number): string {
+        return queue.enqueueBatch(
+          'download',
+          [
+            { localPath: target, remotePath, fileName: path.posix.basename(remotePath), totalBytes }
+          ],
+          false,
+          undefined,
+          { exclusive: true }
+        )[0]
+      }
+
+      it('should unlink the partial file an exclusive download created when it is cancelled', async () => {
+        // covers: Test-631
+        // 분할 경로: 구간을 받기 전에 'wx'로 만든 파일
+        holdAll()
+        const id = enqueueExclusive(localPath, '/remote/big.bin', SEG_MIN)
+        await vi.waitFor(() => expect(big().transferredBytes).toBe(3 * CHUNK))
+        queue.cancel(id)
+        await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+        expect(big().status).toBe('cancelled')
+
+        // 한 스트림: 파일을 만든 뒤 받는 중에 취소된다
+        const small = path.join(dir, 'small.bin')
+        const download = mockFileOps.download as ReturnType<typeof vi.fn>
+        download.mockImplementation(
+          (
+            _remote: string,
+            _local: string,
+            _onProgress: unknown,
+            client: SegmentClient,
+            claim: { created: boolean }
+          ) =>
+            new Promise((_, reject) => {
+              claim.created = true
+              const close = client.close.getMockImplementation() as () => void
+              client.close.mockImplementation(() => {
+                close()
+                reject(Object.assign(new Error('socket closed'), { code: 'ECONNRESET' }))
+              })
+            })
+        )
+        const smallId = enqueueExclusive(small, '/remote/small.bin', 10)
+        await vi.waitFor(() => expect(download).toHaveBeenCalledTimes(1))
+        queue.cancel(smallId)
+        await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(small))
+      })
+
+      it('should leave a file that appeared at the target alone when an exclusive download is cancelled before creating its file', async () => {
+        // covers: Test-632
+        server.sizeDelayMs = 1000
+        const id = enqueueExclusive(localPath, '/remote/big.bin', SEG_MIN)
+        await settle()
+        expect(big().status).toBe('active')
+
+        // SIZE를 기다리는 사이 같은 경로에 파일이 생기고, 작업이 취소된다
+        fs.writeFileSync(localPath, 'appeared meanwhile')
+        queue.cancel(id)
+        await vi.advanceTimersByTimeAsync(1000)
+        await vi.waitFor(() => expect(pool.discard).toHaveBeenCalled())
+
+        expect(big().status).toBe('cancelled')
+        expect(unlink).not.toHaveBeenCalled()
+        expect(fs.readFileSync(localPath, 'utf8')).toBe('appeared meanwhile')
+      })
     })
 
     describe('on a LAN (SIZE answers faster than LAN_RTT_MS)', () => {

@@ -8,6 +8,7 @@ import {
 import { DEFAULT_MAX_TRANSFERS, type FtpConnectPayload, type FtpServer } from '@shared/types/ftp'
 import { AgentError, type AgentServices, type SavedServerInfo, type ServerRef } from '../types'
 import { checkRemotePath } from './paths'
+import { sessionKey } from './remote'
 import type { AgentServiceDeps } from './index'
 
 /** 비밀번호를 빼고 필드를 하나씩 옮긴다. 펼침(...)으로 복사하면 비밀번호가 따라 나간다(M11). */
@@ -75,10 +76,18 @@ export function createSessionService(
 ): AgentServices['session'] {
   const { db, ftp, queue, operations, events } = deps
 
-  // T1: 서버를 바꾸면 진행 중인 전송·작업이 끊기거나 엉뚱한 서버로 간다
+  // T1·§9 R8: 서버를 바꾸거나 끊으면 진행 중인 전송·작업이 끊기거나 엉뚱한 서버로 간다
   const isBusy = (): boolean =>
     queue.getAll().some((j) => j.status === 'pending' || j.status === 'active') ||
     operations.getAll().some((o) => o.status === 'active')
+  const refuseIfBusy = (action: string): void => {
+    if (isBusy()) {
+      throw new AgentError(
+        'BUSY',
+        `Transfers or file operations are still running. Wait for them to finish or cancel them before ${action}.`
+      )
+    }
+  }
 
   return {
     info: () => {
@@ -92,15 +101,12 @@ export function createSessionService(
       return { status, serverId: saved?.id, host, port, user: ftp.getUser() }
     },
 
+    key: () => sessionKey(ftp),
+
     // GUI 연결 흐름(useServerStore.connect → useFtpStore.connect)을 main에서 다시 구현한다(S1).
     connect: async (ref, requestedPath) => {
       const wanted = requestedPath === undefined ? undefined : checkRemotePath(requestedPath)
-      if (isBusy()) {
-        throw new AgentError(
-          'BUSY',
-          'Transfers or file operations are still running. Wait for them to finish or cancel them before connecting.'
-        )
-      }
+      refuseIfBusy('connecting')
       const server = getServerById(db, servers.resolve(ref).id)!
       // 저장된 서버를 저장된 계정으로 연결하므로 id를 보낸다(GUI의 sameAccount와 같다)
       const payload: FtpConnectPayload = {
@@ -148,6 +154,7 @@ export function createSessionService(
     },
 
     disconnect: async () => {
+      refuseIfBusy('disconnecting')
       await ftp.disconnect()
       events.session({ status: 'disconnected' })
     }

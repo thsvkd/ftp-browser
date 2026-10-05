@@ -72,6 +72,7 @@ const createLocalDirectory = actionTool({
     'by themselves, so you rarely need this before a download.',
   inputSchema: z.object({ path: localPath.describe('Absolute path of the new folder') }),
   outputSchema: z.object({ created: z.string() }),
+  localWrites: ({ path }) => [path],
   plan({ path }) {
     return {
       data: path,
@@ -100,11 +101,16 @@ const renameLocal = actionTool({
     to: localPath.describe('Absolute new path in the same folder')
   }),
   outputSchema: z.object({ renamed: z.object({ from: z.string(), to: z.string() }) }),
+  localWrites: ({ from, to }) => [from, to],
   plan({ from, to }) {
     return {
       data: { from, to },
       preview: { from, to },
-      confirm: { items: [{ path: `${from} → ${to}`, kind: 'file' }], totalItems: 1 }
+      confirm: {
+        destination: to,
+        items: [{ path: `${from} → ${to}`, kind: 'file' }],
+        totalItems: 1
+      }
     }
   },
   async run(_input, { from, to }, { deps }) {

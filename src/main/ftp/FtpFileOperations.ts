@@ -96,6 +96,15 @@ const openFd = promisify(open)
 const closeFd = promisify(close)
 
 /**
+ * 배타적 다운로드(에이전트가 넣은 작업)가 로컬 경로를 차지했는지. 아직 차지하지 않았으면 'wx'로 열어 그 사이
+ * 생긴 파일을 덮지 않고 EEXIST로 실패한다. 자기가 만든 파일은 재시도·한 스트림 재실행이 'w'로 다시 연다.
+ * 작업의 모든 시도가 같은 객체를 공유한다.
+ */
+export interface LocalFileClaim {
+  created: boolean
+}
+
+/**
  * basic-ftp `downloadTo(localPath, remotePath)`(startAt 0)와 같다. 파일 전체를 끝 없는 최종 구간으로 보는
  * SegmentWriter에 받아, 평문 FTP면 데이터 소켓이 슬랩에 바로 읽어 넣고(downloadInto) TLS면 스트림 경로로
  * 받은 조각을 DOWNLOAD_WRITE_BUFFER까지 모아 한 번에 쓴다. 성공이든 실패든 진행 중인 쓰기가 끝난 뒤에
@@ -104,9 +113,11 @@ const closeFd = promisify(close)
 async function downloadToFile(
   client: Client,
   localPath: string,
-  remotePath: string
+  remotePath: string,
+  claim?: LocalFileClaim
 ): Promise<void> {
-  const fd = await openFd(localPath, 'w')
+  const fd = await openFd(localPath, claim && !claim.created ? 'wx' : 'w')
+  if (claim) claim.created = true
   const writer = new SegmentWriter(fd, { start: 0, end: Number.MAX_SAFE_INTEGER, final: true })
   // basic-ftp가 리스너를 뗀 뒤 남은 쓰기가 실패해도 프로세스가 죽지 않게 한다. 전송 실패는 downloadTo가 알린다.
   writer.on('error', () => {})
@@ -124,7 +135,15 @@ async function downloadToFile(
     (s) => s.size,
     () => -1
   )
-  if (size === 0) await unlink(localPath).catch(() => {})
+  if (size === 0) {
+    // 지운 경로는 더 이상 이 작업의 것이 아니다: 다음 시도는 다시 'wx'로 연다
+    await unlink(localPath).then(
+      () => {
+        if (claim) claim.created = false
+      },
+      () => {}
+    )
+  }
   throw error
 }
 
@@ -160,11 +179,13 @@ export class FtpFileOperations {
     this.manager.emit('mutation', { kind: 'upload', remotePath })
   }
 
+  /** `claim`이 있으면 배타적 다운로드다(LocalFileClaim). 없으면 지금처럼 'w'로 열어 있는 파일을 덮는다. */
   async download(
     remotePath: string,
     localPath: string,
     onProgress?: ProgressCallback,
-    client?: Client
+    client?: Client,
+    claim?: LocalFileClaim
   ): Promise<void> {
     const task = async (c: Client): Promise<void> => {
       if (onProgress) {
@@ -173,7 +194,7 @@ export class FtpFileOperations {
         })
       }
       try {
-        await downloadToFile(c, localPath, remotePath)
+        await downloadToFile(c, localPath, remotePath, claim)
       } finally {
         c.trackProgress()
       }

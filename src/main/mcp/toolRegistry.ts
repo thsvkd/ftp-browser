@@ -5,6 +5,7 @@ import type {
   Tool,
   ToolAnnotations
 } from '@modelcontextprotocol/server'
+import { isDeepStrictEqual } from 'util'
 import * as z from 'zod/v4'
 import type {
   AgentConfirmRequest,
@@ -13,8 +14,17 @@ import type {
   PolicyValue,
   RiskTier
 } from '@shared/types/agent'
+import { isInsideFolder } from '../agent/services/paths'
 import type { McpToolDeps } from './mcpTools'
-import { deniedResult, jsonResult, sanitize, toolErrorResult } from './toolResults'
+import {
+  busyResult,
+  deniedResult,
+  jsonResult,
+  planChangedResult,
+  sanitize,
+  sessionChangedResult,
+  toolErrorResult
+} from './toolResults'
 
 /** 확인 대화상자에 보내는 항목 수 상한(P5). 나머지는 totalItems로만 센다. */
 export const MAX_CONFIRM_ITEMS = 20
@@ -27,6 +37,11 @@ export interface ToolRuntime {
   deps: McpToolDeps
   ctx: ServerContext
   progress: ProgressReporter
+  /**
+   * 행동 잠금을 푼다(§9 R1). 실행이 시작한 작업을 오래 기다리기 전에 부른다(삭제의 45초 대기).
+   * 여러 번 불러도 되고, 잠금을 잡지 않은 호출(R, dryRun)에서는 아무 일도 하지 않는다.
+   */
+  unlock(): void
 }
 
 interface ToolBase<S extends Schema> {
@@ -52,8 +67,11 @@ export interface ToolPlan<P = unknown> {
   data: P
   /** dryRun이 돌려주는 내용. 목록은 잘라서 담는다 */
   preview: Record<string, unknown>
-  /** 확인 대화상자 내용. items는 등록부가 MAX_CONFIRM_ITEMS로 자른다 */
-  confirm: Pick<AgentConfirmRequest, 'items' | 'totalItems' | 'totalBytes' | 'host'>
+  /**
+   * 확인 대화상자 내용. items는 등록부가 MAX_CONFIRM_ITEMS로 자른다. 승인 뒤 다시 세운 계획의 이것이
+   * 처음과 다르면 실행하지 않는다(§9 R1 PLAN_CHANGED)
+   */
+  confirm: Pick<AgentConfirmRequest, 'items' | 'totalItems' | 'totalBytes' | 'host' | 'destination'>
 }
 
 export type ActionResult =
@@ -64,6 +82,13 @@ export interface ActionTool<S extends Schema = Schema, P = unknown> extends Tool
   tier: PolicyTier
   /** C 등급에서 destructiveHint를 켠다(delete_server) */
   destructive?: boolean
+  /**
+   * §9 R2: 이 호출이 쓰는 로컬 경로. 하나라도 에이전트 폴더(deps.localRoot) 밖이면 정책이 allow여도
+   * 사용자에게 묻는다. 로컬에 쓰는 W 도구만 정한다.
+   */
+  localWrites?(input: z.output<S>): string[]
+  /** 항목을 세지 않는 도구(연결·해제·편집기). 활동 알림에 totalItems를 싣지 않는다 */
+  uncounted?: boolean
   /** 부작용 없이 대상을 확정한다. dryRun과 확인 대화상자가 이것을 보여 준다(P7) */
   plan(input: z.output<S>, rt: ToolRuntime): ToolPlan<P> | Promise<ToolPlan<P>>
   run(input: z.output<S>, plan: P, rt: ToolRuntime): Promise<ActionResult>
@@ -109,28 +134,52 @@ const POLICY_MEANING: Record<PolicyValue, string> = {
   deny: 'turned off by the user in FTP Browser; calls return DENIED_BY_POLICY'
 }
 
+/** get_status가 에이전트 폴더와 함께 알려 주는 규칙(§9 R2) */
+export const AGENT_FOLDER_RULE =
+  'download, create_local_directory and rename_local follow the W policy inside this folder; ' +
+  'anywhere else on this computer FTP Browser asks the user first (W policy deny still refuses).'
+
+function localWriteMeaning(localRoot: string): string {
+  return (
+    `runs without asking the user inside the agent folder ${localRoot}; anywhere else ` +
+    `${POLICY_MEANING.ask}`
+  )
+}
+
 /** 설명 첫 줄. 정책은 이 요청 시점의 설정값이다(요청마다 McpServer를 새로 만든다). */
-export function riskLine(def: ToolDefinition, policy: AgentPolicy): string {
+export function riskLine(def: ToolDefinition, policy: AgentPolicy, localRoot: string): string {
   const value = policyOf(def.tier, policy)
-  const meaning = def.tier === 'R' ? 'always allowed, runs without asking' : POLICY_MEANING[value]
+  const meaning =
+    def.tier === 'R'
+      ? 'always allowed, runs without asking'
+      : value === 'allow' && def.localWrites
+        ? localWriteMeaning(localRoot)
+        : POLICY_MEANING[value]
   return `[RISK ${def.tier}: ${def.risk}. Policy: ${value} — ${meaning}.]`
 }
 
 /** 서버 instructions. 일부 클라이언트만 읽으므로 같은 규칙을 도구 설명에도 반복한다. */
-export function buildInstructions(policy: AgentPolicy): string {
+export function buildInstructions(policy: AgentPolicy, localRoot: string): string {
   return [
     'FTP Browser is the desktop FTP client the user has open. These tools act on that app: ' +
       'its single FTP session, its transfer queue and the local disk. The user sees every ' +
       'change in the app window.',
     'Every tool description starts with [RISK <tier>: … Policy: …]. Tiers:',
     '- R read-only (status, listings, previews, jobs): always allowed.',
-    `- W changes state without losing data (connect, disconnect, folders, rename, download, job control): policy ${policy.W}.`,
+    `- W changes state without losing data (connect, disconnect, folders, rename, download, job control): policy ${policy.W}. ` +
+      `download, create_local_directory and rename_local follow it only inside the agent folder ${localRoot} ` +
+      "(the user's Downloads folder); anywhere else on this computer FTP Browser asks the user first.",
     `- D permanently deletes (delete, delete_local): policy ${policy.D}.`,
     `- X sends local files to the FTP server (upload): policy ${policy.X}.`,
     `- C saved servers and credentials (open_server_editor, delete_server): policy ${policy.C}.`,
     'Policy allow runs at once; ask makes FTP Browser show the user a confirmation dialog ' +
       '(DENIED_BY_USER, CONFIRMATION_TIMEOUT: do not retry unless the user asks); deny hides ' +
       'the tool (DENIED_BY_POLICY).',
+    'Non-read tools run one at a time: while one is being planned, is waiting for the user to ' +
+      'answer its confirmation, or is starting, other non-read calls return BUSY at once ' +
+      '(read-only tools keep working); retry after it returns. After the user approves, FTP ' +
+      'Browser plans the call again: if the targets changed meanwhile you get PLAN_CHANGED, if ' +
+      'the FTP connection changed SESSION_CHANGED, and nothing runs.',
     'Rules: use D, X and C tools only when the user explicitly asked for that action. Every ' +
       'non-read tool accepts dryRun: true, which returns the exact plan and changes nothing; ' +
       'use it first for anything large or destructive. Downloads, uploads and big deletes run ' +
@@ -203,10 +252,56 @@ function toJsonSchema(schema: Schema, io: 'input' | 'output'): Tool['inputSchema
   } as Tool['inputSchema']
 }
 
-/** clientInfo.name은 2026-07-28 요청(봉투)에서만 알 수 있다. 신뢰할 수 없는 텍스트다. */
-function clientNameOf(server: McpServer): string | undefined {
+/**
+ * clientInfo.name은 2026-07-28 요청(봉투)에서만 알 수 있다. 핸드셰이크 클라이언트는 요청마다 서버를
+ * 새로 만들어 initialize의 clientInfo가 남지 않으므로 HTTP User-Agent로 대신한다. 둘 다 신뢰할 수 없는 텍스트다.
+ */
+function clientNameOf(server: McpServer, ctx: ServerContext): string | undefined {
   const name = server.server.getClientVersion()?.name
-  return name ? sanitize(name).slice(0, 100) : undefined
+  if (name) return sanitize(name).slice(0, 100)
+  const agent = sanitize(ctx.http?.req?.headers.get('user-agent') ?? '').trim()
+  return agent ? agent.slice(0, 60) : undefined
+}
+
+export interface ActionHolder {
+  tool: string
+  /** 사용자 확인을 기다리는 중이다(BUSY 문구가 달라진다) */
+  waitingForUser: boolean
+}
+
+/**
+ * §9 R1 행동 잠금. R이 아닌 호출(dryRun 제외)은 계획부터 실행 시작까지 이것을 잡는다. 잡혀 있으면
+ * 기다리지 않고 BUSY다(클라이언트 60초 타임아웃). 확인 대화상자가 떠 있는 동안 서버를 바꾸거나
+ * 이름을 맞바꿔 승인한 것과 다른 대상이 실행되는 일을 막는다. 요청마다 새 McpServer가 공유한다.
+ */
+export class ActionLock {
+  private current: ActionHolder | null = null
+
+  /** 지금 잠금을 잡은 호출. 없으면 null */
+  get holder(): ActionHolder | null {
+    return this.current
+  }
+
+  /** 비어 있으면 잡고 그 표식을 준다. 잡혀 있으면 null이다. */
+  tryAcquire(tool: string): ActionHolder | null {
+    if (this.current) return null
+    this.current = { tool, waitingForUser: false }
+    return this.current
+  }
+
+  /** 여러 번 불러도 된다. 다른 호출이 잡은 잠금은 풀지 않는다. */
+  release(holder: ActionHolder): void {
+    if (this.current === holder) this.current = null
+  }
+}
+
+/** §9 R1: 사용자가 본 계획과 다시 세운 계획을 비교한다. 목록 순서(서버 LIST 순서)는 따지지 않는다. */
+function sameConfirm(a: ToolPlan['confirm'], b: ToolPlan['confirm']): boolean {
+  const key = (c: ToolPlan['confirm']): unknown => ({
+    ...c,
+    items: c.items.map((item) => JSON.stringify(item)).sort()
+  })
+  return isDeepStrictEqual(key(a), key(b))
 }
 
 /**
@@ -229,7 +324,7 @@ export function registerTools(
       def.tier === 'R' ? def.outputSchema : def.outputSchema.partial().extend(PLAN_FIELDS)
     const config = {
       title: def.title,
-      description: `${riskLine(def, policy)}\n${def.description}`,
+      description: `${riskLine(def, policy, deps.localRoot)}\n${def.description}`,
       annotations: annotationsFor(def),
       _meta: { 'ftp-browser/risk': def.tier, 'ftp-browser/policy': value }
     }
@@ -248,9 +343,10 @@ export function registerTools(
             progress: progressReporter(
               ctx,
               deps.timing?.progressIntervalMs ?? DEFAULT_PROGRESS_INTERVAL_MS
-            )
+            ),
+            unlock: () => undefined
           },
-          clientNameOf(server)
+          clientNameOf(server, ctx)
         )
     )
     if (value !== 'deny') {
@@ -265,7 +361,10 @@ export function registerTools(
   server.server.setRequestHandler('tools/list', () => ({ tools: listed }))
 }
 
-/** 정책(P2) → 계획 → dryRun(P7) → 확인(P3–P6) → 실행 → 활동 알림(P8) */
+/**
+ * 정책(P2) → dryRun(P7) → 행동 잠금(§9 R1) → 계획 → 확인(P3–P6, §9 R2) → 승인 뒤 재계획(§9 R1)
+ * → 세션 확인(§9 R1) → 실행 → 활동 알림(P8)
+ */
 async function handleCall(
   def: ToolDefinition,
   input: Record<string, unknown>,
@@ -289,16 +388,57 @@ async function handleCall(
     return deniedResult('policy', tool, tier)
   }
 
+  if (dryRun === true) {
+    // 아무것도 바꾸지 않으므로 R처럼 잠금을 잡지 않는다.
+    try {
+      return jsonResult({ dryRun: true, plan: (await def.plan(args, rt)).preview })
+    } catch (err) {
+      return toolErrorResult(err)
+    }
+  }
+
+  const holder = deps.actionLock.tryAcquire(tool)
+  if (!holder) return busyResult(deps.actionLock.holder!)
+  rt.unlock = () => deps.actionLock.release(holder)
+  try {
+    return await act(def, args, value, deps, rt, client, holder)
+  } finally {
+    rt.unlock()
+  }
+}
+
+/** 잠금 안에서 계획부터 실행까지. */
+async function act(
+  def: ActionTool,
+  args: Record<string, unknown>,
+  value: PolicyValue,
+  deps: McpToolDeps,
+  rt: ToolRuntime,
+  client: string | undefined,
+  holder: ActionHolder
+): Promise<CallToolResult> {
+  const { name: tool, tier } = def
+  const counted = (totalItems: number): { totalItems?: number } =>
+    def.uncounted || totalItems === 0 ? {} : { totalItems }
+  // FTP 서버에 닿는 도구는 계획한 세션에서만 실행한다. 사용자가 GUI에서 서버를 바꿀 수도 있다.
+  const pinned = def.openWorld ? deps.services.session.key() : undefined
+  const sessionChanged = (): boolean => def.openWorld && deps.services.session.key() !== pinned
+  // §9 R2: 에이전트 폴더 밖에 쓰는 W 호출은 정책이 allow여도 묻는다(deny는 위에서 이미 거절했다).
+  const outside = def.localWrites?.(args).some((p) => !isInsideFolder(deps.localRoot, p)) ?? false
+  const policy = value === 'allow' && outside ? 'ask' : value
+
   let plan: ToolPlan
   try {
     plan = await def.plan(args, rt)
   } catch (err) {
     return toolErrorResult(err)
   }
-  if (dryRun === true) return jsonResult({ dryRun: true, plan: plan.preview })
+  const failed = (result: CallToolResult): CallToolResult => {
+    deps.notify.activity({ tool, tier, outcome: 'failed', ...counted(plan.confirm.totalItems) })
+    return result
+  }
 
-  const { totalItems } = plan.confirm
-  if (value === 'ask') {
+  if (policy === 'ask') {
     const request = {
       tool,
       tier,
@@ -306,21 +446,35 @@ async function handleCall(
       ...plan.confirm,
       items: plan.confirm.items.slice(0, MAX_CONFIRM_ITEMS)
     }
+    holder.waitingForUser = true
     const outcome = await rt.progress.during(deps.confirm(request, rt.ctx.mcpReq.signal), () => ({
       message: `Waiting for the user to approve ${tool} in FTP Browser`
     }))
+    holder.waitingForUser = false
     if (outcome !== 'approved') {
-      deps.notify.activity({ tool, tier, outcome: 'denied', totalItems })
+      deps.notify.activity({ tool, tier, outcome: 'denied', ...counted(plan.confirm.totalItems) })
       return deniedResult(outcome, tool, tier)
     }
+    // §9 R1: 대화상자가 떠 있던 동안 바뀐 것이 있으면 사용자가 승인한 것과 다른 대상이 실행된다.
+    if (sessionChanged()) return failed(sessionChangedResult(tool))
+    let again: ToolPlan
+    try {
+      again = await def.plan(args, rt)
+    } catch (err) {
+      return failed(planChangedResult(tool, err instanceof Error ? err.message : String(err)))
+    }
+    if (!sameConfirm(plan.confirm, again.confirm)) return failed(planChangedResult(tool))
+    plan = again
   }
+  if (sessionChanged()) return failed(sessionChangedResult(tool))
 
+  const { totalItems } = plan.confirm
   try {
     const done = await def.run(args, plan.data, rt)
-    deps.notify.activity({ tool, tier, outcome: done.outcome, totalItems })
+    deps.notify.activity({ tool, tier, outcome: done.outcome, ...counted(totalItems) })
     return done.outcome === 'failed' ? done.error : jsonResult(done.result)
   } catch (err) {
-    deps.notify.activity({ tool, tier, outcome: 'failed', totalItems })
+    deps.notify.activity({ tool, tier, outcome: 'failed', ...counted(totalItems) })
     return toolErrorResult(err)
   }
 }

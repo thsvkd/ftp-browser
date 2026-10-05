@@ -222,7 +222,12 @@ const rename = actionTool({
     return {
       data: { from, to },
       preview: { from, to },
-      confirm: { host, items: [{ path: `${from} → ${to}`, kind: 'file' }], totalItems: 1 }
+      confirm: {
+        host,
+        destination: to,
+        items: [{ path: `${from} → ${to}`, kind: 'file' }],
+        totalItems: 1
+      }
     }
   },
   async run(_input, { from, to }, { deps }) {
@@ -253,6 +258,8 @@ export function deletePlanOf(plan: DeletePlan, host?: string): ToolPlan<DeletePl
 export async function finishDelete(id: string, rt: ToolRuntime): Promise<ActionResult> {
   const { services, timing } = rt.deps
   const waitMs = timing?.deleteWaitMs ?? DELETE_WAIT_MS
+  // §9 R1: 작업은 이미 시작했다. 기다리는 동안 다른 호출을 막지 않는다.
+  rt.unlock()
   const [job] = await rt.progress.during(services.jobs.wait([id], waitMs), () => ({
     message: `Deleting: ${jobsMessage(services.jobs.get([id]))}`
   }))

@@ -20,6 +20,7 @@ import { createThumbnailPreviewer } from './mcp/thumbnailPreviews'
 import { AgentPolicyStore } from './mcp/agentPolicy'
 import { ConfirmationBroker, createAgentNotifier } from './mcp/confirmationBroker'
 import { JobHandles } from './mcp/jobHandles'
+import { ActionLock } from './mcp/toolRegistry'
 import { attachRemoteChangeForwarding, createAgentEventSink } from './agent/events'
 import { createAgentServices } from './agent/services'
 import { registerDevtools } from './debug/devtools'
@@ -65,6 +66,12 @@ function createWindow(): BrowserWindow {
 
   mainWindow.on('ready-to-show', () => {
     if (!smokeTestEnabled) mainWindow?.show()
+  })
+
+  // macOS는 창을 닫아도 앱이 남는다. 에이전트 알림·확인 대화상자가 파괴된 창을 쓰지 않게 참조를 비운다(R9).
+  const created = mainWindow
+  created.on('closed', () => {
+    if (mainWindow === created) mainWindow = null
   })
 
   if (smokeTestEnabled) {
@@ -149,6 +156,9 @@ app.whenReady().then(() => {
   const confirmations = new ConfirmationBroker(getWindow)
   const agentNotifier = createAgentNotifier(getWindow)
   const jobHandles = new JobHandles()
+  const actionLock = new ActionLock()
+  // 에이전트 폴더(§9 R2): 로컬에 쓰는 W 도구는 이 안에서만 W 정책을 따르고 밖이면 사용자에게 묻는다.
+  const agentLocalRoot = app.getPath('downloads')
   const previews = createThumbnailPreviewer(manager, generator, cacheManager)
   const mcp = new McpService(
     db,
@@ -161,7 +171,9 @@ app.whenReady().then(() => {
         confirm: (request, signal) => confirmations.request(request, signal),
         notify: agentNotifier,
         previews,
-        jobHandles
+        jobHandles,
+        actionLock,
+        localRoot: agentLocalRoot
       }),
     undefined,
     { userDataDir: app.getPath('userData'), version: app.getVersion() }

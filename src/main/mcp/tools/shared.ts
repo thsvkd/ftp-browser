@@ -2,6 +2,7 @@ import { isAbsolute } from 'path'
 import * as z from 'zod/v4'
 import type { CallToolResult } from '@modelcontextprotocol/server'
 import { AgentError, type JobSnapshot, type SavedServerInfo } from '../../agent/types'
+import { CANONICAL_REMOTE_PATH, hasParentSegment } from '../../agent/services/paths'
 import type { ToolRuntime } from '../toolRegistry'
 import { errorResult } from '../toolResults'
 
@@ -13,19 +14,27 @@ export const READ_ONLY_RISK = 'read-only, changes nothing'
 
 // startsWith는 JSON Schema에 비표준 format을 남기므로 pattern만 나가는 regex로 쓴다.
 // CR·LF·NUL이 든 명령은 basic-ftp가 task 안에서 throw하며 공유 메인 클라이언트를 막으므로 함께 거절한다.
+// §9 R5: 정규형만 받는다. 서비스도 같은 규칙으로 다시 확인한다(INVALID_PATH).
 export const remotePath = z
   .string()
   .regex(
     /^\/[^\r\n\0]*$/,
     "Use an absolute path starting with '/'. Paths cannot contain CR, LF or NUL characters."
   )
+  .regex(
+    CANONICAL_REMOTE_PATH,
+    "Use a normalized absolute path: no empty, '.' or '..' segments and no trailing '/' " +
+      "except for the root '/', e.g. '/photos/2024'."
+  )
 
-/** T3: 로컬 경로는 이 OS의 절대경로만, 제어문자 없이. 서비스도 다시 확인한다(INVALID_PATH). */
-export const localPath = z.string().refine((path) => isAbsolute(path) && !/\p{Cc}/u.test(path), {
-  message:
-    'Use an absolute local path, e.g. /home/me/Downloads or C:\\Users\\me\\Downloads. ' +
-    'Paths cannot contain control characters.'
-})
+/** T3·§9 R5: 로컬 경로는 이 OS의 절대경로만, 제어문자와 `..` 없이. 서비스도 다시 확인한다(INVALID_PATH). */
+export const localPath = z
+  .string()
+  .refine((path) => isAbsolute(path) && !/\p{Cc}/u.test(path) && !hasParentSegment(path), {
+    message:
+      "Use an absolute local path without '..' segments, e.g. /home/me/Downloads or " +
+      'C:\\Users\\me\\Downloads. Paths cannot contain control characters.'
+  })
 
 export const serverRef = z
   .union([z.number().int().positive(), z.string().min(1).max(255)])

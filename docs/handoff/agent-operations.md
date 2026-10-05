@@ -326,6 +326,44 @@ preload 허용 목록·타입(`src/preload/index.ts`, `index.d.ts`, `index.test.
 
 Main(R1·R2·R4 main·R5·R8) **600–624**, Transfer(R3·R9) **625–634**, CLI(R6·R7·R10 CLI) **635–644**, Renderer(R4 표시·R10 표시) **645–649**. 각 갈래는 이 절 아래에 케이스를 한 줄씩 적는다. 리뷰가 재현한 시나리오(승인 중 서버 전환, 승인 중 이름 맞바꾸기, 자동 실행 폴더로의 다운로드, `//uploads` 재귀, `null` 줄)는 반드시 회귀 테스트로 남긴다.
 
+**Main (R1·R2·R4 main·R5·R8, E2E 후속)**
+
+- **Test-600** — (회귀) `delete`가 확인을 기다리는 동안 에이전트의 `connect`(W allow)가 즉시 `BUSY`("FTP Browser is waiting for the user to answer a confirmation; retry after it is answered.")이고 연결하지 않는다. 승인하면 계획한 서버에서만 지운다.
+- **Test-601** — (회귀) `delete`가 확인을 기다리는 동안 원격 `rename` 두 번이 `BUSY`이고 RNFR을 보내지 않으며, 승인한 빈 폴더만 지워지고 맞바꿔 넣으려던 폴더의 파일은 남는다.
+- **Test-602** — (회귀) `delete_local`이 확인을 기다리는 동안 `rename_local` 두 번이 `BUSY`이고, 승인한 빈 폴더만 지워지며 다른 폴더는 내용 그대로 남는다(실제 디스크).
+- **Test-603** — 확인이 떠 있어도 R 도구와 `dryRun`은 돈다. 확인 대기 중이 아니라 계획 중인 호출이 잠금을 잡고 있으면 `BUSY`가 "still starting another action (<도구>)"로 알린다. 거부·계획 실패·실행 뒤에는 잠금이 풀린다.
+- **Test-604** — `delete`는 작업을 시작한 뒤 최대 45초 기다리기 전에 잠금을 푼다(그동안 다른 W 호출이 돈다).
+- **Test-605** — 확인 중 사용자가 GUI에서 다른 서버에 연결하거나 같은 서버에 다시 연결하면, 승인해도 `SESSION_CHANGED`이고 아무것도 실행하지 않으며 활동은 `failed`다. 정책 allow에서 계획과 실행 사이에 세션이 바뀌어도 같다.
+- **Test-606** — (회귀) 원격 삭제 작업은 각 대상 앞에서 세션을 확인해, 첫 대상 뒤 다른 서버로 바뀌면 `SESSION_CHANGED`로 실패하고 다음 대상을 지우지 않는다.
+- **Test-607** — 확인 중 GUI·디스크에서 대상이 바뀌면(원격 이름 맞바꾸기로 개수가 바뀜, 대상이 사라짐, 로컬 맞바꾸기, 업로드 덮어쓰기 표시가 바뀜) 승인 뒤 `PLAN_CHANGED`(안내 포함)이고 실행하지 않는다. 바뀐 것이 없으면 다시 세운 계획으로 실행한다.
+- **Test-608** — 서버 instructions가 R이 아닌 호출은 하나씩 지나며 그동안 다른 호출은 즉시 `BUSY`이고, 승인 뒤 다시 계획해 `PLAN_CHANGED`·`SESSION_CHANGED`가 될 수 있다고 알린다. `disconnect` 설명이 `BUSY`를 밝힌다.
+- **Test-609** — `session.key()`는 한 세션 안에서 같고, 같은 서버로 다시 연결하면 바뀌며, 연결이 없으면 없다.
+- **Test-610** — (회귀) W allow여도 에이전트 폴더 밖(자동 실행 폴더 같은 곳)으로의 `download`는 사용자에게 묻는다(대상 폴더를 `destination`으로). 거부하면 큐에 넣지도 폴더를 만들지도 않고, 폴더 안이면 묻지 않으며, 승인하면 받는다.
+- **Test-611** — `create_local_directory`·`rename_local`도 폴더 밖(이름이 루트로 시작하는 형제 폴더 포함, 루트 자신의 이름변경 포함)이면 묻고 안이면 묻지 않는다. W deny는 안팎 모두 `DENIED_BY_POLICY`, W ask는 안에서도 묻는다.
+- **Test-612** — `isInsideFolder`가 정규화한 절대경로로 판정한다(`.`·`..`·중복·끝 구분자, 형제 접두사는 밖). Windows는 대소문자와 `/`·`\`를 가리지 않고 드라이브가 다르면 밖이며, POSIX는 대소문자를 가린다.
+- **Test-613** — W allow일 때 `download`·`create_local_directory`·`rename_local` 설명 첫 줄이 규칙과 에이전트 폴더 경로를 밝히고(형식은 `[RISK W: … Policy: allow — …]` 그대로, `_meta`·어노테이션은 W), W ask면 보통 문구다. `get_status`가 `agentFolder { path, rule }`을, instructions가 폴더 경로를 준다.
+- **Test-614** — 확인 요청의 `destination`이 업로드는 원격 폴더, 다운로드는 로컬 폴더, `rename`·`rename_local`은 새 경로다.
+- **Test-615** — (회귀) `//uploads`로의 업로드가 스택 넘침 없이 "Use a normalized absolute path"로 거절된다. 원격 경로를 받는 모든 도구 입력이 `//x`·`/a/`·`/./a`·`/a/..`·`/a//b`·`..`가 든 경로를 거절하고 서비스를 부르지 않으며, `/`·`/.hidden`·`/...`는 받는다.
+- **Test-616** — 서비스(목록·만들기·이름변경·삭제 계획·다운로드·업로드 계획·연결)가 정규형이 아닌 원격 경로를 FTP에 닿기 전에 `INVALID_PATH`("use a normalized absolute path")로 거절한다(`planUpload`의 `//uploads` 포함).
+- **Test-617** — 로컬 경로의 `..` 세그먼트(`/`·`\` 모두)를 도구 스키마와 서비스가 `INVALID_PATH`로 거절한다.
+- **Test-618** — (회귀) `disconnect`가 전송이나 파일 작업이 진행 중이면 `BUSY`(`wait_for_jobs`·`cancel_jobs` 안내)이고 끊지 않으며, 끝나면 끊는다.
+- **Test-619** — (E2E) 핸드셰이크 클라이언트(요청에 clientInfo가 없음)의 확인 요청 `client`는 HTTP User-Agent를 제어문자를 지우고 60자로 자른 값이다. clientInfo가 있으면 그것을 쓰고, 둘 다 없으면 `client`가 없다.
+- **Test-620** — (E2E) 항목을 세지 않는 도구(`connect`·`disconnect`·`open_server_editor`)와 수가 0인 호출의 활동에는 `totalItems`가 없고, 센 호출(`cancel_jobs` 2개)에는 있다.
+- **Test-621** — `FtpConnectionManager.getConnectGeneration()`이 같은 서버로의 연결을 포함해 connect·disconnect마다 바뀐다.
+
+**Transfer (R3·R9)**
+
+- **Test-625** — (회귀) 에이전트 다운로드(`exclusive`)가 큐에 들어간 뒤 그 로컬 경로에 파일이 생기면, 한 스트림 경로에서 그 작업만 "File already exists."로 실패하고(재시도·RETR 없음) 그 파일은 내용 그대로 남는다.
+- **Test-626** — (회귀) 같은 상황이 분할 경로(SIZE 뒤 파일을 늘리는 경로)에서도 같다: 그 작업만 실패하고 그 파일은 잘리거나 지워지지 않는다.
+- **Test-627** — 대상 경로가 비어 있으면 배타적 다운로드가 한 스트림·분할 경로 모두 완료되고 원본과 해시가 같다.
+- **Test-628** — 서버가 REST를 무시해 분할 다운로드가 한 스트림으로 다시 받을 때, 배타적 다운로드는 구간이 만든 자기 파일을 다시 열어 완료한다(EEXIST로 실패하지 않는다).
+- **Test-629** — `FtpFileOperations.download`에 소유 표시(claim)를 주면 아직 만들지 않은 경로는 `'wx'`로 열어 남의 파일에는 EEXIST로 실패하고(내용 그대로), 받다 끊긴 자기 파일은 다음 시도가 다시 열어 처음부터 받으며, 아무것도 받지 못해 자기 빈 파일을 지웠으면 다음 시도는 다시 `'wx'`로 연다.
+- **Test-630** — 배타적 다운로드의 재시도는 첫 시도와 같은 소유 표시를 받아(자기가 만든 파일을 안다) 완료하고, GUI 다운로드는 소유 표시 없이 돈다.
+- **Test-631** — 배타적 다운로드를 취소하면 자기가 만든 받다 만 파일은 지운다(분할·한 스트림 모두).
+- **Test-632** — (회귀) 배타적 다운로드가 자기 파일을 만들기 전(SIZE 대기 중)에 그 경로에 파일이 생기고 작업이 취소되면, 그 파일을 자르거나 지우지 않는다.
+- **Test-633** — GUI 다운로드는 그대로다: 대상에 있던 파일을 한 스트림·분할 경로 모두 덮어써 완료한다.
+- **Test-634** — 창이 파괴된 뒤 `ftp:connectionStatus`·`transfer:updated`·`operation:updated`·`operation:progress` 브리지가 `send`하지 않고 던지지도 않는다(썸네일 send도 같은 가드, `mainWindow`는 창의 `closed`에서 비운다).
+
 **CLI (R6·R7·R10 CLI)**
 
 - **Test-635** — (회귀) `ftpb mcp-stdio`가 `null` 줄에서 죽지 않는다. `null`·숫자·문자열·불리언·`[]`·비객체가 든 배열은 앱으로 보내지 않고 stderr에 기록한 뒤 버리며, 처리되지 않은 거부가 없고 다음 요청에는 정상으로 답한다.

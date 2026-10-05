@@ -4,7 +4,12 @@ import type { OperationJob } from '@shared/types/operation'
 import type { AgentServices } from '../agent/types'
 import type { AgentNotifier, ConfirmInput, ConfirmOutcome } from './confirmationBroker'
 import type { JobHandles } from './jobHandles'
-import { buildInstructions, registerTools, type ToolDefinition } from './toolRegistry'
+import {
+  buildInstructions,
+  registerTools,
+  type ActionLock,
+  type ToolDefinition
+} from './toolRegistry'
 import { LOCAL_TOOLS } from './tools/localTools'
 import { REMOTE_TOOLS } from './tools/remoteTools'
 import { SESSION_TOOLS } from './tools/sessionTools'
@@ -34,6 +39,13 @@ export interface McpToolDeps {
   /** 앱 썸네일 파이프라인으로 미리보기를 만든다. 결과는 요청과 같은 순서다. */
   previews(requests: PreviewRequest[]): Promise<PreviewOutcome[]>
   jobHandles: JobHandles
+  /** §9 R1: R이 아닌 호출을 하나씩 지나게 한다. 앱에 하나만 둔다 */
+  actionLock: ActionLock
+  /**
+   * §9 R2 에이전트 폴더(앱은 app.getPath('downloads')). 로컬에 쓰는 W 도구는 이 안에서만 W 정책을
+   * 따르고 밖이면 사용자에게 묻는다
+   */
+  localRoot: string
   /** 테스트가 줄이는 대기 시간 */
   timing?: { deleteWaitMs?: number; progressIntervalMs?: number }
 }
@@ -51,7 +63,7 @@ export function createMcpToolServer(deps: McpToolDeps): McpServer {
   const policy = deps.policy.get()
   const server = new McpServer(
     { name: 'ftp-browser', version: deps.version },
-    { instructions: buildInstructions(policy) }
+    { instructions: buildInstructions(policy, deps.localRoot) }
   )
   registerTools(server, TOOL_DEFINITIONS, policy, deps)
   return server

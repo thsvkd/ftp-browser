@@ -52,7 +52,7 @@ describe('remote delete', () => {
       .addFile('/x.txt')
       .addFile('/keep.txt')
 
-    const plan = await services.remote.planDelete(['/a/', '/x.txt', '/a/b'])
+    const plan = await services.remote.planDelete(['/a', '/x.txt', '/a/b'])
 
     expect(plan).toEqual({
       targets: [
@@ -60,7 +60,8 @@ describe('remote delete', () => {
         { path: '/x.txt', kind: 'file' }
       ],
       totalFiles: 4,
-      totalDirectories: 3
+      totalDirectories: 3,
+      session: services.session.key()
     })
 
     const id = services.remote.startDelete(plan)
@@ -106,5 +107,59 @@ describe('remote path validation', () => {
     // 루트는 지우지 않는다
     await expect(services.remote.planDelete(['/'])).rejects.toMatchObject({ code: 'INVALID_PATH' })
     expect(h.remote.list).not.toHaveBeenCalled()
+  })
+})
+
+describe('remote delete session check', () => {
+  it('stops before the next target once the FTP session changed', async () => {
+    // covers: Test-606
+    h.remote.addFile('/a.txt').addFile('/b.txt')
+    const plan = await services.remote.planDelete(['/a.txt', '/b.txt'])
+    // 첫 대상을 지우는 사이 사용자가 GUI에서 다른 서버로 연결한다
+    h.remote.deleteFile.mockImplementationOnce(async (p: string) => {
+      h.remote.nodes.delete(p)
+      await h.remote.connect({
+        host: 'other.example',
+        port: 21,
+        user: 'me',
+        password: 'pw',
+        secure: false
+      })
+    })
+
+    const id = services.remote.startDelete(plan)
+
+    expect(await settled(id)).toBe('failed')
+    expect(services.jobs.get([id])[0].error).toMatch(/^SESSION_CHANGED: /)
+    expect(h.remote.deleteFile).toHaveBeenCalledTimes(1)
+    expect(h.remote.nodes.has('/b.txt')).toBe(true)
+  })
+})
+
+describe('normalized remote paths', () => {
+  it("rejects empty, '.' and '..' segments and trailing slashes before touching the server", async () => {
+    // covers: Test-616
+    h.remote.addDir('/uploads').addDir('/tmp').addDir('/tmp/old').addDir('/www')
+    const bad = ['//uploads', '/uploads/', '/./a', '/a/.', '/tmp/old/../../www', '/a//b']
+    for (const p of bad) {
+      for (const attempt of [
+        services.remote.list(p),
+        services.remote.mkdir(p),
+        services.remote.rename(p, '/b'),
+        services.remote.rename('/a', p),
+        services.remote.planDelete([p]),
+        services.transfers.planDownload([p], '/tmp', 'skip'),
+        // 예전에는 '//uploads'가 계획 안에서 끝없이 돌다 스택이 넘쳤다
+        services.transfers.planUpload(['/tmp'], p, 'skip'),
+        services.session.connect(1, p)
+      ]) {
+        await expect(attempt, p).rejects.toMatchObject({
+          code: 'INVALID_PATH',
+          message: expect.stringContaining('use a normalized absolute path')
+        })
+      }
+    }
+    expect(h.remote.list).not.toHaveBeenCalled()
+    await expect(services.remote.list('/uploads')).resolves.toMatchObject({ path: '/uploads' })
   })
 })

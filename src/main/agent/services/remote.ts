@@ -22,6 +22,19 @@ export function requireConnected(ftp: Ftp): void {
   }
 }
 
+/**
+ * §9 R1: 지금 FTP 세션을 가리키는 값. 같은 서버로 다시 연결해도 연결 번호가 바뀌므로 다른 값이다.
+ * 연결이 없으면 undefined.
+ */
+export function sessionKey(ftp: Ftp): string | undefined {
+  if (!ftp.isConnected()) return undefined
+  return JSON.stringify([ftp.getConnectGeneration(), ftp.getHost(), ftp.getPort(), ftp.getUser()])
+}
+
+export const SESSION_CHANGED_MESSAGE =
+  'SESSION_CHANGED: The FTP connection changed (another server, a reconnect or a disconnect), ' +
+  'so the delete stopped before the next item.'
+
 /** '.'·'..'를 뺀 폴더 내용 */
 export async function listChildren(ftp: Ftp, dir: string): Promise<FtpFileEntry[]> {
   return (await ftp.list(dir)).entries.filter((e) => e.name !== '.' && e.name !== '..')
@@ -67,7 +80,10 @@ export function createRemoteService(
 ): AgentServices['remote'] {
   const { ftp, fileOps, operations } = deps
 
-  /** ftp:deleteBatch와 같은 순서로 지운다(대상 사이에서만 취소 확인). 진행률 단위는 지운 파일+폴더 수다. */
+  /**
+   * ftp:deleteBatch와 같은 순서로 지운다(대상 사이에서만 취소 확인). 진행률 단위는 지운 파일+폴더 수다.
+   * 각 대상 앞에서 세션이 계획 때와 같은지 본다(§9 R1). 재연결 뒤 새 서버에서 이어 지우지 않는다.
+   */
   const runDelete = async (id: string, plan: DeletePlan): Promise<void> => {
     const planned = plan.totalFiles + plan.totalDirectories
     // 계획 뒤에 트리가 커졌으면 total을 늘린다
@@ -78,6 +94,10 @@ export function createRemoteService(
       for (const target of plan.targets) {
         if (operations.isCancelled(id)) {
           operations.markCancelled(id)
+          return
+        }
+        if (sessionKey(ftp) !== plan.session) {
+          operations.fail(id, SESSION_CHANGED_MESSAGE)
           return
         }
         report(done, target.path)
@@ -167,7 +187,8 @@ export function createRemoteService(
           kind: entry.type === 'directory' ? ('directory' as const) : ('file' as const)
         })),
         totalFiles,
-        totalDirectories
+        totalDirectories,
+        session: sessionKey(ftp)
       }
     },
 

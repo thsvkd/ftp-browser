@@ -220,6 +220,11 @@ export class FtpConnectionManager extends EventEmitter {
     return this._port
   }
 
+  /** connect·disconnect마다 바뀌는 연결 번호. 에이전트가 계획한 세션과 실행 시점의 세션을 비교한다. */
+  getConnectGeneration(): number {
+    return this.connectGeneration
+  }
+
   /** 연결에 쓴 사용자 이름. 연결 전이면 빈 문자열. */
   getUser(): string {
     return this._config?.user ?? ''

@@ -60,6 +60,7 @@ const download = actionTool({
       .describe('When a local file already exists: skip it, or save under a new name')
   }),
   outputSchema: transferStartOutput,
+  localWrites: ({ localDir }) => [localDir],
   async plan({ remotePaths, localDir, conflict }, rt) {
     const host = requireConnection(rt)
     const plan = await rt.deps.services.transfers.planDownload(remotePaths, localDir, conflict)
@@ -78,7 +79,13 @@ const download = actionTool({
         skipped: firstOf(plan.skipped),
         skippedTotal: plan.skipped.length
       },
-      confirm: { host, items, totalItems: items.length, totalBytes: plan.totalBytes }
+      confirm: {
+        host,
+        destination: localDir,
+        items,
+        totalItems: items.length,
+        totalBytes: plan.totalBytes
+      }
     }
   },
   async run(_input, plan, rt) {
@@ -148,7 +155,13 @@ const upload = actionTool({
         skipped: firstOf(plan.skipped),
         skippedTotal: plan.skipped.length
       },
-      confirm: { host, items, totalItems: items.length, totalBytes: plan.totalBytes }
+      confirm: {
+        host,
+        destination: remoteDir,
+        items,
+        totalItems: items.length,
+        totalBytes: plan.totalBytes
+      }
     }
   },
   async run(_input, plan, rt) {

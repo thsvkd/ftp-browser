@@ -41,7 +41,7 @@ export function registerFtpHandlers(
   const fileOps = new FtpFileOperations(manager)
 
   manager.on('connectionStatus', (state: FtpConnectionState) => {
-    win.webContents.send('ftp:connectionStatus', state)
+    if (!win.isDestroyed()) win.webContents.send('ftp:connectionStatus', state)
   })
 
   ipcMain.handle(

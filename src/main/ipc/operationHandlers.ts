@@ -13,11 +13,11 @@ export function registerOperationHandlers(win: BrowserWindow): OperationManager 
   const manager = new OperationManager()
 
   manager.on('operation:updated', (jobs: OperationJob[]) => {
-    win.webContents.send('operation:updated', jobs)
+    if (!win.isDestroyed()) win.webContents.send('operation:updated', jobs)
   })
 
   manager.on('operation:progress', (progress: OperationProgress) => {
-    win.webContents.send('operation:progress', progress)
+    if (!win.isDestroyed()) win.webContents.send('operation:progress', progress)
   })
 
   ipcMain.handle('operation:cancel', (_event, id: string): IpcResult<void> => {

@@ -146,3 +146,23 @@ describe('session.connect', () => {
     await expect(services.session.connect(id)).resolves.toEqual({ path: '/' })
   })
 })
+
+describe('session.key', () => {
+  it('stays the same within a session and changes on every connect and disconnect', async () => {
+    // covers: Test-609
+    const id = addServer({})
+    expect(services.session.key()).toBeUndefined()
+
+    await services.session.connect(id)
+    const first = services.session.key()
+    expect(first).toEqual(expect.any(String))
+    expect(services.session.key()).toBe(first)
+    await services.session.connect(id)
+    const second = services.session.key()
+    await services.session.disconnect()
+
+    expect(second).toEqual(expect.any(String))
+    expect(second).not.toBe(first)
+    expect(services.session.key()).toBeUndefined()
+  })
+})

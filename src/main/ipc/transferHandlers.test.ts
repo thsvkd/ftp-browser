@@ -36,7 +36,7 @@ describe('registerTransferHandlers', () => {
       download: vi.fn().mockResolvedValue(undefined)
     }
     registerTransferHandlers(
-      { webContents: { send: vi.fn() } } as unknown as BrowserWindow,
+      { isDestroyed: () => false, webContents: { send: vi.fn() } } as unknown as BrowserWindow,
       fileOps as unknown as FtpFileOperations,
       manager as unknown as FtpConnectionManager
     )

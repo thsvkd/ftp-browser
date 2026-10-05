@@ -20,6 +20,10 @@ import {
 } from '../../agent/types'
 import { JobHandles } from '../jobHandles'
 import { createMcpToolServer, type McpToolDeps } from '../mcpTools'
+import { ActionLock } from '../toolRegistry'
+
+/** makeDeps의 에이전트 폴더(§9 R2). 가짜 세계의 로컬 경로가 모두 이 안에 있다. */
+export const FAKE_LOCAL_ROOT = '/home/u'
 
 /** A saved password the fakes leak on purpose (like a sloppy row spread) to prove no tool echoes it. */
 export const SECRET_PASSWORD = 'hunter2-SECRET-pw'
@@ -141,11 +145,19 @@ export function fakeServices(world: FakeWorld = defaultWorld()): AgentServices {
     }
   const get = (ids: string[]): JobSnapshot[] =>
     ids.map((id) => world.snapshots[id] ?? unknownJob(id))
+  // FtpConnectionManager의 연결 번호처럼 connect·disconnect마다 바뀐다
+  let generation = 0
   return {
     session: {
       info: vi.fn(() => world.session),
+      key: vi.fn(() =>
+        world.session.status === 'connected'
+          ? JSON.stringify([generation, world.session.host, world.session.port, world.session.user])
+          : undefined
+      ),
       connect: vi.fn(async (ref: ServerRef, path?: string) => {
         const server = resolve(ref)
+        generation++
         world.session = {
           status: 'connected',
           serverId: server.id,
@@ -156,6 +168,7 @@ export function fakeServices(world: FakeWorld = defaultWorld()): AgentServices {
         return { path: path ?? '/last' }
       }),
       disconnect: vi.fn(async () => {
+        generation++
         world.session = { status: 'disconnected' }
       })
     },
@@ -257,6 +270,8 @@ export function makeDeps(
       requests.map(() => ({ ok: true as const, data: 'AAAA', width: 40, height: 30 }))
     ),
     jobHandles: new JobHandles(),
+    actionLock: new ActionLock(),
+    localRoot: FAKE_LOCAL_ROOT,
     ...rest
   } as unknown as TestDeps
   return deps
@@ -264,10 +279,13 @@ export function makeDeps(
 
 export const ALLOW_ALL: AgentPolicy = { W: 'allow', D: 'allow', X: 'allow', C: 'allow' }
 
-/** 포트 없이 같은 프로세스에서 SDK 클라이언트로 도구를 부른다. `modern`은 2026-07-28 프로토콜로 협상한다. */
+/**
+ * 포트 없이 같은 프로세스에서 SDK 클라이언트로 도구를 부른다. `modern`은 2026-07-28 프로토콜로 협상한다.
+ * `userAgent`는 모든 HTTP 요청에 User-Agent 헤더로 붙는다.
+ */
 export async function connectClient(
   deps: McpToolDeps,
-  options: { name?: string; modern?: boolean } = {}
+  options: { name?: string; modern?: boolean; userAgent?: string } = {}
 ): Promise<Client> {
   const handler = createMcpHandler(() => createMcpToolServer(deps))
   const client = new Client(
@@ -276,7 +294,10 @@ export async function connectClient(
   )
   await client.connect(
     new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {
-      fetch: (url, init) => handler.fetch(new Request(url, init))
+      fetch: (url, init) => handler.fetch(new Request(url, init)),
+      ...(options.userAgent
+        ? { requestInit: { headers: { 'User-Agent': options.userAgent } } }
+        : {})
     })
   )
   return client

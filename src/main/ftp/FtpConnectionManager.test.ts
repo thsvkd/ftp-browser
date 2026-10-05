@@ -285,6 +285,30 @@ describe('FtpConnectionManager', () => {
     })
   })
 
+  describe('getConnectGeneration', () => {
+    it('changes on every connect and disconnect, also to the same server', async () => {
+      // covers: Test-621
+      vi.mocked(Client.prototype.access).mockResolvedValue({} as unknown as FTPResponse)
+      const config = {
+        host: 'ftp.example.com',
+        port: 21,
+        user: 'user',
+        password: 'pass',
+        secure: false
+      }
+      const seen = [manager.getConnectGeneration()]
+
+      await manager.connect(config)
+      seen.push(manager.getConnectGeneration())
+      await manager.connect(config)
+      seen.push(manager.getConnectGeneration())
+      await manager.disconnect()
+      seen.push(manager.getConnectGeneration())
+
+      expect(new Set(seen).size).toBe(4)
+    })
+  })
+
   describe('list', () => {
     beforeEach(async () => {
       // list는 runOnMainClient를 거치므로 connected 상태가 전제.

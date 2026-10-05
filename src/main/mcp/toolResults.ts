@@ -37,9 +37,46 @@ const AGENT_NEXT: Record<AgentErrorCode, string> = {
   TARGET_EXISTS:
     'Choose another name, or delete the existing item first (delete and delete_local are ' +
     'tier D and may need the user to confirm).',
-  INVALID_PATH: "Use an absolute path (remote paths start with '/') without control characters.",
+  INVALID_PATH:
+    "Use a normalized absolute path without control characters: remote paths start with '/' " +
+    "and have no empty, '.' or '..' segments and no trailing '/'; local paths have no '..' segments.",
   BUSY: 'Wait for the running jobs with wait_for_jobs, or stop them with cancel_jobs, then retry.',
-  TOO_MANY_ITEMS: 'Split the request into smaller parts, for example one subfolder per call.'
+  TOO_MANY_ITEMS: 'Split the request into smaller parts, for example one subfolder per call.',
+  SESSION_CHANGED:
+    'Call get_status to see the current connection. If the user still wants this, plan it again ' +
+    '(dryRun: true) on that connection and call again.'
+}
+
+/** §9 R1: 다른 non-R 호출이 계획·확인·실행 시작 중이다. 기다리지 않고 바로 돌려준다. */
+export function busyResult(holder: { tool: string; waitingForUser: boolean }): CallToolResult {
+  return codedError(
+    'BUSY',
+    holder.waitingForUser
+      ? 'FTP Browser is waiting for the user to answer a confirmation; retry after it is answered.'
+      : `FTP Browser is still starting another action (${holder.tool}); retry when that call has returned.`,
+    'Read-only tools such as get_status, list_directory and wait_for_jobs work meanwhile.'
+  )
+}
+
+/** §9 R1: 승인 뒤 다시 세운 계획이 사용자가 본 것과 다르다. 실행하지 않았다. */
+export function planChangedResult(tool: string, reason?: string): CallToolResult {
+  return codedError(
+    'PLAN_CHANGED',
+    `What ${tool} would act on changed while the user was answering the confirmation` +
+      `${reason ? ` (${reason})` : ''}, so nothing ran.`,
+    'Check the current state (list_directory, list_local_directory or dryRun: true), tell the ' +
+      'user what changed, and call again only if they still want it; they will be asked again.'
+  )
+}
+
+/** §9 R1: 계획한 FTP 세션이 실행 직전에 바뀌었다. 실행하지 않았다. */
+export function sessionChangedResult(tool: string): CallToolResult {
+  return codedError(
+    'SESSION_CHANGED',
+    `The FTP connection changed (another server, a reconnect or a disconnect) after ${tool} ` +
+      'was planned, so nothing ran.',
+    AGENT_NEXT.SESSION_CHANGED
+  )
 }
 
 /** FTP·파일 시스템 오류는 classifyError 코드로, AgentError는 그 코드로 바꾼다. 예외를 프로토콜 오류로 던지지 않는다. */

@@ -140,7 +140,9 @@ describe('transfers.planDownload', () => {
           totalBytes: 1
         }
       ],
-      true
+      true,
+      undefined,
+      { exclusive: true }
     )
     expect(await fs.readFile(at('a.txt'), 'utf8')).toBe('appeared meanwhile')
     expect((await fs.stat(at('new'))).isDirectory()).toBe(true)

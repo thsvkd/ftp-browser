@@ -607,7 +607,8 @@ describe('tool behavior', () => {
         user: 'alice'
       },
       jobs: { pending: 1, active: 1, completed: 0, failed: 1, cancelled: 0 },
-      policy: { R: 'allow', W: 'allow', D: 'ask', X: 'deny', C: 'ask' }
+      policy: { R: 'allow', W: 'allow', D: 'ask', X: 'deny', C: 'ask' },
+      agentFolder: { path: '/home/u', rule: expect.stringContaining('asks the user first') }
     })
   })
 

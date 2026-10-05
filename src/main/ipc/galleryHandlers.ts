@@ -132,12 +132,14 @@ export function registerGalleryHandlers(
           fromCache: result.fromCache
         }
         // Send asynchronously so the renderer flow mirrors the FTP thumbnail pattern
-        win.webContents.send('localThumbnail:ready', evt)
+        if (!win.isDestroyed()) win.webContents.send('localThumbnail:ready', evt)
         return { success: true, data: result.cacheKey }
       } catch (err) {
         const cacheKey = localThumbnails.buildCacheKey(req.localPath, req.fileSize, req.modifiedAt)
         const message = err instanceof Error ? err.message : String(err)
-        win.webContents.send('localThumbnail:error', { cacheKey, error: message })
+        if (!win.isDestroyed()) {
+          win.webContents.send('localThumbnail:error', { cacheKey, error: message })
+        }
         return { success: false, error: message }
       }
     }

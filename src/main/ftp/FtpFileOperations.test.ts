@@ -204,6 +204,45 @@ describe('FtpFileOperations', () => {
       await expect(ops.download('/remote/file.jpg', localPath)).rejects.toThrow('socket reset')
     })
 
+    it('should write only a file it created itself when the download carries a claim', async () => {
+      // covers: Test-629
+      const localPath = path.join(tmp, 'file.jpg')
+      const claim = { created: false }
+      const download = (): Promise<void> =>
+        ops.download('/remote/file.jpg', localPath, undefined, undefined, claim)
+
+      // 다른 것이 놓은 파일은 열지 않는다: EEXIST로 실패하고 그대로 둔다
+      fs.writeFileSync(localPath, 'not ours')
+      await expect(download()).rejects.toMatchObject({ code: 'EEXIST' })
+      expect(fs.readFileSync(localPath, 'utf8')).toBe('not ours')
+      expect(claim.created).toBe(false)
+      expect(mockClient.downloadTo).not.toHaveBeenCalled()
+
+      // 아무것도 받기 전에 실패하면 자기가 만든 빈 파일을 지우고 경로를 놓는다. 그 뒤에 생긴 파일은 다시 거절한다.
+      fs.rmSync(localPath)
+      mockClient.downloadTo.mockRejectedValueOnce(new Error('550 No such file'))
+      await expect(download()).rejects.toThrow('550')
+      expect(fs.existsSync(localPath)).toBe(false)
+      expect(claim.created).toBe(false)
+      fs.writeFileSync(localPath, 'appeared before the retry')
+      await expect(download()).rejects.toMatchObject({ code: 'EEXIST' })
+      expect(fs.readFileSync(localPath, 'utf8')).toBe('appeared before the retry')
+
+      // 받다 끊긴 파일은 이 작업의 것이다: 다음 시도가 그 파일을 다시 열어 처음부터 받는다
+      fs.rmSync(localPath)
+      mockClient.downloadTo.mockImplementationOnce(async (target: Writable) => {
+        await new Promise<void>((resolve) => target.write(Buffer.alloc(100, 1), () => resolve()))
+        throw new Error('reset')
+      })
+      await expect(download()).rejects.toThrow('reset')
+      expect(fs.statSync(localPath).size).toBe(100)
+      expect(claim.created).toBe(true)
+      const data = Buffer.alloc(5000, 9)
+      serve(mockClient, data)
+      await download()
+      expect(fs.readFileSync(localPath).equals(data)).toBe(true)
+    })
+
     it('should clean up progress tracking on error', async () => {
       mockClient.downloadTo.mockRejectedValueOnce(new Error('Download failed'))
 

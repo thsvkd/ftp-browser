@@ -2,7 +2,7 @@ import * as z from 'zod/v4'
 import type { ServerEditorRequest } from '@shared/types/agent'
 import type { TransferStatus } from '@shared/types/transfer'
 import type { SavedServerInfo } from '../../agent/types'
-import { actionTool, readTool, type ToolDefinition } from '../toolRegistry'
+import { AGENT_FOLDER_RULE, actionTool, readTool, type ToolDefinition } from '../toolRegistry'
 import { codedError, jsonResult } from '../toolResults'
 import { READ_ONLY_RISK, remotePath, serverRef, serverSchema, serverSummary } from './shared'
 
@@ -23,9 +23,11 @@ const getStatus = readTool({
   description:
     'Show what FTP Browser is doing: whether it is connected and to which saved server, host, ' +
     'port and user; how many transfers and file operations are pending, active, completed, ' +
-    'failed or cancelled; and the current policy for each risk tier (allow, ask or deny). Call ' +
-    'it first to learn whether you need to connect, and which tools will ask the user to ' +
-    'confirm or are turned off. It never returns passwords.',
+    'failed or cancelled; the current policy for each risk tier (allow, ask or deny); and the ' +
+    'agent folder: download, create_local_directory and rename_local follow the W policy only ' +
+    'inside it and ask the user anywhere else. Call it first to learn whether you need to ' +
+    'connect, and which tools will ask the user to confirm or are turned off. It never returns ' +
+    'passwords.',
   inputSchema: z.object({}),
   outputSchema: z.object({
     connection: z.object({
@@ -46,7 +48,10 @@ const getStatus = readTool({
       .describe('Transfers and file operations in the app, by status'),
     policy: z
       .object({ R: policyValue, W: policyValue, D: policyValue, X: policyValue, C: policyValue })
-      .describe('What happens when you call a tool of each risk tier')
+      .describe('What happens when you call a tool of each risk tier'),
+    agentFolder: z
+      .object({ path: z.string(), rule: z.string() })
+      .describe("The user's Downloads folder; local writes outside it ask the user first")
   }),
   run(_input, { deps }) {
     const session = deps.services.session.info()
@@ -70,7 +75,12 @@ const getStatus = readTool({
     }
     for (const { status } of deps.services.transfers.list()) jobs[status]++
     for (const { status } of deps.operations.getAll()) jobs[status]++
-    return jsonResult({ connection, jobs, policy: { R: 'allow', ...deps.policy.get() } })
+    return jsonResult({
+      connection,
+      jobs,
+      policy: { R: 'allow', ...deps.policy.get() },
+      agentFolder: { path: deps.localRoot, rule: AGENT_FOLDER_RULE }
+    })
   }
 })
 
@@ -97,6 +107,7 @@ const connect = actionTool({
   title: 'Connect to a saved server',
   risk: 'switches the app to another FTP server; no files change',
   openWorld: true,
+  uncounted: true,
   description:
     'Connect FTP Browser to one of the saved servers (id, name or host from list_servers) and ' +
     'open a folder, as if the user had picked it in the app; the app window follows. Without ' +
@@ -132,10 +143,13 @@ const disconnect = actionTool({
   title: 'Disconnect',
   risk: 'closes the FTP connection; no files change',
   openWorld: true,
+  uncounted: true,
   description:
     'Close the FTP connection FTP Browser has open; the app window shows it as disconnected. ' +
-    'Remote tools then fail with NOT_CONNECTED until you connect again. Use it when the user ' +
-    'asks to disconnect, not between steps of a task.',
+    'Remote tools then fail with NOT_CONNECTED until you connect again. It fails with BUSY ' +
+    'while transfers or file operations run (also ones the user started): wait for them with ' +
+    'wait_for_jobs or stop them with cancel_jobs. Use it when the user asks to disconnect, not ' +
+    'between steps of a task.',
   inputSchema: z.object({}),
   outputSchema: z.object({ disconnected: z.boolean(), host: z.string().optional() }),
   plan(_input, { deps }) {
@@ -159,6 +173,7 @@ const openServerEditor = actionTool({
   title: 'Open the server editor',
   risk: "opens FTP Browser's saved-server editor pre-filled; the user types the password and saves",
   openWorld: false,
+  uncounted: true,
   description:
     'Open the saved-server editor in FTP Browser with these fields filled in, so the user can ' +
     'add the server. The user types the password and presses save; you never see or send a ' +

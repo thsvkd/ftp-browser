@@ -2,7 +2,7 @@ import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { open, unlink, type FileHandle } from 'fs/promises'
 import { FTPError, type Client, type FTPResponse } from 'basic-ftp'
-import { FtpFileOperations } from '../ftp/FtpFileOperations'
+import { FtpFileOperations, type LocalFileClaim } from '../ftp/FtpFileOperations'
 import { DOWNLOAD_WRITE_BUFFER, isFastFlowSuspect } from '../ftp/fastTransfer'
 import { LIMIT, type TransferClientPool } from './TransferClientPool'
 import {
@@ -107,6 +107,15 @@ interface WorkItem {
 
 type SegmentItem = WorkItem & Required<Pick<WorkItem, 'segment'>>
 
+/** enqueueBatch 옵션 */
+export interface EnqueueOptions {
+  /**
+   * 다운로드를 배타적으로 받는다(에이전트가 넣은 작업, R3). 로컬 파일을 'wx'로 만들어 큐에 있는 사이 그 경로에
+   * 생긴 파일이면 덮지 않고 그 작업만 실패하며, 취소·실패 때는 자기가 만든 파일만 지운다. GUI는 쓰지 않는다.
+   */
+  exclusive?: boolean
+}
+
 /** POSIX 원격 경로의 부모 디렉터리 */
 function remoteParent(remotePath: string): string {
   const slash = remotePath.lastIndexOf('/')
@@ -144,6 +153,8 @@ export class TransferQueue extends EventEmitter {
   private loginHold: ReturnType<typeof setTimeout> | null = null
   /** 풀이 시험 로그인을 할 수 있게 되는 때 pump하는 타이머 */
   private probeWake: ReturnType<typeof setTimeout> | null = null
+  /** 배타적 다운로드 작업 → 로컬 파일 소유. 작업의 모든 시도(재시도, 구간, 한 스트림 재실행)가 공유한다. */
+  private claims = new WeakMap<TransferJob, LocalFileClaim>()
 
   constructor(
     private fileOps: FtpFileOperations,
@@ -166,7 +177,8 @@ export class TransferQueue extends EventEmitter {
     direction: TransferDirection,
     items: TransferEnqueueItem[],
     forceBatch = false,
-    remoteDirs?: string[]
+    remoteDirs?: string[],
+    options?: EnqueueOptions
   ): string[] {
     if (items.length === 0) return []
 
@@ -188,6 +200,7 @@ export class TransferQueue extends EventEmitter {
         : undefined
 
     for (const job of jobs) {
+      if (options?.exclusive && direction === 'download') this.claims.set(job, { created: false })
       this.queue.push(job)
       this.byId.set(job.id, job)
       this.work.push({ job, dirs })
@@ -426,7 +439,7 @@ export class TransferQueue extends EventEmitter {
       // 취소로 닫은 클라이언트는 다시 쓸 수 없다
       if (client) this.pool.discard(client)
       // 받다 만 로컬 파일은 지운다. 올리다 만 원격 파일은 FileZilla처럼 남겨 둔다.
-      if (job.direction === 'download') unlink(job.localPath).catch(() => {})
+      if (job.direction === 'download') this.removePartial(job)
     }
     this.finishRun()
   }
@@ -439,7 +452,13 @@ export class TransferQueue extends EventEmitter {
       this.markDirty(job)
     }
     if (job.direction === 'download') {
-      await this.fileOps.download(job.remotePath, job.localPath, onProgress, client ?? undefined)
+      await this.fileOps.download(
+        job.remotePath,
+        job.localPath,
+        onProgress,
+        client ?? undefined,
+        this.claims.get(job)
+      )
     } else {
       if (item.dirs) {
         // 메인 클라이언트 fallback(client 없음)이면 MKD도 메인 클라이언트의 직렬 큐로 보낸다
@@ -494,7 +513,10 @@ export class TransferQueue extends EventEmitter {
     const lan = rtt < LAN_RTT_MS
     if (lan) ranges = [{ start: 0, end: size, final: true }]
 
-    const file = await open(job.localPath, 'w')
+    // 배타적 다운로드는 아직 자기 파일이 없으면 'wx'로 만든다: 큐에 있는 사이 생긴 파일이면 EEXIST로 실패한다
+    const claim = this.claims.get(job)
+    const file = await open(job.localPath, claim && !claim.created ? 'wx' : 'w')
+    if (claim) claim.created = true
     try {
       // NTFS는 늘리기만 한 파일의 끝쪽에 처음 쓸 때 그 앞을 0으로 채우며 다른 구간의 쓰기도 막는다(512 MiB에
       // 수 초). 희소 파일은 채우지 않으므로 늘리기 전에 표시한다. 최적화일 뿐이라 실패해도 그대로 받는다.
@@ -673,7 +695,7 @@ export class TransferQueue extends EventEmitter {
     this.segmented.delete(job.id)
 
     if (isCancelled(job)) {
-      unlink(job.localPath).catch(() => {})
+      this.removePartial(job)
       return
     }
     if (state.remaining === 0) {
@@ -685,13 +707,13 @@ export class TransferQueue extends EventEmitter {
       } else {
         job.status = 'failed'
         job.error = 'Downloaded file size does not match the server'
-        unlink(job.localPath).catch(() => {})
+        this.removePartial(job)
       }
       this.markDirty(job)
     } else if (job.status === 'failed') {
-      unlink(job.localPath).catch(() => {})
+      this.removePartial(job)
     } else if (state.restart) {
-      // 'w'로 다시 열어 처음부터 받으므로 구간이 써 둔 내용은 덮인다.
+      // 'w'로 다시 열어 처음부터 받으므로 구간이 써 둔 내용은 덮인다. 배타적 다운로드도 이 파일은 자기가 만든 것이다.
       // 구간이 쓴 재시도 횟수와 에러는 새 한 스트림 시도의 것이 아니므로 비운다.
       job.status = 'pending'
       job.transferredBytes = 0
@@ -701,6 +723,12 @@ export class TransferQueue extends EventEmitter {
       this.pushFront({ job, oneStream: true })
       this.pump()
     }
+  }
+
+  /** 받다 만 로컬 파일을 지운다. 배타적 다운로드는 자기가 만든 파일만 지운다(그 경로에 생긴 남의 파일은 둔다). */
+  private removePartial(job: TransferJob): void {
+    if (this.claims.get(job)?.created === false) return
+    unlink(job.localPath).catch(() => {})
   }
 
   private addLease(jobId: string, client: Client): void {

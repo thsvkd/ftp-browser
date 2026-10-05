@@ -37,7 +37,7 @@ export function registerTransferHandlers(
   const queue = new TransferQueue(fileOps, new TransferClientPool(manager))
 
   queue.on('queue:updated', (update: TransferUpdate) => {
-    win.webContents.send('transfer:updated', update)
+    if (!win.isDestroyed()) win.webContents.send('transfer:updated', update)
   })
 
   // 큐가 만든 폴더도 탐색 캐시가 알아야 한다(ftp:mkdir이 내던 mutation과 같다)

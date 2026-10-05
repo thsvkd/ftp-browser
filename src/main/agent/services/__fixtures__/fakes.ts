@@ -63,8 +63,11 @@ export class FakeRemote extends EventEmitter {
   /** MKD를 조용히 무시하는 서버(ensureRemoteDir가 음수 응답을 삼킨다) */
   ignoreMkd = false
   connectResult: { success: boolean; error?: string; cancelled?: boolean } = { success: true }
+  /** FtpConnectionManager처럼 connect·disconnect마다 늘어난다 */
+  generation = 0
 
   connect = vi.fn(async (config: FtpConnectPayload) => {
+    this.generation++
     if (!this.connectResult.success) return this.connectResult
     this.connected = true
     this.status = 'connected'
@@ -74,6 +77,7 @@ export class FakeRemote extends EventEmitter {
     return this.connectResult
   })
   disconnect = vi.fn(async () => {
+    this.generation++
     this.connected = false
     this.status = 'disconnected'
   })
@@ -103,6 +107,7 @@ export class FakeRemote extends EventEmitter {
   getHost = (): string => this.host
   getPort = (): number => this.port
   getUser = (): string => this.user
+  getConnectGeneration = (): number => this.generation
 
   mkdir = vi.fn(async (dir: string) => {
     if (!this.ignoreMkd) {

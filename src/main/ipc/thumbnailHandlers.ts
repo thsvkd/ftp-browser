@@ -27,10 +27,10 @@ export function registerThumbnailHandlers(
     generator,
     cacheManager,
     (result: ThumbnailResult) => {
-      win.webContents.send('thumbnail:ready', result)
+      if (!win.isDestroyed()) win.webContents.send('thumbnail:ready', result)
     },
     (cacheKey: string, error: string) => {
-      win.webContents.send('thumbnail:error', { cacheKey, error })
+      if (!win.isDestroyed()) win.webContents.send('thumbnail:error', { cacheKey, error })
     }
   )
 

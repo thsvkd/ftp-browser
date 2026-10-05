@@ -43,6 +43,11 @@ export interface DeletePlan {
   /** Every file and folder that will be removed, counted recursively. */
   totalFiles: number
   totalDirectories: number
+  /**
+   * Remote plans only: `session.key()` when the plan was made. The delete stops before the next
+   * target once the session differs (spec §9 R1).
+   */
+  session?: string
 }
 
 export interface DownloadPlan {
@@ -85,6 +90,7 @@ export type AgentErrorCode =
   | 'INVALID_PATH'
   | 'BUSY'
   | 'TOO_MANY_ITEMS'
+  | 'SESSION_CHANGED'
 
 /**
  * A failure the agent can act on. Services throw this for conditions they detect themselves;
@@ -108,11 +114,17 @@ export interface AgentServices {
   session: {
     info(): SessionInfo
     /**
+     * Identifies the current FTP session (host, port, user and a connection number that changes
+     * on every connect and disconnect, also to the same server). undefined while not connected.
+     */
+    key(): string | undefined
+    /**
      * Connect the app (and its GUI) to a saved server, then open `path` or, like the GUI, the
      * folder last visited on that server, falling back to '/'. Throws AgentError BUSY while
      * transfers or file operations are active, NOT_FOUND for an unknown server.
      */
     connect(ref: ServerRef, path?: string): Promise<{ path: string }>
+    /** Throws AgentError BUSY while transfers or file operations are active (spec §9 R8). */
     disconnect(): Promise<void>
   }
   servers: {

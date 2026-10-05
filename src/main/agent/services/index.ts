@@ -33,6 +33,7 @@ export interface AgentServiceDeps {
     | 'getHost'
     | 'getPort'
     | 'getUser'
+    | 'getConnectGeneration'
   >
   fileOps: Pick<FtpFileOperations, 'mkdir' | 'rename' | 'deleteFile' | 'deleteDirectory'>
   queue: Pick<TransferQueue, 'enqueueBatch' | 'cancel' | 'clearCompleted' | 'getAll'> &

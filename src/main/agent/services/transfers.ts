@@ -57,8 +57,9 @@ export function createTransfersService(
     }))
 
   return {
-    // T5: 다운로드는 'w'로 열고 취소·실패하면 그 경로를 지운다. 그래서 계획은 이미 있는 파일을 절대 대상으로
-    // 삼지 않는다: 'skip'은 빼고 'rename'은 비어 있는 이름을 고른다. 같은 이름의 폴더에는 합쳐 받는다.
+    // T5·§9 R3: 에이전트 다운로드는 배타적 생성('wx')으로 열고 자기가 만든 파일만 지운다. 그래도 계획은 이미
+    // 있는 파일을 대상으로 삼지 않는다: 'skip'은 빼고 'rename'은 비어 있는 이름을 고른다. 같은 이름의 폴더에는
+    // 합쳐 받는다.
     planDownload: async (remotePaths, localDir, conflict) => {
       const sources = outermost(remotePaths.map(checkRemotePath), '/')
       const dest = checkLocalPath(localDir)
@@ -169,7 +170,10 @@ export function createTransfersService(
           fileName: posix.basename(item.remotePath),
           totalBytes: item.size
         })),
-        plan.createDirs.length > 0
+        plan.createDirs.length > 0,
+        undefined,
+        // 큐에 있는 사이 그 경로에 생긴 파일은 덮거나 지우지 않는다('wx', R3)
+        { exclusive: true }
       )
     },
 
