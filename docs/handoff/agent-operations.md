@@ -326,6 +326,19 @@ preload 허용 목록·타입(`src/preload/index.ts`, `index.d.ts`, `index.test.
 
 Main(R1·R2·R4 main·R5·R8) **600–624**, Transfer(R3·R9) **625–634**, CLI(R6·R7·R10 CLI) **635–644**, Renderer(R4 표시·R10 표시) **645–649**. 각 갈래는 이 절 아래에 케이스를 한 줄씩 적는다. 리뷰가 재현한 시나리오(승인 중 서버 전환, 승인 중 이름 맞바꾸기, 자동 실행 폴더로의 다운로드, `//uploads` 재귀, `null` 줄)는 반드시 회귀 테스트로 남긴다.
 
+**CLI (R6·R7·R10 CLI)**
+
+- **Test-635** — (회귀) `ftpb mcp-stdio`가 `null` 줄에서 죽지 않는다. `null`·숫자·문자열·불리언·`[]`·비객체가 든 배열은 앱으로 보내지 않고 stderr에 기록한 뒤 버리며, 처리되지 않은 거부가 없고 다음 요청에는 정상으로 답한다.
+- **Test-636** — `ftpb mcp-stdio`가 4 MiB(앱의 요청 본문 한도)를 넘는 줄을 끝까지 모으지 않고 버린다(stderr 기록, `id: null` JSON-RPC 오류). 앱의 답 중 JSON-RPC 2.0 메시지가 아닌 것은 stdout에 쓰지 않는다.
+- **Test-637** — `ftpb call <tool> --args -`와 `ftpb <tool> --args -`가 stdin의 JSON 객체를 인자로 쓴다. 뒤의 플래그가 덮어쓰고, 따옴표·`&`·`|`·`%`·`^`·`!`·줄바꿈이 든 이름이 그대로 도착한다.
+- **Test-638** — `--args -`의 stdin이 JSON 객체가 아니거나 비었으면 exit 2(stdin 내용을 오류에 되풀이하지 않는다). stdin이 터미널이면 읽으려고 기다리지 않고 exit 2.
+- **Test-639** — `--help`, `ftpb <tool> --help`, README "에이전트 연동", `SKILL.md`가 원격 이름 같은 신뢰할 수 없는 문자열은 `--args -`로 stdin JSON에 담아 넘기라고(특히 Windows) 안내한다.
+- **Test-640** — `CONFIRMATION_CANCELLED`는 exit 3이고 `BUSY`·`SESSION_CHANGED`·`PLAN_CHANGED`는 exit 1이다.
+- **Test-641** — `--help`의 exit code 표와 `SKILL.md`가 3에 `CONFIRMATION_CANCELLED`를 넣고, `BUSY`(확인 대기 중: 사용자가 답한 뒤 재시도)와 `SESSION_CHANGED`·`PLAN_CHANGED`(대상이 바뀜: 다시 확인하고 다시 실행)를 1로 설명하며, 다운로드 폴더 밖 로컬 쓰기는 사용자에게 묻는다는 규칙을 밝힌다.
+- **Test-642** — `installCli`가 표식 없는 기존 `ftpb`(Windows `ftpb.cmd`)를 덮어쓰지 않고 그 경로를 밝힌 `error`를 돌려준다. 앱이 쓴(표식 있는) 셔임은 계속 다시 쓴다.
+- **Test-643** — (회귀) `endpoint.json`의 pid가 살아 있지 않으면 토큰을 보내지 않고 exit 4 "stale discovery file"(그 URL에서 듣는 쪽은 요청을 받지 않는다). `auth`와 `mcp-stdio`도 같다. pid가 살아 있거나 `kill(pid, 0)`이 `EPERM`이면 진행한다.
+- **Test-644** — `FTPB_URL`(과 `FTPB_TOKEN`)으로 엔드포인트를 정하면 pid를 확인하지 않는다. `FTPB_TOKEN`만 있으면 URL이 발견 파일에서 오므로 확인한다.
+
 **Renderer (R4 표시·R10 표시, E2E 후속)** — 645–649가 모자라 E2E가 찾은 세 건에 **650–651**을 더 쓴다.
 
 - **Test-645** — 확인 대화상자가 `destination`(업로드의 원격 폴더, 다운로드의 로컬 폴더, 이름변경의 새 경로)을 "To"/"대상 위치" 라벨(dt·dd 한 쌍)과 함께 자르지 않고 보이고, `destination`이 없는 요청에는 그 줄이 없다.

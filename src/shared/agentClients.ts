@@ -341,8 +341,23 @@ the work in its own window, so the user sees every step.
 - \`${ftpb} <tool> --<param> <value> ...\` - run a tool, kebab or snake case
   (\`${ftpb} list-directory --path /photos\`). Repeat a flag for a list, or pass JSON (\`--paths '["/a","/b"]'\`).
 - \`${ftpb} call <tool> --args '<json>'\` - the same with all arguments as one JSON object.
+- \`${ftpb} call <tool> --args -\` - the same JSON object read from stdin (also \`${ftpb} <tool> --args -\`).
 
 Output is JSON when piped (or with \`--json\`); errors go to stderr. \`${ftpb}\` never prompts.
+
+## Untrusted strings go on stdin
+
+Remote file and folder names can hold quotes, \`&\`, \`|\`, \`%\`, \`^\` or newlines. Pass untrusted strings like these as JSON on stdin with \`--args -\`, never as command-line arguments.
+This matters most on Windows, where \`${ftpb}\` is a \`.cmd\` file and cmd.exe re-parses its arguments.
+
+\`\`\`sh
+${ftpb} call <tool> --args - <<'EOF'
+{"paths": ["/photos/a & b.jpg"]}
+EOF
+\`\`\`
+
+Without a heredoc, write the JSON to a UTF-8 file and run \`${ftpb} call <tool> --args - < args.json\`
+(PowerShell: \`Get-Content -Raw args.json | ${ftpb} call <tool> --args -\`).
 
 ## Risk tiers and policy
 
@@ -360,8 +375,13 @@ dialog in FTP Browser) or \`deny\` (the tool is hidden). \`${ftpb} status\` show
 - Use D, X and C tools only when the user explicitly asked for that action.
 - Run every non-R tool with \`--dry-run\` first. It returns the plan (exact files, counts, sizes,
   overwrites) and changes nothing. Show the plan to the user, then run it without \`--dry-run\`.
-- Exit code 3 (\`DENIED_BY_USER\`, \`DENIED_BY_POLICY\`, \`CONFIRMATION_TIMEOUT\`,
-  \`CONFIRMATION_UNAVAILABLE\`) means FTP Browser refused. Stop and tell the user; do not retry unless they ask.
+- Local writes (the \`download\` target, \`create_local_directory\`, \`rename_local\`) inside the user's
+  Downloads folder follow the W policy; outside the user's Downloads folder FTP Browser always asks the user (and refuses when W is \`deny\`).
+  \`${ftpb} status\` shows that folder. Download into it unless the user named another place.
+- Exit code 3 (\`DENIED_BY_USER\`, \`DENIED_BY_POLICY\`, \`CONFIRMATION_TIMEOUT\`, \`CONFIRMATION_UNAVAILABLE\`, \`CONFIRMATION_CANCELLED\`) means FTP Browser refused.
+  Stop and tell the user; do not retry unless they ask.
+- \`BUSY\` (exit 1): FTP Browser is waiting for the user to answer a confirmation (or, for \`disconnect\`, a transfer is running); retry after the user answers.
+- \`SESSION_CHANGED\` or \`PLAN_CHANGED\` (exit 1): the connection or the files changed while the user was deciding, so FTP Browser stopped. Look again (\`${ftpb} status\`, a listing, \`--dry-run\`) and run it again if it is still what the user wants.
 
 ## Long transfers
 

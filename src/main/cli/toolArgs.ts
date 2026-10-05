@@ -230,6 +230,10 @@ export function toolHelp(tool: ToolInfo): string {
     return [usage, notes] as const
   })
   rows.push(["--args '<json>'", 'all parameters as one JSON object (flags override it)'])
+  rows.push([
+    '--args -',
+    'the same object read from stdin: use it for untrusted strings (remote names)'
+  ])
   const width = Math.max(...rows.map(([usage]) => usage.length))
   const lines = [
     `${tool.name}  [tier ${tierOf(tool)}, policy ${policyOf(tool)}]${tool.title ? `  ${tool.title}` : ''}`,

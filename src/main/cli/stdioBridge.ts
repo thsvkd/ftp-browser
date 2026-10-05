@@ -1,4 +1,4 @@
-import { createInterface } from 'readline'
+import { StringDecoder } from 'string_decoder'
 import { APP_NOT_RUNNING, postJsonRpc, type Endpoint, type JsonRpcMessage } from './mcpClient'
 
 /**
@@ -13,11 +13,63 @@ export interface BridgeOptions {
   stdout: { write(chunk: string): unknown }
   stderr: { write(chunk: string): unknown }
   fetch: typeof fetch
-  /** Read again for every message: the app may start, or regenerate its token, while we run. */
+  /**
+   * Read again for every message: the app may start, or regenerate its token, while we run. Throws
+   * (e.g. a stale discovery file) to fail the message with that error's text.
+   */
   endpoint: () => Endpoint | null
 }
 
 type Id = string | number
+
+/**
+ * Longest line relayed: the app's request body limit (the MCP SDK's 4 MiB). A longer line is
+ * dropped as it arrives instead of being buffered whole (§9 R6).
+ */
+const MAX_LINE = 4 * 1024 * 1024
+
+const isObject = (value: unknown): value is JsonRpcMessage =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** A JSON-RPC message or batch: an object, or a non-empty array of objects (§9 R6). */
+function isMessage(value: unknown): value is JsonRpcMessage | JsonRpcMessage[] {
+  return isObject(value) || (Array.isArray(value) && value.length > 0 && value.every(isObject))
+}
+
+const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
+/** The newline-delimited lines of `input`; a line over MAX_LINE goes to `onTooLong` instead. */
+async function* readLines(
+  input: NodeJS.ReadableStream,
+  onTooLong: () => void
+): AsyncGenerator<string> {
+  const decoder = new StringDecoder('utf8')
+  let partial = ''
+  let skipping = false
+  for await (const chunk of input) {
+    const text = typeof chunk === 'string' ? chunk : decoder.write(chunk)
+    let start = 0
+    for (let end = text.indexOf('\n'); end >= 0; end = text.indexOf('\n', start)) {
+      const line = partial + text.slice(start, end)
+      partial = ''
+      start = end + 1
+      if (skipping) skipping = false
+      else if (line.length > MAX_LINE) onTooLong()
+      else yield line
+    }
+    if (skipping) continue
+    partial += text.slice(start)
+    if (partial.length > MAX_LINE) {
+      onTooLong()
+      skipping = true
+      partial = ''
+    }
+  }
+  if (skipping) return
+  const last = partial + decoder.end()
+  if (last.length > MAX_LINE) onTooLong()
+  else if (last !== '') yield last
+}
 
 function isRequest(message: JsonRpcMessage): message is JsonRpcMessage & { id: Id } {
   return (
@@ -61,10 +113,16 @@ export async function runStdioBridge(options: BridgeOptions): Promise<void> {
       }
     }
 
-    const endpoint = options.endpoint()
+    let endpoint: Endpoint | null = null
+    let unavailable = APP_NOT_RUNNING
+    try {
+      endpoint = options.endpoint()
+    } catch (err) {
+      unavailable = errorText(err)
+    }
     if (!endpoint) {
-      log(APP_NOT_RUNNING)
-      failUnanswered(APP_NOT_RUNNING)
+      log(unavailable)
+      failUnanswered(unavailable)
       return
     }
     const single = !Array.isArray(message) && isRequest(message) ? message : undefined
@@ -77,6 +135,11 @@ export async function runStdioBridge(options: BridgeOptions): Promise<void> {
         headers,
         signal: controller?.signal,
         onMessage: (answer) => {
+          // stdout carries JSON-RPC only; the request then fails below as unanswered.
+          if (answer.jsonrpc !== '2.0') {
+            log('ignored part of the answer that is not a JSON-RPC 2.0 message')
+            return
+          }
           // An error the server could not tie to a request (id: null) answers ours, so the client stops waiting.
           const reply =
             single && answer.id === null && answer.error ? { ...answer, id: single.id } : answer
@@ -93,7 +156,7 @@ export async function runStdioBridge(options: BridgeOptions): Promise<void> {
       failUnanswered(`FTP Browser answered HTTP ${status} without a JSON-RPC response.`)
     } catch (err) {
       if (controller?.signal.aborted) return
-      const text = err instanceof Error ? err.message : String(err)
+      const text = errorText(err)
       log(text)
       failUnanswered(text)
     } finally {
@@ -101,17 +164,30 @@ export async function runStdioBridge(options: BridgeOptions): Promise<void> {
     }
   }
 
-  const lines = createInterface({ input: options.stdin, crlfDelay: Infinity })
-  for await (const line of lines) {
+  const tooLong = (): void => {
+    log(`dropped a line longer than ${MAX_LINE} characters`)
+    const message = `Message too large: lines longer than ${MAX_LINE} characters are dropped.`
+    write({ jsonrpc: '2.0', id: null, error: { code: -32600, message } })
+  }
+  for await (const line of readLines(options.stdin, tooLong)) {
     if (line.trim() === '') continue
-    let message: JsonRpcMessage | JsonRpcMessage[]
+    let message: unknown
     try {
-      message = JSON.parse(line) as JsonRpcMessage | JsonRpcMessage[]
+      message = JSON.parse(line)
     } catch {
       write({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error: not JSON' } })
       continue
     }
-    const task = relay(message).finally(() => pending.delete(task))
+    if (!isMessage(message)) {
+      // e.g. `null`: relaying it crashed the bridge (649c370 review, §9 R6)
+      log(
+        `dropped a message that is not a JSON-RPC object or a batch of objects: ${line.slice(0, 60)}`
+      )
+      continue
+    }
+    const task = relay(message)
+      .catch((err: unknown) => log(`could not relay a message: ${errorText(err)}`))
+      .finally(() => pending.delete(task))
     pending.add(task)
   }
   await Promise.all(pending)

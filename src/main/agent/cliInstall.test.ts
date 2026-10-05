@@ -190,6 +190,49 @@ describe('installCli on Windows', () => {
   })
 })
 
+describe('installCli next to an ftpb it did not write', () => {
+  it('refuses to replace a foreign ftpb and names its path, but replaces its own shim', async () => {
+    // covers: Test-642
+    const shim = join(home, '.local', 'bin', 'ftpb')
+    mkdirSync(join(shim, '..'), { recursive: true })
+    writeFileSync(shim, '#!/bin/sh\necho another ftpb\n')
+
+    const refused = await installCli(posixEnv())
+
+    expect(refused.error).toContain(shim)
+    expect(refused.error).toMatch(/not written by FTP Browser/)
+    expect(readFileSync(shim, 'utf8')).toBe('#!/bin/sh\necho another ftpb\n')
+
+    rmSync(shim)
+    await installCli(posixEnv())
+    const replaced = await installCli(posixEnv({ execPath: '/opt/new/ftp-browser' }))
+    expect(replaced.error).toBeUndefined()
+    expect(readFileSync(shim, 'utf8')).toContain('exec "/opt/new/ftp-browser"')
+  })
+
+  it('refuses to replace a foreign ftpb.cmd on Windows', async () => {
+    // covers: Test-642
+    const binDir = join(home, 'AppData', 'Local', 'ftp-browser', 'bin')
+    const cmd = join(binDir, 'ftpb.cmd')
+    mkdirSync(binDir, { recursive: true })
+    writeFileSync(cmd, '@echo off\r\necho mine\r\n')
+    const run = vi.fn<CliInstallEnv['run']>(async () => '')
+
+    const status = await installCli({
+      platform: 'win32',
+      env: { PATH: 'C:\\Windows', LOCALAPPDATA: join(home, 'AppData', 'Local') },
+      home,
+      execPath: 'C:\\ftp-browser.exe',
+      cliPath,
+      run
+    })
+
+    expect(status.error).toContain(cmd)
+    expect(readFileSync(cmd, 'utf8')).toBe('@echo off\r\necho mine\r\n')
+    expect(run.mock.calls.some(([, args]) => String(args).includes('SetValue'))).toBe(false)
+  })
+})
+
 describe('refreshInstalledCli', () => {
   it('rewrites only a shim this app wrote', async () => {
     // covers: Test-567

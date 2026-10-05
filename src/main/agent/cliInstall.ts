@@ -2,6 +2,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -120,6 +121,21 @@ function writeShim(e: CliInstallEnv): void {
   renameSync(temp, file)
 }
 
+/** 우리 경로에 앱이 쓰지 않은(표식 없는) 무언가가 있다. 설치가 그것을 덮어쓰면 안 된다(§9 R10). */
+function foreignShimAt(file: string): boolean {
+  try {
+    lstatSync(file)
+  } catch {
+    return false
+  }
+  try {
+    return !readFileSync(file, 'utf8').includes(MARKER)
+  } catch {
+    // 폴더, 깨진 링크, 읽을 수 없는 파일: 우리 것이 아니다
+    return true
+  }
+}
+
 function pathContains(
   pathValue: string | undefined,
   dir: string,
@@ -177,6 +193,13 @@ export async function installCli(e: CliInstallEnv): Promise<CliInstallStatus> {
     return {
       ...(await getCliStatus(e)),
       error: `The bundled command-line tool is missing: ${e.cliPath}`
+    }
+  }
+  const { file } = shimLocation(e)
+  if (foreignShimAt(file)) {
+    return {
+      ...(await getCliStatus(e)),
+      error: `${file} already exists and was not written by FTP Browser. Rename or remove it, then install again.`
     }
   }
   try {

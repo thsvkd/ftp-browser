@@ -161,6 +161,27 @@ describe('buildSkillMarkdown', () => {
     for (const code of ['0', '1', '2', '3', '4']) expect(body).toMatch(new RegExp(`\\| ${code} `))
   })
 
+  it('tells the agent to pass untrusted strings as JSON on stdin, especially on Windows', () => {
+    // covers: Test-639
+    const md = buildSkillMarkdown({ ftpbCommand: 'ftpb' })
+
+    expect(md).toContain("ftpb call <tool> --args - <<'EOF'")
+    const rule = md.split('\n').find((line) => line.includes('--args -') && /untrusted/i.test(line))
+    expect(rule).toBeDefined()
+    expect(md).toMatch(/Windows/)
+  })
+
+  it('explains exit 3 with CONFIRMATION_CANCELLED, the errors to retry and the local root', () => {
+    // covers: Test-641
+    const md = buildSkillMarkdown({ ftpbCommand: 'ftpb' })
+
+    const exit3 = md.split('\n').find((line) => line.startsWith('- Exit code 3')) ?? ''
+    expect(exit3).toContain('CONFIRMATION_CANCELLED')
+    expect(md).toMatch(/`BUSY`[^\n]*retry after the user answers/)
+    expect(md).toMatch(/`SESSION_CHANGED`[^\n]*`PLAN_CHANGED`[^\n]*run it again/)
+    expect(md).toMatch(/outside the user's Downloads folder[^\n]*asks the user/)
+  })
+
   it('uses the given command in every example', () => {
     // covers: Test-559
     const md = buildSkillMarkdown({ ftpbCommand: '/home/u/.local/bin/ftpb' })

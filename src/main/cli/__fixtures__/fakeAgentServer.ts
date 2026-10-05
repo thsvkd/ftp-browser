@@ -119,6 +119,18 @@ export async function startFakeAgentServer(): Promise<FakeAgentServer> {
           return text('CONFIRMATION_TIMEOUT: Nobody answered within 120 s.', true)
         if (args.paths.includes('/fail'))
           return text('FTP_PERMISSION_DENIED: 550 Permission denied.', true)
+        // §9 R1·R10: 취소는 거부(exit 3), 나머지는 다시 시도할 수 있는 도구 오류(exit 1)
+        if (args.paths.includes('/cancelled'))
+          return text(
+            'CONFIRMATION_CANCELLED: The call was cancelled before the user answered.',
+            true
+          )
+        if (args.paths.includes('/busy'))
+          return text('BUSY: FTP Browser is waiting for the user to answer a confirmation.', true)
+        if (args.paths.includes('/session-changed'))
+          return text('SESSION_CHANGED: The connection changed while the user was deciding.', true)
+        if (args.paths.includes('/plan-changed'))
+          return text('PLAN_CHANGED: The files changed after the plan was shown.', true)
         const data = { deleted: args.paths, dryRun: args.dryRun ?? false }
         return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data }
       }

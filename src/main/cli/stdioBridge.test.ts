@@ -21,7 +21,10 @@ interface Bridge {
   stderr(): string
 }
 
-function startBridge(endpoint: () => { url: string; token: string } | null): Bridge {
+function startBridge(
+  endpoint: () => { url: string; token: string } | null,
+  fetchImpl: typeof fetch = globalThis.fetch
+): Bridge {
   const stdin = new PassThrough()
   let out = ''
   let err = ''
@@ -39,7 +42,7 @@ function startBridge(endpoint: () => { url: string; token: string } | null): Bri
         return true
       }
     },
-    fetch: globalThis.fetch,
+    fetch: fetchImpl,
     endpoint
   })
   return {
@@ -145,5 +148,98 @@ describe('ftpb mcp-stdio', () => {
       { jsonrpc: '2.0', id: null, error: { code: -32700, message: expect.any(String) } },
       { jsonrpc: '2.0', id: 3, result: {} }
     ])
+  })
+
+  it('drops a null line and other messages that are not objects instead of crashing', async () => {
+    // covers: Test-635
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason)
+    }
+    process.on('unhandledRejection', onUnhandled)
+    const posted: unknown[] = []
+    const bridge = startBridge(
+      () => ({ url: server.url, token: server.token }),
+      async (input, init) => {
+        posted.push(JSON.parse(String(init?.body)))
+        return globalThis.fetch(input, init)
+      }
+    )
+    try {
+      const bad = ['null', '42', '"tools/list"', 'true', '[]', '[null]']
+      for (const line of bad) bridge.raw(`${line}\n`)
+      bridge.raw('[1,{"jsonrpc":"2.0","id":9,"method":"ping"}]\n')
+      bridge.send({ jsonrpc: '2.0', id: 3, method: 'ping' })
+      const lines = await bridge.finish()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      expect(lines.map((l) => JSON.parse(l))).toEqual([{ jsonrpc: '2.0', id: 3, result: {} }])
+      expect(posted).toEqual([{ jsonrpc: '2.0', id: 3, method: 'ping' }])
+      expect(
+        bridge.stderr().match(/dropped a message that is not a JSON-RPC object/g)
+      ).toHaveLength(bad.length + 1)
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+
+  it('drops a line over 4 MiB, whole or in pieces, and keeps relaying', async () => {
+    // covers: Test-636
+    const bridge = startBridge(() => ({ url: server.url, token: server.token }))
+    const huge = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'ping',
+      params: { pad: 'x'.repeat(4 * 1024 * 1024) }
+    })
+
+    // In pieces: the limit is hit long before the newline arrives.
+    for (let i = 0; i < huge.length; i += 65536) bridge.raw(huge.slice(i, i + 65536))
+    bridge.raw('\n')
+    bridge.send({ jsonrpc: '2.0', id: 2, method: 'ping' })
+    // Whole, in one write with its newline.
+    bridge.raw(`${huge.replace('"id":1', '"id":4')}\n`)
+    bridge.send({ jsonrpc: '2.0', id: 5, method: 'ping' })
+    const lines = await bridge.finish()
+
+    const tooLarge = {
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32600, message: expect.stringContaining('too large') }
+    }
+    const messages = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
+    expect(messages.filter((m) => m.id === null)).toEqual([tooLarge, tooLarge])
+    expect(messages.filter((m) => m.id !== null)).toEqual([
+      { jsonrpc: '2.0', id: 2, result: {} },
+      { jsonrpc: '2.0', id: 5, result: {} }
+    ])
+    expect(bridge.stderr().match(/longer than 4194304 characters/g)).toHaveLength(2)
+  })
+
+  it('writes only JSON-RPC 2.0 messages of the answer to stdout', async () => {
+    // covers: Test-636
+    const json = (body: string): Response =>
+      new Response(body, { headers: { 'content-type': 'application/json' } })
+    const answers = [json('{}'), json('[{"status":"ok"},{"jsonrpc":"2.0","id":2,"result":{}}]')]
+    const bridge = startBridge(
+      () => ({ url: 'http://127.0.0.1:1/mcp', token: 't' }),
+      async () => answers.shift() ?? json('{}')
+    )
+
+    bridge.send({ jsonrpc: '2.0', id: 1, method: 'ping' })
+    bridge.send({ jsonrpc: '2.0', id: 2, method: 'ping' })
+    const lines = await bridge.finish()
+
+    const messages = lines.map((l) => JSON.parse(l) as { id: number })
+    expect(messages.sort((a, b) => a.id - b.id)).toEqual([
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        error: { code: -32000, message: expect.stringContaining('HTTP 200') }
+      },
+      { jsonrpc: '2.0', id: 2, result: {} }
+    ])
+    expect(bridge.stderr()).toContain('not a JSON-RPC 2.0 message')
   })
 })

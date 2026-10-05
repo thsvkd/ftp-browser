@@ -1,7 +1,12 @@
 import path from 'path'
 import { MCP_PORT } from '@shared/constants'
 import { AGENT_CLIENT_IDS, buildClientSetups, buildSkillMarkdown } from '@shared/agentClients'
-import { defaultUserDataDir, discoverEndpoint, tokenFilePath } from '../agent/discovery'
+import {
+  defaultUserDataDir,
+  discoverEndpoint,
+  tokenFilePath,
+  type DiscoveredEndpoint
+} from '../agent/discovery'
 import { installSkill } from '../agent/cliInstall'
 import {
   APP_NOT_RUNNING,
@@ -29,13 +34,11 @@ import {
 
 export const EXIT = { OK: 0, TOOL_ERROR: 1, USAGE: 2, DENIED: 3, UNAVAILABLE: 4 } as const
 
-/** Tool error codes that mean FTP Browser refused to run the call (exit 3). */
-const REFUSALS = new Set([
-  'DENIED_BY_POLICY',
-  'DENIED_BY_USER',
-  'CONFIRMATION_TIMEOUT',
-  'CONFIRMATION_UNAVAILABLE'
-])
+/**
+ * Tool error codes that mean FTP Browser refused to run the call: DENIED_* and CONFIRMATION_*
+ * (exit 3, §2.6 L3, §9 R10). BUSY, SESSION_CHANGED and PLAN_CHANGED are errors to retry (exit 1).
+ */
+const isRefusal = (code: string): boolean => /^(DENIED|CONFIRMATION)_/.test(code)
 
 /** Replaced at build time (script/build-cli.mjs) with the app version. */
 const CLI_VERSION = process.env.FTPB_VERSION ?? 'dev'
@@ -62,7 +65,7 @@ Usage:
   ftpb tools                          tools with their risk tier and current policy
   ftpb <tool> [--param value ...]     run a tool; kebab or snake case (list-directory)
   ftpb <tool> --help                  a tool's parameters
-  ftpb call <tool> [--args '<json>'] [--param value ...]
+  ftpb call <tool> [--args '<json>' | --args -] [--param value ...]
   ftpb status                         connection, running jobs and the policy per tier
   ftpb auth header [--value]          {"Authorization":"Bearer <token>"} (Claude Code
                                       headersHelper); --value prints only "Bearer <token>"
@@ -76,6 +79,11 @@ Parameters follow the tool's schema: --limit 50, --recursive / --no-recursive, a
 repeating a flag (--paths /a --paths /b) or as JSON (--paths '["/a","/b"]'), objects as JSON.
 Every non-R tool takes --dry-run: it returns the plan and changes nothing.
 
+--args - reads all parameters as one JSON object from stdin. Pass untrusted strings, such as
+remote file names, that way and never as command-line arguments; above all on Windows, where
+ftpb.cmd runs through cmd.exe, which re-parses quotes, &, | and % in arguments:
+  ftpb call delete --args - < args.json
+
 Output is JSON when stdout is not a terminal, or with --json; readable text otherwise.
 Errors go to stderr. ftpb never prompts.
 
@@ -86,17 +94,26 @@ Risk tiers (the app decides; Settings › Permissions sets allow, ask or deny pe
   X  sends local files to the server: upload
   C  credentials and saved servers
   allow runs at once, ask shows the user a dialog in FTP Browser, deny hides the tool.
+  A local write (download target, new local folder, local rename) that lands
+  outside the user's Downloads folder always asks the user, whatever the W policy
+  (deny still refuses).
 
 Exit codes:
   0  success
-  1  the tool failed (isError) or the request failed
+  1  the tool failed (isError) or the request failed. Among these errors:
+     BUSY             FTP Browser is waiting for the user to answer a confirmation (or,
+                      for disconnect, a transfer is running): retry after the user answers
+     SESSION_CHANGED  the connection or the files changed while the user was deciding, so
+     PLAN_CHANGED     FTP Browser stopped: look again (--dry-run) and run it again
   2  usage error: unknown command, tool or parameter, or a value the tool's schema rejects
-  3  refused: DENIED_BY_POLICY, DENIED_BY_USER, CONFIRMATION_TIMEOUT or
-     CONFIRMATION_UNAVAILABLE (do not retry unless the user asks)
-  4  FTP Browser is not running, Agent access is off, or the token was rejected
+  3  refused: DENIED_BY_POLICY, DENIED_BY_USER, CONFIRMATION_TIMEOUT,
+     CONFIRMATION_UNAVAILABLE or CONFIRMATION_CANCELLED (do not retry unless the user asks)
+  4  FTP Browser is not running, Agent access is off, the token was rejected, or the
+     discovery file is stale (the app that wrote it is gone)
 
 Environment: FTPB_URL and FTPB_TOKEN override the endpoint the app publishes in
-<userData>/agent/ (endpoint.json, token).
+<userData>/agent/ (endpoint.json, token). ftpb sends the token to an endpoint from
+endpoint.json only while the app process that wrote it is running.
 `
 
 class Output {
@@ -127,14 +144,76 @@ class Output {
   }
 }
 
-function endpointOf(io: FtpbIo): ReturnType<typeof discoverEndpoint> {
+function endpointOf(io: FtpbIo): DiscoveredEndpoint | null {
   return discoverEndpoint(io.platform, io.env, io.home)
 }
 
-function requireEndpoint(io: FtpbIo): NonNullable<ReturnType<typeof discoverEndpoint>> {
+/** Whether `pid` runs. EPERM: it does, as another user's process. */
+function processAlive(pid: number | undefined): boolean {
+  if (pid === undefined || !Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/**
+ * The endpoint ftpb may send the token to. Files left by a crashed app are stale: whatever listens
+ * on that port now must not get the token (§9 R10). FTPB_URL skips the check: the user chose it.
+ */
+function liveEndpoint(io: FtpbIo): DiscoveredEndpoint | null {
   const endpoint = endpointOf(io)
+  if (endpoint && !io.env.FTPB_URL && !processAlive(endpoint.pid)) {
+    throw new EndpointUnavailableError(
+      `Stale discovery file: FTP Browser (pid ${String(endpoint.pid)}) is no longer running, so ` +
+        'ftpb did not send the token. Start FTP Browser and turn on Agent access in Settings ' +
+        '(Enable MCP server), then retry.'
+    )
+  }
+  return endpoint
+}
+
+function requireEndpoint(io: FtpbIo): DiscoveredEndpoint {
+  const endpoint = liveEndpoint(io)
   if (!endpoint) throw new EndpointUnavailableError(APP_NOT_RUNNING)
   return endpoint
+}
+
+/**
+ * `--args -` (§9 R7): the JSON object comes from stdin, so no shell or cmd.exe parses untrusted
+ * strings such as remote names. Puts the text read in place of `-` for parseToolArgs.
+ */
+async function withStdinArgs(argv: string[], stdin: FtpbIo['stdin']): Promise<string[]> {
+  const fromStdin = (arg: string, i: number): boolean =>
+    arg === '--args=-' || (arg === '-' && argv[i - 1] === '--args')
+  if (!argv.some(fromStdin)) return argv
+  if ((stdin as { isTTY?: boolean }).isTTY) {
+    throw new UsageError(
+      '--args - reads a JSON object from stdin, but stdin is a terminal. Pipe the JSON in: ' +
+        'ftpb call <tool> --args - < args.json'
+    )
+  }
+  const chunks: Buffer[] = []
+  for await (const chunk of stdin)
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+  // PowerShell may write a UTF-8 BOM.
+  const text = Buffer.concat(chunks)
+    .toString('utf8')
+    .replace(/^\uFEFF/, '')
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch {
+    value = undefined
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new UsageError('--args - needs a JSON object on stdin, such as {"path":"/photos"}.')
+  }
+  return argv.map((arg, i) =>
+    arg === '--args=-' ? `--args=${text}` : fromStdin(arg, i) ? text : arg
+  )
 }
 
 async function listTools(session: McpSession): Promise<ToolInfo[]> {
@@ -200,7 +279,7 @@ function toolResult(out: Output, result: Record<string, unknown>, unlisted?: str
     const code =
       /^([A-Z][A-Z0-9_]{2,})\b/.exec(text)?.[1] ??
       (typeof structured?.code === 'string' ? structured.code : 'TOOL_ERROR')
-    return out.error(REFUSALS.has(code) ? EXIT.DENIED : EXIT.TOOL_ERROR, code, text)
+    return out.error(isRefusal(code) ? EXIT.DENIED : EXIT.TOOL_ERROR, code, text)
   }
   if (result.resultType !== undefined && result.resultType !== 'complete') {
     return out.error(
@@ -239,7 +318,7 @@ async function runTool(
   }
   // Call unlisted tools anyway: a tool hidden by a deny policy answers DENIED_BY_POLICY.
   if (!tool && !/^[A-Za-z0-9_.-]+$/.test(name)) throw new UsageError(`Unknown tool ${name}.`)
-  const args = parseToolArgs(argv, tool?.inputSchema)
+  const args = parseToolArgs(await withStdinArgs(argv, io.stdin), tool?.inputSchema)
   const toolName = tool?.name ?? name.replace(/-/g, '_')
   let result: Record<string, unknown>
   try {
@@ -369,7 +448,7 @@ function runSkill(io: FtpbIo, out: Output, argv: string[]): number {
 
 const COMMAND_USAGE: Record<string, string> = {
   tools: 'ftpb tools',
-  call: "ftpb call <tool> [--args '<json>'] [--param value ...] [--dry-run]",
+  call: "ftpb call <tool> [--args '<json>' | --args -] [--param value ...] [--dry-run]",
   status: 'ftpb status',
   auth: 'ftpb auth header [--value] | ftpb auth token',
   'mcp-stdio': 'ftpb mcp-stdio   (stdin/stdout: newline-delimited JSON-RPC; logs on stderr)',
@@ -412,7 +491,7 @@ export async function runFtpb(argv: string[], io: FtpbIo): Promise<number> {
           stdout: io.stdout,
           stderr: io.stderr,
           fetch: io.fetch,
-          endpoint: () => endpointOf(io)
+          endpoint: () => liveEndpoint(io)
         })
         return EXIT.OK
       case 'setup':

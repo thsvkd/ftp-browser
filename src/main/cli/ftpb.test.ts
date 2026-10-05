@@ -1,5 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'fs'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { spawnSync } from 'child_process'
+import { mkdtempSync, readFileSync, rmSync } from 'fs'
+import { createServer, type Server } from 'http'
+import type { AddressInfo } from 'net'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { PassThrough } from 'stream'
@@ -28,15 +31,18 @@ interface Run {
 
 async function ftpb(
   argv: string[],
-  options: { tty?: boolean; env?: NodeJS.ProcessEnv } = {}
+  options: { tty?: boolean; env?: NodeJS.ProcessEnv; stdin?: string | NodeJS.ReadableStream } = {}
 ): Promise<Run> {
   let stdout = ''
   let stderr = ''
+  let stdin = options.stdin
+  if (typeof stdin === 'string') stdin = new PassThrough().end(stdin)
   const io: FtpbIo = {
     env: options.env ?? { FTPB_URL: server.url, FTPB_TOKEN: server.token },
     platform: 'linux',
     home,
-    stdin: new PassThrough(),
+    // Never ends: a command that reads stdin when it should not hangs the test.
+    stdin: stdin ?? new PassThrough(),
     stdout: {
       isTTY: options.tty ?? false,
       write: (chunk: string) => {
@@ -61,13 +67,14 @@ describe('ftpb discovery', () => {
   it('reads the endpoint from the userData discovery files when no env is set', async () => {
     // covers: Test-550
     const userData = defaultUserDataDir('linux', {}, home)
-    writeDiscovery(userData, { url: server.url, token: server.token, pid: 1, version: '9.9.9' })
+    const pid = process.pid
+    writeDiscovery(userData, { url: server.url, token: server.token, pid, version: '9.9.9' })
 
     const run = await ftpb(['status'], { env: {} })
 
     expect(run).toMatchObject({ code: EXIT.OK, stderr: '' })
     expect(JSON.parse(run.stdout)).toMatchObject({
-      endpoint: { url: server.url, version: '9.9.9', pid: 1 },
+      endpoint: { url: server.url, version: '9.9.9', pid },
       connection: { status: 'connected', host: 'nas.local' }
     })
     rmSync(join(userData, 'agent'), { recursive: true, force: true })
@@ -327,5 +334,229 @@ describe('ftpb setup and skill', () => {
 
     expect(run.code).toBe(EXIT.OK)
     expect(JSON.parse(run.stdout)).toEqual({ paths: [join(dir, 'ftp-browser', 'SKILL.md')] })
+  })
+})
+
+/** The text of `text` from the line matching `from` up to the line matching `to`. */
+function section(text: string, from: RegExp, to: RegExp): string {
+  const start = text.search(from)
+  expect(start).toBeGreaterThanOrEqual(0)
+  const rest = text.slice(start)
+  const body = rest.indexOf('\n') + 1
+  const end = rest.slice(body).search(to)
+  return end < 0 ? rest : rest.slice(0, body + end)
+}
+
+describe('ftpb --args - (JSON arguments on stdin)', () => {
+  it('reads the arguments from stdin for call and for the tool sugar', async () => {
+    // covers: Test-637
+    const name = `a "b" & c | d %PATH% ^e !f\n'g'.jpg`
+    const args = { path: '/photos', names: [name], limit: 5 }
+    server.calls.length = 0
+
+    const viaCall = await ftpb(['call', 'list_directory', '--args', '-'], {
+      stdin: JSON.stringify(args)
+    })
+    const viaSugar = await ftpb(['list-directory', '--args=-', '--limit', '7'], {
+      stdin: `${JSON.stringify(args, null, 2)}\n`
+    })
+
+    expect([viaCall.code, viaSugar.code]).toEqual([EXIT.OK, EXIT.OK])
+    expect(server.calls.map((c) => c.args)).toEqual([args, { ...args, limit: 7 }])
+  })
+
+  it('exits 2 when stdin holds no JSON object, without echoing it or waiting on a terminal', async () => {
+    // covers: Test-638
+    server.calls.length = 0
+    const call = ['call', 'list_directory', '--args', '-']
+
+    const notJson = await ftpb(call, { stdin: 'remote name & more' })
+    const array = await ftpb(call, { stdin: '["/a"]' })
+    const empty = await ftpb(call, { stdin: '' })
+    const tty = await ftpb(call, { stdin: Object.assign(new PassThrough(), { isTTY: true }) })
+
+    expect([notJson.code, array.code, empty.code, tty.code]).toEqual([2, 2, 2, 2])
+    expect(notJson.stderr).not.toContain('remote name')
+    for (const run of [notJson, array, empty])
+      expect(JSON.parse(run.stderr).error.message).toContain(
+        '--args - needs a JSON object on stdin'
+      )
+    expect(JSON.parse(tty.stderr).error.message).toContain('stdin is a terminal')
+    expect(server.calls).toEqual([])
+  })
+
+  it('tells agents to pass untrusted strings as JSON on stdin in --help and the README', async () => {
+    // covers: Test-639
+    const help = (await ftpb(['--help'])).stdout
+    const toolHelp = (await ftpb(['list-directory', '--help'])).stdout
+    const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8')
+    const agents = section(readme, /^## 에이전트 연동/m, /^## /m)
+
+    expect(help).toContain("ftpb call <tool> [--args '<json>' | --args -]")
+    for (const text of [help, agents]) {
+      expect(text).toContain('--args -')
+      expect(text).toMatch(/untrusted|신뢰할 수 없는/)
+      expect(text).toContain('Windows')
+    }
+    expect(toolHelp).toContain('--args -')
+  })
+})
+
+describe('ftpb refusals and errors to retry', () => {
+  it('exits 3 for CONFIRMATION_CANCELLED and 1 for BUSY, SESSION_CHANGED and PLAN_CHANGED', async () => {
+    // covers: Test-640
+    const cases = [
+      ['/cancelled', 'CONFIRMATION_CANCELLED', EXIT.DENIED],
+      ['/busy', 'BUSY', EXIT.TOOL_ERROR],
+      ['/session-changed', 'SESSION_CHANGED', EXIT.TOOL_ERROR],
+      ['/plan-changed', 'PLAN_CHANGED', EXIT.TOOL_ERROR]
+    ] as const
+
+    for (const [path, code, exit] of cases) {
+      const run = await ftpb(['delete', '--paths', path])
+      expect([JSON.parse(run.stderr).error.code, run.code]).toEqual([code, exit])
+    }
+  })
+
+  it('explains in --help which codes exit 1 or 3, what to do, and the local write rule', async () => {
+    // covers: Test-641
+    const help = (await ftpb(['--help'])).stdout
+    const exits = section(help, /^Exit codes:/m, /^\S/m)
+    const exit1 = section(exits, /^ {2}1 {2}/m, /^ {2}2 {2}/m)
+    const exit3 = section(exits, /^ {2}3 {2}/m, /^ {2}4 {2}/m)
+
+    for (const code of ['BUSY', 'SESSION_CHANGED', 'PLAN_CHANGED']) expect(exit1).toContain(code)
+    expect(exit1).toMatch(/retry after the user answers/)
+    expect(exit1).toMatch(/run it again/)
+    for (const code of [
+      'DENIED_BY_POLICY',
+      'DENIED_BY_USER',
+      'CONFIRMATION_TIMEOUT',
+      'CONFIRMATION_UNAVAILABLE',
+      'CONFIRMATION_CANCELLED'
+    ])
+      expect(exit3).toContain(code)
+    expect(help).toMatch(/outside (the user's|your) Downloads folder/)
+  })
+})
+
+describe('ftpb stale discovery files', () => {
+  let listener: Server
+  let listenerUrl: string
+  let hits = 0
+  const userData = (): string => defaultUserDataDir('linux', {}, home)
+
+  beforeAll(async () => {
+    listener = createServer((_req, res) => {
+      hits++
+      res.writeHead(500).end()
+    })
+    await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve))
+    listenerUrl = `http://127.0.0.1:${(listener.address() as AddressInfo).port}/mcp`
+  })
+
+  afterAll(async () => {
+    await new Promise((resolve) => listener.close(resolve))
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    rmSync(join(userData(), 'agent'), { recursive: true, force: true })
+    hits = 0
+  })
+
+  /** The pid of a process that has already exited. */
+  function deadPid(): number {
+    const { pid } = spawnSync(process.execPath, ['-e', ''])
+    expect(pid).toBeGreaterThan(0)
+    return pid as number
+  }
+
+  it('does not send the token when the app that wrote endpoint.json is gone', async () => {
+    // covers: Test-643
+    writeDiscovery(userData(), {
+      url: listenerUrl,
+      token: 'leftover',
+      pid: deadPid(),
+      version: '1'
+    })
+
+    const runs = [
+      await ftpb(['status'], { env: {} }),
+      await ftpb(['list-directory', '--path', '/'], { env: {} }),
+      await ftpb(['auth', 'header'], { env: {} }),
+      await ftpb(['auth', 'token'], { env: {} })
+    ]
+
+    for (const run of runs) {
+      expect(run.code).toBe(EXIT.UNAVAILABLE)
+      expect(run.stdout).toBe('')
+      expect(JSON.parse(run.stderr).error.message).toMatch(
+        /^Stale discovery file.*Start FTP Browser and turn on Agent access/
+      )
+    }
+    expect(hits).toBe(0)
+  })
+
+  it('answers mcp-stdio requests with an error instead of relaying them to a stale endpoint', async () => {
+    // covers: Test-643
+    writeDiscovery(userData(), {
+      url: listenerUrl,
+      token: 'leftover',
+      pid: deadPid(),
+      version: '1'
+    })
+    const request = { jsonrpc: '2.0', id: 1, method: 'tools/list' }
+
+    const run = await ftpb(['mcp-stdio'], { env: {}, stdin: `${JSON.stringify(request)}\n` })
+
+    expect(run.code).toBe(EXIT.OK)
+    expect(JSON.parse(run.stdout)).toEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      error: { code: -32000, message: expect.stringMatching(/^Stale discovery file/) }
+    })
+    expect(run.stderr).toContain('Stale discovery file')
+    expect(hits).toBe(0)
+  })
+
+  it("goes ahead when the pid is alive, or when kill answers EPERM (another user's process)", async () => {
+    // covers: Test-643
+    writeDiscovery(userData(), {
+      url: server.url,
+      token: server.token,
+      pid: process.pid,
+      version: '1'
+    })
+    const alive = await ftpb(['get-status'], { env: {} })
+    const pid = deadPid()
+    writeDiscovery(userData(), { url: server.url, token: server.token, pid, version: '1' })
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' })
+    })
+    const eperm = await ftpb(['get-status'], { env: {} })
+
+    expect([alive.code, eperm.code]).toEqual([EXIT.OK, EXIT.OK])
+    expect(kill).toHaveBeenCalledWith(pid, 0)
+  })
+
+  it('skips the pid check when FTPB_URL is set, but not for FTPB_TOKEN alone', async () => {
+    // covers: Test-644
+    writeDiscovery(userData(), {
+      url: listenerUrl,
+      token: server.token,
+      pid: deadPid(),
+      version: '1'
+    })
+
+    const both = await ftpb(['get-status'], {
+      env: { FTPB_URL: server.url, FTPB_TOKEN: server.token }
+    })
+    const urlOnly = await ftpb(['get-status'], { env: { FTPB_URL: server.url } })
+    const tokenOnly = await ftpb(['get-status'], { env: { FTPB_TOKEN: server.token } })
+
+    expect([both.code, urlOnly.code, tokenOnly.code]).toEqual([EXIT.OK, EXIT.OK, EXIT.UNAVAILABLE])
+    expect(tokenOnly.stderr).toContain('Stale discovery file')
+    expect(hits).toBe(0)
   })
 })
