@@ -35,7 +35,7 @@
 | #   | 결정                                                                                                                                                                                                                                                                             | 근거                                                               |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | S1  | **서비스 계층** `src/main/agent/services/*`가 `AgentServices`(`src/main/agent/types.ts`)를 구현한다. MCP·위험 등급·확인을 모른다. 렌더러/IPC 클로저의 로직은 이곳으로 **옮기지 않고 재구현하거나 순수 함수로 공유**한다(`src/shared`로 옮길 수 있는 순수 함수는 옮겨 GUI와 공유) | GUI 경로를 리팩터링하면 회귀 위험이 크다. 순수 함수만 공유한다     |
-| S2  | **도구 레지스트리** `src/main/mcp/`: 도구마다 `{ name, tier, title, description, inputSchema, outputSchema, plan?, run }`을 한 곳에 정의한다. MCP 등록(어노테이션, 설명 접두사, `_meta`)은 레지스트리에서 **파생**한다                                                           | 도구 수가 18개로 늘어난다. 등급별 표시를 한 곳에서 일관되게 만든다 |
+| S2  | **도구 레지스트리** `src/main/mcp/`: 도구마다 `{ name, tier, title, description, inputSchema, outputSchema, plan?, run }`을 한 곳에 정의한다. MCP 등록(어노테이션, 설명 접두사, `_meta`)은 레지스트리에서 **파생**한다                                                           | 도구 수가 21개로 늘어난다. 등급별 표시를 한 곳에서 일관되게 만든다 |
 | S3  | **정책 엔진과 확인 브로커**는 main에 하나만 둔다. MCP와 CLI가 같은 경로를 지난다(CLI는 MCP 클라이언트이므로 자동으로 그렇다)                                                                                                                                                     | 우회 경로를 없앤다                                                 |
 | S4  | **CLI `ftpb`는 같은 `/mcp` 엔드포인트의 얇은 MCP 클라이언트**다. 별도 REST API를 만들지 않는다. 도구 목록은 실행 시 `tools/list`로 받아 하위 명령을 만든다                                                                                                                       | 도구 정의가 한 벌만 존재한다                                       |
 | S5  | 1단계 결정 **M6(연결 도구 없음)·M7(읽기 전용)은 폐기**한다. M1–M5, M8–M14는 유지한다. `list_transfers`는 `list_jobs`로 바뀐다(전송과 파일 작업을 함께 보여 줌)                                                                                                                   | 사용자 결정                                                        |
@@ -180,7 +180,7 @@ preload 허용 목록·타입(`src/preload/index.ts`, `index.d.ts`, `index.test.
 
 ### 4.2 Tools (레지스트리, 정책, 확인, MCP)
 
-- **Test-450** — `tools/list`에 §2.2의 18개 도구가 있고, 각 도구의 어노테이션이 등급표와 정확히 일치한다(표 기반 테스트).
+- **Test-450** — `tools/list`에 §2.2의 21개 도구가 있고, 각 도구의 어노테이션이 등급표와 정확히 일치한다(표 기반 테스트).
 - **Test-451** — 모든 도구 설명 첫 줄이 `[RISK <등급>:`로 시작하고 현재 정책 값을 담는다. 정책을 바꾸면 다음 `tools/list`에 반영된다.
 - **Test-452** — `_meta`의 `ftp-browser/risk`·`ftp-browser/policy`가 등급·정책과 일치한다.
 - **Test-453** — 정책 `deny`인 등급의 도구는 `tools/list`에 없고, 호출하면 `DENIED_BY_POLICY`.
@@ -196,6 +196,15 @@ preload 허용 목록·타입(`src/preload/index.ts`, `index.d.ts`, `index.test.
 - **Test-463** — 실행된 W·D·X·C 호출과 거부가 `agent:activity`로 나간다.
 - **Test-464** — `get_image_previews`의 MCP 큐가 동시 호출에서도 보조 연결을 1개만 쓴다.
 - **Test-465** — 발견 파일이 listen 시 0600으로 생기고 stop 시 사라진다.
+- **Test-466** — `agent:confirmRespond`·`agent:getPolicy`·`agent:setPolicy`가 IpcResult를 돌려준다. 승인은 `approved === true`일 때만이고, 잘못된 정책은 실패 값이 된다.
+- **Test-467** — `wait_for_jobs`가 기다리는 동안 progressToken이 있으면 progress 통지를 보내고(값은 늘기만 한다), 반환한 뒤에는 보내지 않는다.
+- **Test-468** — `delete`/`delete_local`이 정해진 시간까지만 기다려, 안 끝났으면 operationId·진행 상태·`wait_for_jobs` 안내를, 끝났으면 결과를, 실패면 `JOB_FAILED` isError를 준다.
+- **Test-469** — `get_status`가 연결 정보, 상태별 작업 수(전송과 파일 작업), R을 포함한 등급별 정책표를 준다.
+- **Test-470** — 여러 파일 전송은 묶음 id 하나를 돌려주고, `wait_for_jobs`·`cancel_jobs`가 그것을 소속 전송으로 펼친다.
+- **Test-471** — 로컬 경로 입력에 상대경로나 제어문자가 있으면 스키마 단계에서 거절하고 로컬 서비스를 부르지 않는다.
+- **Test-472** — `open_server_editor`가 비밀번호 칸 없는 요청을 보내고, 창이 없으면 `WINDOW_UNAVAILABLE`이다.
+- **Test-473** — MCP 호출이 끊기면(abort) 보이던 확인은 `agent:confirmCancelled`로 닫히고 대기 중이던 확인은 조용히 빠진다.
+- **Test-474** — FTP 연결 상태가 바뀌면 MCP 미리보기 큐를 비우고, 기다리던 미리보기를 실패로 끝내며 보조 연결을 닫는다.
 
 ### 4.3 Renderer
 

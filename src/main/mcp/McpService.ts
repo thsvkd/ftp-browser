@@ -10,6 +10,7 @@ import {
 } from '@modelcontextprotocol/node'
 import { MCP_PORT } from '@shared/constants'
 import type { McpState } from '@shared/types/mcp'
+import { removeDiscovery, writeDiscovery } from '../agent/discovery'
 
 /** Claude Code에 이 앱을 user 스코프 HTTP MCP 서버로 등록하는 명령 */
 export function buildClaudeCodeCommand(url: string, token: string): string {
@@ -18,6 +19,12 @@ export function buildClaudeCodeCommand(url: string, token: string): string {
 
 const validateHost = localhostHostValidation()
 const validateOrigin = localhostOriginValidation()
+
+/** 발견 파일(L4)을 쓸 userData 폴더와 앱 버전. 없으면 쓰지 않는다(테스트). */
+export interface DiscoveryOptions {
+  userDataDir: string
+  version: string
+}
 
 /**
  * 내장 MCP 서버(Streamable HTTP)의 켜기·끄기·토큰. 설정은 SQLite `settings`의
@@ -35,7 +42,8 @@ export class McpService {
   constructor(
     private db: Database.Database,
     private createToolServer: () => McpServer,
-    private port = MCP_PORT
+    private port = MCP_PORT,
+    private discovery?: DiscoveryOptions
   ) {
     this.token = this.readSetting('mcpToken')
   }
@@ -70,6 +78,7 @@ export class McpService {
   /** 새 토큰은 즉시 적용된다. 이전 토큰으로 등록한 클라이언트는 다음 요청부터 401을 받는다. */
   regenerateToken(): McpState {
     this.saveNewToken()
+    if (this.server) this.publishDiscovery()
     return this.getState()
   }
 
@@ -80,6 +89,7 @@ export class McpService {
     if (!server || !handler) return
     this.server = null
     this.handler = null
+    this.withdrawDiscovery()
     const closed = new Promise<void>((resolve) => server.close(() => resolve()))
     server.closeAllConnections()
     await Promise.all([closed, handler.close()])
@@ -127,6 +137,31 @@ export class McpService {
     this.server = server
     this.handler = handler
     this.error = undefined
+    this.publishDiscovery()
+  }
+
+  /** CLI(`ftpb`)가 앱을 찾는 파일을 0600으로 쓴다. 실패해도 MCP 서버는 그대로 둔다(CLI만 못 찾는다). */
+  private publishDiscovery(): void {
+    if (!this.discovery || !this.token) return
+    try {
+      writeDiscovery(this.discovery.userDataDir, {
+        url: this.getState().url,
+        token: this.token,
+        pid: process.pid,
+        version: this.discovery.version
+      })
+    } catch (err) {
+      console.warn('[mcp] could not write the agent discovery files:', err)
+    }
+  }
+
+  private withdrawDiscovery(): void {
+    if (!this.discovery) return
+    try {
+      removeDiscovery(this.discovery.userDataDir)
+    } catch (err) {
+      console.warn('[mcp] could not remove the agent discovery files:', err)
+    }
   }
 
   private isAuthorized(req: IncomingMessage): boolean {

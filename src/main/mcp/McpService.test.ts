@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import http from 'http'
 import net, { type AddressInfo } from 'net'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import Database from 'better-sqlite3'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { McpService, buildClaudeCodeCommand } from './McpService'
 import { createMcpToolServer } from './mcpTools'
+import { makeDeps } from './__fixtures__/agentToolHarness'
 
 /** 상수 포트(47821)를 쓰지 않도록 비어 있는 포트를 고른다. */
 async function freePort(): Promise<number> {
@@ -28,21 +32,10 @@ function tokenIn(db: Database.Database): string | undefined {
   return row?.value
 }
 
-const toolServer = vi.fn(() =>
-  createMcpToolServer({
-    version: '0.0.0-test',
-    ftp: {
-      getStatus: () => 'disconnected',
-      isConnected: () => false,
-      getHost: () => '',
-      getPort: () => 0,
-      getUser: () => '',
-      list: async () => ({ path: '/', entries: [] })
-    },
-    transfers: { getAll: () => [] },
-    previews: async () => []
-  })
-)
+const toolServer = vi.fn(() => createMcpToolServer(makeDeps()))
+
+/** 기본 정책(D·X·C는 ask, deny 없음)에서 tools/list에 나오는 도구 수 */
+const TOOL_COUNT = 21
 
 /** SDK가 보내는 것과 같은 tools/call POST. Host·Origin을 직접 정할 수 있게 node:http로 보낸다. */
 function postToolCall(port: number, headers: Record<string, string>): Promise<number> {
@@ -137,7 +130,7 @@ describe('McpService HTTP boundary', () => {
     expect(toolServer).not.toHaveBeenCalled()
   })
 
-  it('lets an SDK client with the token list exactly the four read-only tools', async () => {
+  it('lets an SDK client with the token list the tools, read-only ones marked as such', async () => {
     // covers: Test-235
     const state = await service.setEnabled(true)
     const client = await connectClient(state.url, tokenIn(db)!)
@@ -145,13 +138,11 @@ describe('McpService HTTP boundary', () => {
     const { tools } = await client.listTools()
     await client.close()
 
-    expect(tools.map((t) => t.name).sort()).toEqual([
-      'get_image_previews',
-      'get_status',
-      'list_directory',
-      'list_transfers'
-    ])
-    for (const tool of tools) {
+    expect(tools).toHaveLength(TOOL_COUNT)
+    expect(tools.map((t) => t.name)).toEqual(
+      expect.arrayContaining(['get_image_previews', 'get_status', 'list_directory', 'list_jobs'])
+    )
+    for (const tool of tools.filter((t) => t.description?.startsWith('[RISK R:'))) {
       expect(tool.annotations, tool.name).toMatchObject({
         readOnlyHint: true,
         destructiveHint: false
@@ -244,7 +235,7 @@ describe('McpService settings', () => {
     expect(service.getState()).toMatchObject({ enabled: true, running: true })
     expect(service.getState().command).toContain(token)
     const client = await connectClient(service.getState().url, token!)
-    expect((await client.listTools()).tools).toHaveLength(4)
+    expect((await client.listTools()).tools).toHaveLength(TOOL_COUNT)
     await client.close()
   })
 
@@ -260,7 +251,7 @@ describe('McpService settings', () => {
     expect(state.command).toContain(newToken)
     expect(await postToolCall(port, { Authorization: `Bearer ${oldToken}` })).toBe(401)
     const client = await connectClient(state.url, newToken)
-    expect((await client.listTools()).tools).toHaveLength(4)
+    expect((await client.listTools()).tools).toHaveLength(TOOL_COUNT)
     await client.close()
   })
 
@@ -270,5 +261,42 @@ describe('McpService settings', () => {
       'claude mcp add --scope user --transport http ftp-browser http://127.0.0.1:47821/mcp ' +
         '--header "Authorization: Bearer abc-123_XYZ"'
     )
+  })
+})
+
+describe('McpService discovery file', () => {
+  it('writes the endpoint and token files 0600 while listening and removes them on stop', async () => {
+    // covers: Test-465
+    const userData = mkdtempSync(join(tmpdir(), 'ftpb-discovery-'))
+    try {
+      await service.stop()
+      service = new McpService(db, toolServer, port, { userDataDir: userData, version: '9.8.7' })
+      const endpoint = join(userData, 'agent', 'endpoint.json')
+      const tokenFile = join(userData, 'agent', 'token')
+
+      const state = await service.setEnabled(true)
+
+      expect(JSON.parse(readFileSync(endpoint, 'utf8'))).toEqual({
+        url: state.url,
+        pid: process.pid,
+        version: '9.8.7'
+      })
+      expect(readFileSync(tokenFile, 'utf8').trim()).toBe(tokenIn(db))
+      if (process.platform !== 'win32') {
+        expect(statSync(endpoint).mode & 0o777).toBe(0o600)
+        expect(statSync(tokenFile).mode & 0o777).toBe(0o600)
+      }
+
+      // 토큰을 바꾸면 CLI가 읽는 파일도 바로 바뀐다.
+      service.regenerateToken()
+      expect(readFileSync(tokenFile, 'utf8').trim()).toBe(tokenIn(db))
+
+      await service.setEnabled(false)
+
+      expect(existsSync(endpoint)).toBe(false)
+      expect(existsSync(tokenFile)).toBe(false)
+    } finally {
+      rmSync(userData, { recursive: true, force: true })
+    }
   })
 })

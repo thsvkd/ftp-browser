@@ -12,9 +12,15 @@ import { registerDragHandlers } from './ipc/dragHandlers'
 import { registerGalleryHandlers } from './ipc/galleryHandlers'
 import { registerUpdateHandlers } from './ipc/updateHandlers'
 import { registerMcpHandlers } from './ipc/mcpHandlers'
+import { registerAgentHandlers } from './ipc/agentHandlers'
 import { McpService } from './mcp/McpService'
 import { createMcpToolServer } from './mcp/mcpTools'
 import { createThumbnailPreviewer } from './mcp/thumbnailPreviews'
+import { AgentPolicyStore } from './mcp/agentPolicy'
+import { ConfirmationBroker, createAgentNotifier } from './mcp/confirmationBroker'
+import { JobHandles } from './mcp/jobHandles'
+import { attachRemoteChangeForwarding, createAgentEventSink } from './agent/events'
+import { createAgentServices } from './agent/services'
 import { registerDevtools } from './debug/devtools'
 import { applyApplicationMenu } from './menu/appMenu'
 import { UpdateManager, isAutomaticUpdateSupported } from './update/UpdateManager'
@@ -116,24 +122,51 @@ app.whenReady().then(() => {
   // Register IPC handlers
   const operationManager = registerOperationHandlers(win)
   const { manager, fileOps } = registerFtpHandlers(win, operationManager)
-  registerLocalFsHandlers(win, operationManager)
+  const localFs = registerLocalFsHandlers(win, operationManager)
   const transferQueue = registerTransferHandlers(win, fileOps, manager)
   const { cacheManager, generator } = registerThumbnailHandlers(win, db, manager)
   registerPreviewHandlers(db, manager)
   registerDragHandlers(manager)
   registerGalleryHandlers(win, db, manager)
 
-  // 내장 MCP 서버는 GUI와 같은 연결·전송 큐·썸네일 캐시를 읽기 전용으로 쓴다(기본 꺼짐)
+  // 에이전트(내장 MCP 서버, ftpb)는 GUI와 같은 연결·전송 큐·파일 작업·썸네일 캐시를 쓴다(기본 꺼짐).
+  // macOS activate가 창을 새로 만들 수 있으므로 창은 매번 getter로 얻는다.
+  const getWindow = (): BrowserWindow | null => mainWindow
+  const agentEvents = createAgentEventSink(getWindow)
+  attachRemoteChangeForwarding(manager, agentEvents)
+  // 전송·작업 알림을 구독하므로 한 번만 만든다.
+  const agentServices = createAgentServices({
+    db,
+    ftp: manager,
+    fileOps,
+    queue: transferQueue,
+    operations: operationManager,
+    localFs,
+    events: agentEvents
+  })
+  const agentPolicy = new AgentPolicyStore(db)
+  const confirmations = new ConfirmationBroker(getWindow)
+  const agentNotifier = createAgentNotifier(getWindow)
+  const jobHandles = new JobHandles()
   const previews = createThumbnailPreviewer(manager, generator, cacheManager)
-  const mcp = new McpService(db, () =>
-    createMcpToolServer({
-      version: app.getVersion(),
-      ftp: manager,
-      transfers: transferQueue,
-      previews
-    })
+  const mcp = new McpService(
+    db,
+    () =>
+      createMcpToolServer({
+        version: app.getVersion(),
+        services: agentServices,
+        operations: operationManager,
+        policy: agentPolicy,
+        confirm: (request, signal) => confirmations.request(request, signal),
+        notify: agentNotifier,
+        previews,
+        jobHandles
+      }),
+    undefined,
+    { userDataDir: app.getPath('userData'), version: app.getVersion() }
   )
   registerMcpHandlers(mcp)
+  registerAgentHandlers(agentPolicy, confirmations)
   void mcp.init()
   app.on('will-quit', () => void mcp.stop())
 
