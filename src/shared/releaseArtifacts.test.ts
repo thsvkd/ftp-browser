@@ -547,6 +547,16 @@ describe('electron-builder.yml Windows release contract', () => {
     expect(patterns).toContain('**/node_modules/@img/**/*')
   })
 
+  it('should unpack the ftpb CLI from ASAR so the app executable can run it as Node', () => {
+    // covers: Test-562
+    // 셔임은 `ELECTRON_RUN_AS_NODE=1 <앱> <cli>`로 돈다. Node 모드의 진입 스크립트와 Claude Desktop의
+    // stdio 설정이 가리키는 경로는 실제 파일이어야 하므로 app.asar.unpacked로 꺼낸다(L1).
+    const unpack = yamlListItems(yml, 'asarUnpack')
+    expect(unpack).toContain('out/cli/**')
+    // 빌드 산출물(out/cli/ftpb.cjs)은 이미 files 허용 목록(out/**) 안에 있다
+    expect(yamlListItems(yml, 'files')).toContain('out/**')
+  })
+
   it('should ship koffi unpacked on Windows only', () => {
     // koffi는 Windows 희소 파일(sparseFile.ts)에만 쓰인다. 맥·리눅스 패키지에 네이티브 모듈을 싣지 않는다.
     // 플랫폼 files는 최상위 목록을 대신하므로 허용 목록을 되풀이한 뒤 koffi만 뺀다

@@ -20,6 +20,8 @@ files:
   - package.json
 asarUnpack:
   - resources/**
+  # ftpb CLI(§2.6 L1). 셔임·Claude Desktop 설정이 `ELECTRON_RUN_AS_NODE=1 <앱> <이 파일>`로 실행하므로 실제 파일이어야 한다.
+  - out/cli/**
   - '**/node_modules/sharp/**/*'
   - '**/node_modules/@img/**/*'
   # Windows 희소 파일용 FFI(sparseFile.ts). 네이티브 모듈은 플랫폼별 @koromix/koffi-* 패키지에 있다.

@@ -13,6 +13,7 @@ import { registerGalleryHandlers } from './ipc/galleryHandlers'
 import { registerUpdateHandlers } from './ipc/updateHandlers'
 import { registerMcpHandlers } from './ipc/mcpHandlers'
 import { registerAgentHandlers } from './ipc/agentHandlers'
+import { registerAgentCliHandlers } from './ipc/agentCliHandlers'
 import { McpService } from './mcp/McpService'
 import { createMcpToolServer } from './mcp/mcpTools'
 import { createThumbnailPreviewer } from './mcp/thumbnailPreviews'
@@ -167,6 +168,7 @@ app.whenReady().then(() => {
   )
   registerMcpHandlers(mcp)
   registerAgentHandlers(agentPolicy, confirmations)
+  registerAgentCliHandlers()
   void mcp.init()
   app.on('will-quit', () => void mcp.stop())
 

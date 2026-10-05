@@ -134,6 +134,32 @@ through the preload bridge `window.api`.
   `--smoke-test` (`src/main/smokeTest.ts`) works only in a packaged app and needs
   `FTP_BROWSER_SMOKE_USER_DATA`; `npm run smoke:packaged` sets both.
 
+## Agent access (MCP and `ftpb`)
+
+Specs: `docs/handoff/agent-friendly.md` (phase 1), `agent-operations.md` (phase 2). Off by default.
+
+- `src/main/agent/services/*` implement `AgentServices` (`src/main/agent/types.ts`): app logic only,
+  no MCP, tiers or confirmation. `src/main/agent/events.ts` sends the GUI-sync events.
+- `src/main/mcp/`: `McpService.ts` (Streamable HTTP on 127.0.0.1:47821, Bearer token, writes the
+  discovery files), `toolRegistry.ts` (annotations, `[RISK …]` first line, `_meta`
+  `ftp-browser/risk|policy`; policy → dryRun → confirmation → run), `tools/*.ts` (definitions),
+  `agentPolicy.ts` (`settings.agentPolicy`), `confirmationBroker.ts`. The app is the only gate.
+- Tiers, one per tool: R read · W reversible write · D destructive · X upload · C credentials.
+  New tool: `readTool`/`actionTool` in `src/main/mcp/tools/` (`actionTool` needs `plan()` for dryRun
+  and the dialog), add it to `TOOL_DEFINITIONS` (`mcpTools.ts`), the §2.2 table and its test
+  (Test-450), and `agent.tool.<name>` in all 11 locales.
+- `ftpb` (`src/main/cli/`): a dependency-free MCP client of the same endpoint (one POST per request
+  with the 2026-07-28 `_meta` envelope; `mcp-stdio` relays stdio clients). `script/build-cli.mjs`,
+  run by a plugin in `electron.vite.config.ts`, bundles it into `out/cli/ftpb.cjs` (Node built-ins
+  only), unpacked from asar. Exit codes 0 ok, 1 tool error, 2 usage, 3 refused, 4 app unavailable.
+- Discovery: `src/main/agent/discovery.ts`, `<userData>/agent/{endpoint.json,token}` (0600);
+  userData is `<appData>/ftp-browser` on every OS (packaged package.json has no productName).
+- `src/shared/agentClients.ts` (pure): per-client snippets and `SKILL.md`, shared by Settings and
+  `ftpb setup`. `src/main/agent/cliInstall.ts`: shim, Windows user PATH, skill install.
+- Tests: `releaseArtifacts.test.ts` pins `asarUnpack: out/cli/**` (Test-562); `script/build-cli.test.mjs`
+  builds the CLI and runs `--help` from a temp copy (Test-557); CLI tests use the real `McpService`
+  with fake tools (`src/main/cli/__fixtures__/`).
+
 ---
 
 # CLAUDE.md

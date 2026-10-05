@@ -245,6 +245,13 @@ preload 허용 목록·타입(`src/preload/index.ts`, `index.d.ts`, `index.test.
 - **Test-560** — CLI 설치: 플랫폼별 셔임 내용과 경로(macOS/Linux sh, Windows cmd), AppImage에서 `$APPIMAGE` 사용, 사용자 PATH 갱신 명령이 `setx`를 쓰지 않는다(실행부는 주입한 가짜로 검증).
 - **Test-561** — 스킬 설치가 두 경로에 `SKILL.md`를 쓰고 기존 파일을 덮어쓴다(자기 파일만).
 - **Test-562** — `electron-builder.yml`의 `asarUnpack`에 CLI 산출물이 있다(`releaseArtifacts.test.ts`의 다른 계약은 그대로 통과).
+- **Test-563** — `writeDiscovery`가 `agent/`(0700)에 `endpoint.json`·`token`(0600)을 임시 파일 없이 원자적으로 쓰고, `readDiscovery`가 되읽으며(없거나 깨졌으면 null), `removeDiscovery`는 자기 pid의 파일만 지운다.
+- **Test-564** — `defaultUserDataDir`가 OS별 Electron userData(`<appData>/ftp-browser`, Linux는 `XDG_CONFIG_HOME` 반영)를 돌려준다.
+- **Test-565** — 에이전트 접근이 꺼져 토큰이 없으면 모든 스니펫 안내가 그 사실을 말하고 리터럴 토큰 자리에 켜라는 문구가 들어간다.
+- **Test-566** — Windows 경로(공백·역슬래시)가 들어가도 TOML·JSON·셸 스니펫이 깨지지 않고, 홈 아래 토큰 파일은 `~/…`로 쓴다.
+- **Test-567** — 앱이 쓴 셔임(표식 있음)만 시작 시 현재 실행 파일로 다시 쓰고, 사용자가 바꾼 셔임은 두며, 셔임이 없으면 아무것도 하지 않는다.
+- **Test-568** — `ftpb setup <client>`가 스니펫을 stdout에, 안내를 stderr에 쓰고(`--list`, 모르는 클라이언트는 exit 2), `ftpb skill install --dir`가 그 폴더에 설치한다.
+- **Test-569** — `agent:getClientSetups`·`getCliStatus`·`installCli`·`installSkill` 핸들러가 등록되고, 엔드포인트가 없으면 꺼짐 안내, 있으면 토큰·토큰 파일·앱 실행 파일로 스니펫을 만들며, 실패는 `IpcResult`로 돌려준다.
 
 ---
 

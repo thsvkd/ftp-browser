@@ -24,20 +24,20 @@ Windows 설치판은 앱을 시작할 때 새 버전을 확인합니다. 설정�
 
 포터블 Windows 실행 파일과 macOS·Linux 패키지는 자동 업데이트 대상이 아닙니다. 새 버전은 GitHub Releases에서 직접 내려받아 설치해야 합니다. 자동 업데이트 기능이 처음 포함된 버전도 이전 버전에서 한 번 수동 설치해야 이후 릴리스부터 자동 업데이트를 받을 수 있습니다.
 
-## 에이전트 접근 (MCP)
+## 에이전트 연동
 
-앱에 읽기 전용 MCP 서버가 들어 있어 Claude Code 같은 AI 에이전트가 앱이 연결 중인 FTP 서버의 폴더 목록, 이미지 미리보기, 전송 목록을 볼 수 있습니다. 기본으로 꺼져 있고, 에이전트는 연결을 바꾸거나 파일을 수정할 수 없습니다.
+Claude Code, Codex, Gemini CLI 같은 AI 에이전트가 이 앱을 대신 조작할 수 있습니다. 저장된 서버 연결, 폴더 탐색, 다운로드·업로드, 이름 변경, 삭제를 도구로 열고, 에이전트가 한 일은 앱 창에 그대로 보입니다. 기본으로 꺼져 있습니다.
 
-1. 설정의 **Agent access (MCP)**에서 **Enable MCP server**를 켭니다. 서버는 이 컴퓨터(`http://127.0.0.1:47821/mcp`)에서만 열립니다.
-2. **Copy Claude Code command**로 복사한 명령을 터미널에서 실행합니다. 명령에 접속 토큰이 들어 있으므로 다른 사람과 공유하지 마세요.
+1. 설정의 **Agent access (MCP)**에서 **Enable MCP server**를 켭니다. 서버는 이 컴퓨터(`http://127.0.0.1:47821/mcp`)에서만 열리고 접속 토큰을 요구합니다.
+2. **Command-line tool**의 **Install**로 `ftpb` 명령을 설치합니다(macOS·Linux는 `~/.local/bin/ftpb`, Windows는 사용자 폴더의 `ftpb.cmd`와 사용자 PATH). 그 폴더가 PATH에 없으면 화면에 나오는 한 줄을 실행합니다.
+3. **Connect an agent**에서 에이전트를 고르고 **Copy setup**으로 복사한 설정을 그 에이전트에 넣습니다. 터미널에서는 `ftpb setup <client>`가 같은 설정을 보여 줍니다(`ftpb setup --list`로 목록). 대부분의 설정은 토큰을 담지 않고 실행할 때 `ftpb`나 토큰 파일에서 읽습니다.
+4. 셸을 쓰는 에이전트를 위해 **Agent skill**을 설치하면 에이전트가 `ftpb` 사용법을 스스로 찾습니다(`ftpb skill install`과 같음).
 
-   ```sh
-   claude mcp add --scope user --transport http ftp-browser http://127.0.0.1:47821/mcp --header "Authorization: Bearer <TOKEN>"
-   ```
+`ftpb`는 앱의 MCP 서버에 붙는 얇은 클라이언트라 앱이 꺼져 있으면 동작하지 않습니다. `ftpb tools`로 도구와 위험 등급을, `ftpb <도구> --help`로 인자를 보고 `ftpb list-directory --path /photos`처럼 실행합니다. 파이프로 받으면 JSON을 출력하고, 종료 코드는 0 성공, 1 도구 오류, 2 사용법 오류, 3 앱이 거부, 4 앱 미실행·접근 꺼짐·토큰 거부입니다. Claude Desktop처럼 로컬 HTTP에 직접 붙지 못하는 클라이언트는 `ftpb mcp-stdio` 브리지를 씁니다.
 
-3. 앱에서 FTP 서버에 연결한 뒤 에이전트에게 요청합니다. 앱이 꺼져 있거나 설정이 꺼져 있으면 에이전트는 접속하지 못합니다.
+모든 도구는 R(읽기)·W(데이터 손실 없는 변경)·D(삭제)·X(업로드)·C(서버 설정) 중 한 등급이고, **Permissions**에서 등급마다 Allow·Ask·Block을 고릅니다. 기본값은 D·X·C가 Ask라서 에이전트가 삭제·업로드·서버 설정을 하려 하면 앱이 확인 창을 띄우며, 에이전트가 어떤 클라이언트를 쓰든 이 결정은 앱이 내립니다.
 
-**Regenerate token**을 누르면 이전 토큰은 바로 거부됩니다. `claude mcp remove ftp-browser`로 기존 등록을 지운 뒤 새 명령으로 다시 등록하세요.
+**Regenerate token**을 누르면 이전 토큰은 바로 거부됩니다. 토큰을 직접 담는 설정(Gemini CLI, Qwen Code, VS Code에 입력한 값)만 다시 넣으면 됩니다.
 
 ## 자동 검증
 
