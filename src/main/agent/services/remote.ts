@@ -1,0 +1,189 @@
+import { posix } from 'path'
+import { getParentRemotePath } from '../../utils/remotePath'
+import type { FtpFileEntry } from '@shared/types/ftp'
+import { AgentError, MAX_PLAN_ITEMS, type AgentServices, type DeletePlan } from '../types'
+import { checkRemotePath, outermost, tooManyItems } from './paths'
+import type { AgentServiceDeps } from './index'
+
+type Ftp = AgentServiceDeps['ftp']
+
+const ROOT: FtpFileEntry = {
+  name: '',
+  type: 'directory',
+  size: 0,
+  modifiedAt: '',
+  rawModifiedAt: '',
+  isImage: false
+}
+
+export function requireConnected(ftp: Ftp): void {
+  if (!ftp.isConnected()) {
+    throw new AgentError('NOT_CONNECTED', 'FTP Browser is not connected to an FTP server.')
+  }
+}
+
+/** '.'·'..'를 뺀 폴더 내용 */
+export async function listChildren(ftp: Ftp, dir: string): Promise<FtpFileEntry[]> {
+  return (await ftp.list(dir)).entries.filter((e) => e.name !== '.' && e.name !== '..')
+}
+
+/**
+ * 부모 폴더 목록에서 찾은 항목. 없으면 undefined, 부모를 읽지 못하면 그 에러다.
+ * 파일을 직접 LIST하는 방식은 서버마다 달라 쓰지 않는다. `cache`는 한 계획 안에서 부모 목록을 재사용한다.
+ */
+export async function findRemote(
+  ftp: Ftp,
+  p: string,
+  cache?: Map<string, FtpFileEntry[]>
+): Promise<FtpFileEntry | undefined> {
+  if (p === '/') return ROOT
+  const parent = getParentRemotePath(p)
+  let entries = cache?.get(parent)
+  if (!entries) {
+    entries = await listChildren(ftp, parent)
+    cache?.set(parent, entries)
+  }
+  const name = posix.basename(p)
+  return entries.find((e) => e.name === name)
+}
+
+/** 계획의 대상들. 하나라도 없으면 NOT_FOUND. */
+export async function statRemote(
+  ftp: Ftp,
+  paths: string[]
+): Promise<Array<{ path: string; entry: FtpFileEntry }>> {
+  const cache = new Map<string, FtpFileEntry[]>()
+  const out: Array<{ path: string; entry: FtpFileEntry }> = []
+  for (const p of paths) {
+    const entry = await findRemote(ftp, p, cache)
+    if (!entry) throw new AgentError('NOT_FOUND', `Not found on the server: ${p}`)
+    out.push({ path: p, entry })
+  }
+  return out
+}
+
+export function createRemoteService(
+  deps: Pick<AgentServiceDeps, 'ftp' | 'fileOps' | 'operations'>
+): AgentServices['remote'] {
+  const { ftp, fileOps, operations } = deps
+
+  /** ftp:deleteBatch와 같은 순서로 지운다(대상 사이에서만 취소 확인). 진행률 단위는 지운 파일+폴더 수다. */
+  const runDelete = async (id: string, plan: DeletePlan): Promise<void> => {
+    const planned = plan.totalFiles + plan.totalDirectories
+    // 계획 뒤에 트리가 커졌으면 total을 늘린다
+    const report = (completed: number, p: string): void =>
+      operations.progress(id, completed, posix.basename(p), Math.max(planned, completed))
+    let done = 0
+    try {
+      for (const target of plan.targets) {
+        if (operations.isCancelled(id)) {
+          operations.markCancelled(id)
+          return
+        }
+        report(done, target.path)
+        if (target.kind === 'directory') {
+          let removed = 0
+          await fileOps.deleteDirectory(target.path, (n, _total, p) => {
+            removed = n
+            report(done + n, p)
+          })
+          done += removed
+        } else {
+          await fileOps.deleteFile(target.path)
+          report(++done, target.path)
+        }
+      }
+      operations.complete(id)
+    } catch (err) {
+      operations.fail(id, err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  return {
+    list: async (p) => {
+      const dir = checkRemotePath(p)
+      requireConnected(ftp)
+      return ftp.list(dir)
+    },
+
+    mkdir: async (p) => {
+      const dir = checkRemotePath(p)
+      requireConnected(ftp)
+      await fileOps.mkdir(dir)
+      // ensureRemoteDir는 MKD의 음수 응답을 "이미 있음"으로 보고 삼킨다. 정말 폴더가 있는지 확인한다.
+      const made = await findRemote(ftp, dir).catch(() => undefined)
+      if (!made) {
+        throw new Error(
+          `The server did not create ${dir}. Check that you may write to its parent folder.`
+        )
+      }
+      if (made.type !== 'directory') {
+        throw new AgentError('TARGET_EXISTS', `${dir} already exists on the server as a file.`)
+      }
+    },
+
+    rename: async (from, to) => {
+      const src = checkRemotePath(from)
+      const dst = checkRemotePath(to)
+      requireConnected(ftp)
+      // T4: 많은 서버가 RNTO로 대상을 덮어쓴다. RNFR을 보내기 전에 대상이 없는지 확인한다.
+      // 대상 폴더를 읽지 못하면 확인할 수 없으므로 그 에러로 멈춘다.
+      if (await findRemote(ftp, dst)) {
+        throw new AgentError(
+          'TARGET_EXISTS',
+          `${dst} already exists on the server; rename never overwrites. Choose another name or delete it first.`
+        )
+      }
+      await fileOps.rename(src, dst)
+    },
+
+    planDelete: async (paths) => {
+      const checked = paths.map(checkRemotePath)
+      if (checked.includes('/')) {
+        throw new AgentError('INVALID_PATH', 'Refusing to delete the root folder of the server.')
+      }
+      requireConnected(ftp)
+      const targets = await statRemote(ftp, outermost(checked, '/'))
+      let totalFiles = 0
+      let totalDirectories = 0
+      const addFile = (): void => {
+        if (++totalFiles > MAX_PLAN_ITEMS) throw tooManyItems()
+      }
+      const count = async (dir: string): Promise<void> => {
+        totalDirectories++
+        for (const entry of await listChildren(ftp, dir)) {
+          // removeRemoteDirRecursive와 같이 심링크는 따라가지 않고 파일처럼 지운다
+          if (entry.type === 'directory') await count(posix.join(dir, entry.name))
+          else addFile()
+        }
+      }
+      for (const { path, entry } of targets) {
+        if (entry.type === 'directory') await count(path)
+        else addFile()
+      }
+      return {
+        targets: targets.map(({ path, entry }) => ({
+          path,
+          kind: entry.type === 'directory' ? ('directory' as const) : ('file' as const)
+        })),
+        totalFiles,
+        totalDirectories
+      }
+    },
+
+    startDelete: (plan) => {
+      const { targets } = plan
+      const job = operations.create(
+        'delete',
+        {
+          itemCount: targets.length,
+          itemName: targets.length === 1 ? posix.basename(targets[0].path) : undefined
+        },
+        'files',
+        plan.totalFiles + plan.totalDirectories
+      )
+      void runDelete(job.id, plan)
+      return job.id
+    }
+  }
+}

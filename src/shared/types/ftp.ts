@@ -61,6 +61,16 @@ export interface FtpListResult {
   entries: FtpFileEntry[]
 }
 
+/**
+ * 원격 측 상태를 변경한 작업의 알림. 폴더 미리보기 등 캐시 무효화 hook이 구독한다.
+ * `download`처럼 read-only 작업은 emit하지 않는다. main은 렌더러에 `ftp:remoteChanged`로도 보낸다.
+ */
+export interface FtpMutationEvent {
+  kind: 'delete' | 'rename' | 'mkdir' | 'upload'
+  remotePath: string
+  newPath?: string
+}
+
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
 export interface FtpConnectionState {

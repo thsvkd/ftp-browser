@@ -171,6 +171,12 @@ preload 허용 목록·타입(`src/preload/index.ts`, `index.d.ts`, `index.test.
 - **Test-412** — `mutation` 이벤트가 `ftp:remoteChanged`로 전달된다(창이 파괴되었으면 보내지 않는다).
 - **Test-413** — `local.mkdir`/`rename`/`startDelete`가 `local:changed`를 보낸다.
 - **Test-414** — 로컬 경로에 상대경로나 제어문자가 있으면 `INVALID_PATH`.
+- **Test-415** — `servers.remove`가 저장 서버와 그 최근 경로를 지우고, 없는 id는 `NOT_FOUND`.
+- **Test-416** — `startDownload`는 계획 뒤에 생긴 로컬 파일을 받지 않고(기존 파일 보존), 계획은 받는 중인 다운로드의 로컬 경로도 기존 파일처럼 피한다.
+- **Test-417** — `remote.mkdir`는 MKD 뒤에 폴더가 없으면(서버가 조용히 거부) 실패하고, 같은 이름의 파일이 있으면 `TARGET_EXISTS`.
+- **Test-418** — 끝난 전송·작업이 큐나 작업 패널에서 빠진 뒤에도 `jobs.get`/`wait`이 마지막 상태를 돌려준다.
+- **Test-419** — 원격 경로가 상대경로이거나 CR·LF·NUL을 담으면 모든 원격 서비스가 `INVALID_PATH`이고 서버에 닿지 않는다. 루트 삭제도 `INVALID_PATH`.
+- **Test-420** — `local.rename`은 대상이 있으면 `TARGET_EXISTS`, 다른 폴더로 옮기려 하면 `INVALID_PATH`.
 
 ### 4.2 Tools (레지스트리, 정책, 확인, MCP)
 

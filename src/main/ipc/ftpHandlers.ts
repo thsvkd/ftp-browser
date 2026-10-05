@@ -3,7 +3,14 @@ import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
 import { OperationManager } from '../operation/OperationManager'
 import { getDatabase } from '../db/database'
-import { listServers, recordConnection, saveServer, ServerSaveError } from '../db/servers'
+import {
+  deleteServer,
+  getRecentPaths,
+  listServers,
+  recordConnection,
+  saveServer,
+  ServerSaveError
+} from '../db/servers'
 import { ipcError } from '../utils/errorClassifier'
 import type {
   FtpConnectPayload,
@@ -112,18 +119,7 @@ export function registerFtpHandlers(
 
   ipcMain.handle('ftp:deleteServer', (_event, serverId: number): IpcResult<void> => {
     try {
-      const db = getDatabase()
-      // Delete server and its recent paths
-      const row = db.prepare('SELECT host, port FROM servers WHERE id = ?').get(serverId) as
-        | { host: string; port: number }
-        | undefined
-      if (row) {
-        db.prepare('DELETE FROM server_recent_paths WHERE server_host = ? AND server_port = ?').run(
-          row.host,
-          row.port
-        )
-      }
-      db.prepare('DELETE FROM servers WHERE id = ?').run(serverId)
+      deleteServer(getDatabase(), serverId)
       return { success: true, data: undefined }
     } catch (err) {
       return ipcError(err)
@@ -134,17 +130,7 @@ export function registerFtpHandlers(
     'ftp:getRecentPaths',
     (_event, host: string, port: number): IpcResult<RecentPath[]> => {
       try {
-        const db = getDatabase()
-        // 저장된 서버처럼 호스트는 대소문자를 가리지 않는다('NAS.local'과 'nas.local'은 같은 서버).
-        const rows = db
-          .prepare(
-            'SELECT path, last_visited FROM server_recent_paths WHERE lower(server_host) = lower(?) AND server_port = ? ORDER BY last_visited DESC LIMIT 20'
-          )
-          .all(host, port) as Array<{ path: string; last_visited: string }>
-        return {
-          success: true,
-          data: rows.map((r) => ({ path: r.path, lastVisited: r.last_visited }))
-        }
+        return { success: true, data: getRecentPaths(getDatabase(), host, port) }
       } catch (err) {
         console.warn('[ftpHandlers] Failed to load recent paths:', err)
         return { success: true, data: [] }

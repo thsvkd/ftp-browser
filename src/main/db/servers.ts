@@ -4,7 +4,8 @@ import {
   DEFAULT_MAX_TRANSFERS,
   isValidMaxTransfers,
   type FtpConnectPayload,
-  type FtpServer
+  type FtpServer,
+  type RecentPath
 } from '@shared/types/ftp'
 
 /** A save the renderer can explain in its own language: `code` picks the message. */
@@ -191,4 +192,37 @@ export function listServers(db: Database.Database): FtpServer[] {
     )
     .all() as ServerRow[]
   return rows.map(toServer)
+}
+
+export function getServerById(db: Database.Database, id: number): FtpServer | undefined {
+  const row = db
+    .prepare(
+      'SELECT id, name, host, port, username, password_enc, secure, max_transfers, last_connected FROM servers WHERE id = ?'
+    )
+    .get(id) as ServerRow | undefined
+  return row && toServer(row)
+}
+
+/** 저장된 서버와 그 최근 경로를 지운다. 없는 id면 아무것도 하지 않는다. */
+export function deleteServer(db: Database.Database, id: number): void {
+  const row = db.prepare('SELECT host, port FROM servers WHERE id = ?').get(id) as
+    | { host: string; port: number }
+    | undefined
+  if (row) {
+    db.prepare('DELETE FROM server_recent_paths WHERE server_host = ? AND server_port = ?').run(
+      row.host,
+      row.port
+    )
+  }
+  db.prepare('DELETE FROM servers WHERE id = ?').run(id)
+}
+
+/** 이 서버에서 연 폴더, 최근 순 20개. 저장된 서버처럼 호스트는 대소문자를 가리지 않는다. */
+export function getRecentPaths(db: Database.Database, host: string, port: number): RecentPath[] {
+  const rows = db
+    .prepare(
+      'SELECT path, last_visited FROM server_recent_paths WHERE lower(server_host) = lower(?) AND server_port = ? ORDER BY last_visited DESC LIMIT 20'
+    )
+    .all(host, port) as Array<{ path: string; last_visited: string }>
+  return rows.map((r) => ({ path: r.path, lastVisited: r.last_visited }))
 }
