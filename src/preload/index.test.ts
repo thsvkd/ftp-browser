@@ -102,6 +102,44 @@ describe('preload api', () => {
     expect(() => on('transfer:progress', vi.fn())).toThrow('IPC event channel not allowed')
   })
 
+  it('should allow every agent-operations channel of spec §2.7', async () => {
+    // covers: Test-513
+    // 렌더러 테스트는 window.api를 목으로 바꾸므로 허용 목록 누락은 여기서만 잡힌다.
+    const api = await loadExposedApi()
+    const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>
+    const on = api.on as (channel: string, callback: (...args: unknown[]) => void) => () => void
+
+    for (const channel of [
+      'agent:confirmRespond',
+      'agent:getPolicy',
+      'agent:setPolicy',
+      'agent:getClientSetups',
+      'agent:getCliStatus',
+      'agent:installCli',
+      'agent:installSkill'
+    ]) {
+      await invoke(channel, 'arg')
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith(channel, 'arg')
+    }
+
+    for (const channel of [
+      'ftp:remoteChanged',
+      'local:changed',
+      'agent:session',
+      'agent:confirmRequest',
+      'agent:confirmCancelled',
+      'agent:activity',
+      'agent:openServerEditor'
+    ]) {
+      const callback = vi.fn()
+      on(channel, callback)
+      const listener = vi.mocked(ipcRenderer.on).mock.calls.at(-1)?.[1]
+      expect(ipcRenderer.on).toHaveBeenLastCalledWith(channel, expect.any(Function))
+      listener?.({} as Electron.IpcRendererEvent, { channel })
+      expect(callback).toHaveBeenCalledWith({ channel })
+    }
+  })
+
   it('should allow saving a server without connecting', async () => {
     const api = await loadExposedApi()
     const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>

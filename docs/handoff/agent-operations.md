@@ -213,6 +213,12 @@ preload 허용 목록·타입(`src/preload/index.ts`, `index.d.ts`, `index.test.
 - **Test-511** — `agent:activity`가 토스트를 띄운다.
 - **Test-512** — `agent:openServerEditor`가 서버 편집기를 미리 채워 열고 비밀번호 칸은 비어 있다.
 - **Test-513** — 새 IPC 채널이 preload 허용 목록에 모두 있다(`src/preload/index.test.ts`).
+- **Test-514** — 설정의 "에이전트 스킬 설치" 버튼이 `agent:installSkill`을 부르고 설치 경로를 토스트로 알린다.
+- **Test-515** — 정책 저장·CLI 설치·스킬 설치·스니펫 복사가 `{success:false}`나 reject면 오류 토스트를 띄우고, 저장되지 않은 정책 값을 보이지 않는다.
+- **Test-516** — GUI가 직접 연결 중(`useServerStore.connecting`)일 때 온 `agent:session`은 무시한다(GUI 연결 흐름을 깨지 않음).
+- **Test-517** — 확인 요청이 여러 개 오면 한 번에 하나씩 도착 순서대로 보이고, 같은 id는 한 번만 묻는다.
+- **Test-518** — §2.2의 모든 도구에 `agent.tool.<tool>` 제목이, 모든 등급에 `agent.tier.<등급>` 이름이 있고, 모르는 도구는 이름 그대로 보인다.
+- **Test-519** — 동기화가 시작한 새로 고침이 끝나기 전에 사용자가 다른 폴더로 옮기면, 늦게 온 이전 폴더 목록을 버린다(원격·로컬).
 - 접근성: 새 대화상자는 `role="dialog"`(또는 `alertdialog`)와 이름을 갖고, Test-261(이름 없는 버튼 0개)이 계속 통과한다.
 
 ### 4.4 CLI·배포

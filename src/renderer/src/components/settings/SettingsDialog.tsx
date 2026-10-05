@@ -13,6 +13,7 @@ import { LOCALES, useLocale, useT, type LanguageSetting } from '@renderer/i18n'
 import type { IpcResult } from '@shared/types/ipc'
 import type { UpdateState } from '@shared/types/update'
 import type { McpState } from '@shared/types/mcp'
+import { AgentSettings } from './AgentSettings'
 
 interface SettingsDialogProps {
   open: boolean
@@ -381,6 +382,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 </div>
               </>
             )}
+            {mcpState && <AgentSettings enabled={mcpState.enabled} command={mcpState.command} />}
           </section>
         </div>
 

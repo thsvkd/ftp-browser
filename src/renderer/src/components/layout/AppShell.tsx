@@ -10,6 +10,8 @@ import { SettingsDialog } from '@renderer/components/settings/SettingsDialog'
 import { useThumbnailListener } from '@renderer/hooks/useThumbnailListener'
 import { useLocalThumbnailListener } from '@renderer/hooks/useLocalThumbnailListener'
 import { useUpdateListener } from '@renderer/hooks/useUpdateListener'
+import { useAgentSync } from '@renderer/hooks/useAgentSync'
+import { useAgentActivityToast } from '@renderer/hooks/useAgentActivityToast'
 
 export function AppShell(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -18,6 +20,8 @@ export function AppShell(): React.JSX.Element {
   useThumbnailListener()
   useLocalThumbnailListener()
   useUpdateListener()
+  useAgentSync()
+  useAgentActivityToast()
 
   return (
     <div className="flex h-full flex-col">

@@ -12,6 +12,7 @@ import {
   type ServerDraft
 } from '@renderer/lib/serverAddress'
 import type { FtpServer } from '@shared/types/ftp'
+import type { ServerEditorRequest } from '@shared/types/agent'
 import { PasswordInput } from './ServerForm'
 import { SavedServersPopover } from './SavedServersPopover'
 import { ServerManagerDialog } from './ServerManagerDialog'
@@ -39,6 +40,8 @@ export function ConnectBar(): React.JSX.Element {
 
   const [popover, setPopover] = useState(false)
   const [manager, setManager] = useState<ServerDraft | null>(null)
+  // 에이전트가 연 편집기는 이미 열려 있어도 새 내용으로 다시 연다(초안은 마운트할 때만 읽힌다).
+  const [managerKey, setManagerKey] = useState(0)
   const barRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<HTMLInputElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -57,6 +60,24 @@ export function ConnectBar(): React.JSX.Element {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [connecting, cancel])
+
+  // 에이전트가 서버 등록을 부탁하면(open_server_editor, T10) 미리 채운 새 서버로 편집기를 연다.
+  // 비밀번호는 비워 두고 사람이 입력해 저장한다. 같은 주소의 저장된 서버를 덮어쓰지도 않는다.
+  useEffect(() => {
+    return window.api.on('agent:openServerEditor', (...args: unknown[]) => {
+      const request = args[0] as ServerEditorRequest
+      setPopover(false)
+      setManagerKey((k) => k + 1)
+      setManager({
+        ...emptyDraft(),
+        name: request.name ?? '',
+        host: request.host,
+        port: String(request.port),
+        username: request.user,
+        secure: request.secure
+      })
+    })
+  }, [])
 
   // 드롭다운 바깥을 누르면 닫는다.
   useEffect(() => {
@@ -112,6 +133,7 @@ export function ConnectBar(): React.JSX.Element {
   )
   const managerEl = manager && (
     <ServerManagerDialog
+      key={managerKey}
       initial={manager}
       onClose={() => setManager(null)}
       // 연 버튼이 사라졌으면(드롭다운의 편집, 연결 후 모드 전환) 지금 보이는 툴바 입력으로 돌아간다.

@@ -31,6 +31,11 @@ interface FtpStore {
   // Actions
   connect: (config: FtpConnectPayload, initialPath?: string) => Promise<boolean>
   disconnect: () => Promise<void>
+  /**
+   * Main changed the connection by itself (an agent, handoff agent-operations G3): reset the
+   * session state like `disconnect()` without asking main to disconnect, then take `session`.
+   */
+  adoptSession: (session: { status: ConnectionStatus; host?: string; port?: number }) => void
   navigateTo: (path: string) => Promise<void>
   navigateUp: () => Promise<void>
   goBack: () => Promise<void>
@@ -44,6 +49,19 @@ interface FtpStore {
  * 커밋하지 않기 위한 세대 번호. UI에 노출하지 않는다.
  */
 let connectGeneration = 0
+
+/** 연결이 없을 때의 세션 상태. disconnect()와 adoptSession()이 같은 초기화를 쓴다. */
+const DISCONNECTED = {
+  connectionStatus: 'disconnected',
+  host: '',
+  port: 21,
+  currentPath: '/',
+  entries: [],
+  error: null,
+  loading: false,
+  history: ['/'],
+  historyIndex: 0
+} satisfies Partial<FtpStore>
 
 export const useFtpStore = create<FtpStore>((set, get) => ({
   connectionStatus: 'disconnected',
@@ -89,16 +107,17 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
   disconnect: async () => {
     connectGeneration++
     await window.api.invoke('ftp:disconnect')
+    set(DISCONNECTED)
+  },
+
+  adoptSession: (session) => {
+    // 진행 중이던 목록 요청은 이전 세션의 것이므로 버린다.
+    connectGeneration++
     set({
-      connectionStatus: 'disconnected',
-      host: '',
-      port: 21,
-      currentPath: '/',
-      entries: [],
-      error: null,
-      loading: false,
-      history: ['/'],
-      historyIndex: 0
+      ...DISCONNECTED,
+      connectionStatus: session.status,
+      host: session.host ?? '',
+      port: session.port ?? 21
     })
   },
 
@@ -191,6 +210,8 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
     const path = get().currentPath
     try {
       const result = await window.api.invoke<IpcResult<FtpListData>>('ftp:list', path)
+      // 기다리는 사이 다른 폴더로 옮겼으면 이전 폴더의 목록으로 덮어쓰지 않는다.
+      if (get().currentPath !== path) return
       if (result.success) {
         set({ entries: result.data.entries, error: null })
       } else {
