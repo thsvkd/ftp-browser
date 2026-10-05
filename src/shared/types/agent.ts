@@ -34,6 +34,11 @@ export interface AgentConfirmRequest {
   client?: string
   /** FTP host the action targets, when it targets the remote side. */
   host?: string
+  /**
+   * Where the action writes: the remote folder of an upload, the local folder of a download, the
+   * new path of a rename. Untrusted text (spec §9 R4).
+   */
+  destination?: string
   /** At most 20 items; `totalItems` counts all of them. */
   items: AgentPlanItem[]
   totalItems: number
