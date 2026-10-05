@@ -138,6 +138,17 @@ interface ListedEntry {
   name: string
   type: string
   isImage: boolean
+  /** ISO 8601, or empty when unknown */
+  modifiedAt: string
+}
+
+/** 목록 조건. cursor가 이것을 통째로 담아 다른 조건의 cursor를 거절한다. */
+export interface ListingFilter {
+  kind: Kind
+  nameContains: string
+  /** list_directory만: 받은 그대로의 경계(UTC 날짜 또는 ISO 시각), 양끝 포함 */
+  modifiedFrom?: string
+  modifiedTo?: string
 }
 
 const KIND_FILTERS: Record<Kind, (entry: ListedEntry) => boolean> = {
@@ -160,29 +171,77 @@ export const listingInput = {
   cursor: z.string().optional().describe('`nextCursor` from the previous page')
 }
 
+// §10 U5: `YYYY-MM-DD`(UTC 하루 전체) 또는 Z나 오프셋이 붙은 ISO 8601 시각. 오프셋 없는 시각은
+// 어느 시간대인지 모호하므로 받지 않는다.
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
+const DATE_OR_TIME =
+  /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2}))?$/
+const DAY_MS = 86_400_000
+
+/** 경계의 UTC 밀리초. 날짜는 `end`면 그날의 마지막 밀리초다. 없는 날짜(2월 30일 등)는 NaN이다. */
+function boundMs(value: string, end: boolean): number {
+  if (!DATE_ONLY.test(value)) return Date.parse(value)
+  const start = Date.parse(`${value}T00:00:00Z`)
+  // Date.parse는 2026-02-30을 3월 2일로 넘긴다. 되돌려 같은 날짜인지 본다.
+  if (Number.isNaN(start) || new Date(start).toISOString().slice(0, 10) !== value) return NaN
+  return end ? start + DAY_MS - 1 : start
+}
+
+const modifiedBound = z
+  .string()
+  .regex(
+    DATE_OR_TIME,
+    "Use a UTC date like '2026-09-12' or an ISO 8601 time with Z or an offset, like " +
+      "'2026-09-12T08:30:00Z'."
+  )
+  .refine((value) => !Number.isNaN(boundMs(value, false)), { message: 'No such date or time.' })
+
+export const modifiedInput = {
+  modifiedFrom: modifiedBound
+    .optional()
+    .describe(
+      "Keep only entries modified at or after this: a UTC date ('2026-09-12', from the start of " +
+        "that day) or an ISO 8601 time with Z or an offset ('2026-09-12T08:30:00Z')"
+    ),
+  modifiedTo: modifiedBound
+    .optional()
+    .describe(
+      "Keep only entries modified at or before this: a UTC date ('2026-09-12', to the end of " +
+        'that day) or an ISO 8601 time with Z or an offset'
+    )
+}
+
 /** cursor는 조회 조건과 오프셋을 묶은 불투명 문자열이다. 조건이 다르면 거절한다. */
-function encodeCursor(path: string, kind: Kind, nameContains: string, offset: number): string {
-  return Buffer.from(JSON.stringify([path, kind, nameContains, offset])).toString('base64url')
+function cursorKey(path: string, filter: ListingFilter): unknown[] {
+  return [
+    path,
+    filter.kind,
+    filter.nameContains,
+    filter.modifiedFrom ?? '',
+    filter.modifiedTo ?? ''
+  ]
+}
+
+function encodeCursor(path: string, filter: ListingFilter, offset: number): string {
+  return Buffer.from(JSON.stringify([...cursorKey(path, filter), offset])).toString('base64url')
 }
 
 export function decodeCursor(
   cursor: string | undefined,
   path: string,
-  kind: Kind,
-  nameContains: string,
+  filter: ListingFilter,
   tool: string
 ): number | CallToolResult {
   if (cursor === undefined) return 0
   try {
     const value: unknown = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'))
-    if (Array.isArray(value) && value.length === 4) {
-      const [p, k, n, offset] = value
+    const key = cursorKey(path, filter)
+    if (Array.isArray(value) && value.length === key.length + 1) {
+      const offset: unknown = value[key.length]
       if (
-        p === path &&
-        k === kind &&
-        n === nameContains &&
+        key.every((part, i) => value[i] === part) &&
         Number.isInteger(offset) &&
-        offset >= 0
+        (offset as number) >= 0
       ) {
         return offset as number
       }
@@ -193,19 +252,31 @@ export function decodeCursor(
   return errorResult(`Invalid cursor. Call ${tool} again without cursor.`)
 }
 
+/** §10 U5: 수정 시각 조건. 시각을 모르는 항목은 조건이 있으면 뺀다. */
+function modifiedFilter(filter: ListingFilter): (entry: ListedEntry) => boolean {
+  const { modifiedFrom, modifiedTo } = filter
+  if (modifiedFrom === undefined && modifiedTo === undefined) return () => true
+  const from = modifiedFrom !== undefined ? boundMs(modifiedFrom, false) : -Infinity
+  const to = modifiedTo !== undefined ? boundMs(modifiedTo, true) : Infinity
+  return (entry) => {
+    const at = entry.modifiedAt ? Date.parse(entry.modifiedAt) : NaN
+    return at >= from && at <= to
+  }
+}
+
 /** 폴더 먼저, 이름순으로 거른 뒤 한 페이지를 자른다. */
 export function pageOf<E extends ListedEntry>(
   entries: E[],
   path: string,
-  kind: Kind,
-  nameContains: string,
+  filter: ListingFilter,
   limit: number,
   offset: number
 ): { total: number; page: E[]; nextCursor?: string } {
-  const needle = nameContains.toLowerCase()
+  const needle = filter.nameContains.toLowerCase()
   const matched = entries
-    .filter(KIND_FILTERS[kind])
+    .filter(KIND_FILTERS[filter.kind])
     .filter((entry) => entry.name.toLowerCase().includes(needle))
+    .filter(modifiedFilter(filter))
     .sort((a, b) => {
       if (a.type === 'directory' && b.type !== 'directory') return -1
       if (a.type !== 'directory' && b.type === 'directory') return 1
@@ -216,6 +287,6 @@ export function pageOf<E extends ListedEntry>(
   return {
     total: matched.length,
     page,
-    ...(end < matched.length ? { nextCursor: encodeCursor(path, kind, nameContains, end) } : {})
+    ...(end < matched.length ? { nextCursor: encodeCursor(path, filter, end) } : {})
   }
 }

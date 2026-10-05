@@ -34,17 +34,11 @@ const listLocalDirectory = readTool({
     nextCursor: z.string().optional()
   }),
   async run({ path, kind, nameContains = '', limit, cursor }, { deps }) {
-    const offset = decodeCursor(cursor, path, kind, nameContains, 'list_local_directory')
+    const filter = { kind, nameContains }
+    const offset = decodeCursor(cursor, path, filter, 'list_local_directory')
     if (typeof offset !== 'number') return offset
     const listing = await deps.services.local.list(path)
-    const { total, page, nextCursor } = pageOf(
-      listing.entries,
-      path,
-      kind,
-      nameContains,
-      limit,
-      offset
-    )
+    const { total, page, nextCursor } = pageOf(listing.entries, path, filter, limit, offset)
     return jsonResult({
       path,
       total,
@@ -129,8 +123,9 @@ const deleteLocal = actionTool({
     "Permanently delete files or folders (folders with everything inside) on this computer's " +
     'disk; they do not go to the trash and cannot be restored. Only use it when the user ' +
     'explicitly asked to delete these items. Call it with dryRun: true first to see the exact ' +
-    'targets and counts. It waits up to 45 seconds; if the deletion is still running you get ' +
-    'its operationId for wait_for_jobs.',
+    'targets and counts, which folders are not empty and whether the user will ' +
+    'be asked. It waits up to 45 seconds; if the deletion is still running you get its ' +
+    'operationId for wait_for_jobs.',
   inputSchema: z.object({
     paths: z.array(localPath).min(1).max(100).describe('Absolute local paths to delete')
   }),

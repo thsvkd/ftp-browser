@@ -280,6 +280,7 @@ export const ja = {
   'agent.tool.list_servers': '保存済みサーバーを一覧表示',
   'agent.tool.list_directory': 'リモート フォルダーを一覧表示',
   'agent.tool.get_image_previews': '画像プレビューを表示',
+  'agent.tool.read_text_file': 'リモートのテキスト ファイルを読む',
   'agent.tool.list_local_directory': 'ローカル フォルダーを一覧表示',
   'agent.tool.list_jobs': '転送とファイル操作を一覧表示',
   'agent.tool.wait_for_jobs': '転送とファイル操作の完了を待つ',

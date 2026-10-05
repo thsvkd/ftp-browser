@@ -26,7 +26,7 @@ function tokenIn(db: Database.Database): string | undefined {
 const toolServer = vi.fn(() => createMcpToolServer(makeDeps()))
 
 /** 기본 정책(D·X·C는 ask, deny 없음)에서 tools/list에 나오는 도구 수 */
-const TOOL_COUNT = 21
+const TOOL_COUNT = 22
 
 /** SDK가 보내는 것과 같은 tools/call POST. Host·Origin을 직접 정할 수 있게 node:http로 보낸다. */
 function postToolCall(port: number, headers: Record<string, string>): Promise<number> {

@@ -44,7 +44,8 @@ const AGENT_NEXT: Record<AgentErrorCode, string> = {
   TOO_MANY_ITEMS: 'Split the request into smaller parts, for example one subfolder per call.',
   SESSION_CHANGED:
     'Call get_status to see the current connection. If the user still wants this, plan it again ' +
-    '(dryRun: true) on that connection and call again.'
+    '(dryRun: true) on that connection and call again.',
+  NOT_A_FILE: 'This works on files only: use list_directory to see what a folder contains.'
 }
 
 /** §9 R1: 다른 non-R 호출이 계획·확인·실행 시작 중이다. 기다리지 않고 바로 돌려준다. */

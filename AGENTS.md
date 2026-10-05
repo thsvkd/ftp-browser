@@ -146,8 +146,9 @@ Specs: `docs/handoff/agent-friendly.md` (phase 1), `agent-operations.md` (phase 
   `agentPolicy.ts` (`settings.agentPolicy`), `confirmationBroker.ts`. The app is the only gate.
 - Tiers, one per tool: R read · W reversible write · D destructive · X upload · C credentials.
   New tool: `readTool`/`actionTool` in `src/main/mcp/tools/` (`actionTool` needs `plan()` for dryRun
-  and the dialog), add it to `TOOL_DEFINITIONS` (`mcpTools.ts`), the §2.2 table and its test
-  (Test-450), and `agent.tool.<name>` in all 11 locales.
+  and the dialog), add it to `TOOL_DEFINITIONS` (`mcpTools.ts`), the §2.2 table and its tests
+  (Test-450 table, `TOOL_COUNT` in `McpService.test.ts`, Test-518 list; 22 tools now), and
+  `agent.tool.<name>` in all 11 locales.
 - `ftpb` (`src/main/cli/`): a dependency-free MCP client of the same endpoint (one POST per request
   with the 2026-07-28 `_meta` envelope; `mcp-stdio` relays stdio clients). `script/build-cli.mjs`,
   run by a plugin in `electron.vite.config.ts`, bundles it into `out/cli/ftpb.cjs` (Node built-ins

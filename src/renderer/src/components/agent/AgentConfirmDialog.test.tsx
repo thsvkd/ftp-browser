@@ -319,6 +319,7 @@ describe('AgentConfirmDialog', () => {
       'list_servers',
       'list_directory',
       'get_image_previews',
+      'read_text_file',
       'list_local_directory',
       'list_jobs',
       'wait_for_jobs',

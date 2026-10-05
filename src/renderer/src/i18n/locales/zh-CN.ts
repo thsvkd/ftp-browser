@@ -269,6 +269,7 @@ export const zhCN = {
   'agent.tool.list_servers': '列出已保存的服务器',
   'agent.tool.list_directory': '列出远程文件夹',
   'agent.tool.get_image_previews': '查看图片预览',
+  'agent.tool.read_text_file': '读取远程文本文件',
   'agent.tool.list_local_directory': '列出本地文件夹',
   'agent.tool.list_jobs': '列出传输和文件操作',
   'agent.tool.wait_for_jobs': '等待传输和文件操作',

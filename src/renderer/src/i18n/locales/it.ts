@@ -293,6 +293,7 @@ export const it = {
   'agent.tool.list_servers': 'Elencare i server salvati',
   'agent.tool.list_directory': 'Elencare una cartella remota',
   'agent.tool.get_image_previews': 'Vedere le anteprime delle immagini',
+  'agent.tool.read_text_file': 'Leggere un file di testo remoto',
   'agent.tool.list_local_directory': 'Elencare una cartella locale',
   'agent.tool.list_jobs': 'Elencare trasferimenti e operazioni sui file',
   'agent.tool.wait_for_jobs': 'Attendere trasferimenti e operazioni sui file',

@@ -297,6 +297,7 @@ export const fr = {
   'agent.tool.list_servers': 'Lister les serveurs enregistrés',
   'agent.tool.list_directory': 'Lister un dossier distant',
   'agent.tool.get_image_previews': 'Voir des aperçus d’images',
+  'agent.tool.read_text_file': 'Lire un fichier texte distant',
   'agent.tool.list_local_directory': 'Lister un dossier local',
   'agent.tool.list_jobs': 'Lister les transferts et opérations sur les fichiers',
   'agent.tool.wait_for_jobs': 'Attendre les transferts et opérations sur les fichiers',

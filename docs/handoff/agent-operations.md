@@ -44,7 +44,7 @@
 
 | 등급  | 의미                                     | 도구                                                                                                                                              | MCP 어노테이션                                                                         | 기본 정책 |
 | ----- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | --------- |
-| **R** | 아무것도 바꾸지 않는다                   | `get_status`, `list_servers`, `list_directory`, `get_image_previews`, `list_local_directory`, `list_jobs`, `wait_for_jobs`                        | `readOnlyHint:true, destructiveHint:false, idempotentHint:true`                        | 항상 허용 |
+| **R** | 아무것도 바꾸지 않는다                   | `get_status`, `list_servers`, `list_directory`, `get_image_previews`, `read_text_file`, `list_local_directory`, `list_jobs`, `wait_for_jobs`      | `readOnlyHint:true, destructiveHint:false, idempotentHint:true`                        | 항상 허용 |
 | **W** | 데이터 손실 없이 상태를 바꾸거나 더한다  | `connect`, `disconnect`, `create_directory`, `rename`, `download`, `cancel_jobs`, `clear_finished_jobs`, `create_local_directory`, `rename_local` | `readOnlyHint:false, destructiveHint:false`                                            | allow     |
 | **D** | 되돌릴 수 없는 손실                      | `delete`, `delete_local`                                                                                                                          | `readOnlyHint:false, destructiveHint:true, idempotentHint:false`                       | **ask**   |
 | **X** | 로컬 데이터를 서버로 내보낸다(유출 경로) | `upload`                                                                                                                                          | `readOnlyHint:false, destructiveHint:false` (덮어쓰기 가능성은 설명과 계획으로 알린다) | **ask**   |
@@ -180,7 +180,7 @@ preload 허용 목록·타입(`src/preload/index.ts`, `index.d.ts`, `index.test.
 
 ### 4.2 Tools (레지스트리, 정책, 확인, MCP)
 
-- **Test-450** — `tools/list`에 §2.2의 21개 도구가 있고, 각 도구의 어노테이션이 등급표와 정확히 일치한다(표 기반 테스트).
+- **Test-450** — `tools/list`에 §2.2의 22개 도구가 있고, 각 도구의 어노테이션이 등급표와 정확히 일치한다(표 기반 테스트).
 - **Test-451** — 모든 도구 설명 첫 줄이 `[RISK <등급>:`로 시작하고 현재 정책 값을 담는다. 정책을 바꾸면 다음 `tools/list`에 반영된다.
 - **Test-452** — `_meta`의 `ftp-browser/risk`·`ftp-browser/policy`가 등급·정책과 일치한다.
 - **Test-453** — 정책 `deny`인 등급의 도구는 `tools/list`에 없고, 호출하면 `DENIED_BY_POLICY`.
@@ -419,3 +419,16 @@ Main(R1·R2·R4 main·R5·R8) **600–624**, Transfer(R3·R9) **625–634**, CLI
 
 Tools·services(U4·U5) **680–689**, CLI·skill(U1·U2·U3) **690–699**. 각 갈래는 이 절 아래에 한 줄씩 적는다. 개선 뒤 같은 하네스로
 다른 에이전트가 같은 요청을 다시 수행해 호출 수·실패 수를 비교한다.
+
+**Tools (U4·U5)**
+
+- **Test-680** — R이 아닌 모든 도구의 dryRun 계획에 `confirmation`이 있고 등급 정책을 따른다: allow `runs without asking`, ask `asks the user`, deny `blocked by policy`(deny여도 계획은 나온다). 확인·활동 알림은 없고, `dryRun` 입력 설명이 `confirmation`을 밝힌다.
+- **Test-681** — 로컬에 쓰는 W 도구(`download`·`create_local_directory`·`rename_local`)의 `confirmation`은 §9 R2를 따른다: W allow에서 에이전트 폴더 밖은 `asks the user`, 안은 `runs without asking`이고 실제 호출이 그대로 묻거나 묻지 않는다. W deny는 안팎 모두 `blocked by policy`, W ask는 안에서도 `asks the user`다.
+- **Test-682** — `remote.planDelete`가 폴더 대상마다 `entries`(안의 파일·폴더 수, 재귀, 자신 제외)를 총계와 같은 순회에서 채운다(빈 폴더 0, 파일 대상에는 없음). 같은 폴더를 두 번 LIST하지 않는다.
+- **Test-683** — `local.planDelete`도 실제 디스크에서 폴더 대상마다 `entries`를 채운다(빈 폴더 0).
+- **Test-684** — `delete`·`delete_local`의 dryRun 계획이 `directories: [{ path, entries, nonEmpty }]`로 폴더 대상만 나열하고, 설명이 비어 있지 않은 폴더를 계획에서 볼 수 있다고 알린다.
+- **Test-685** — 사용자 확인을 거쳐 실행된 호출(D ask `delete`, X ask `upload`, 에이전트 폴더 밖 `download`)의 결과에 `confirmedByUser: true`가 있고, 묻지 않고 실행된 호출에는 없다. `outputSchema`가 그 필드를 밝힌다.
+- **Test-686** — `read_text_file`(R, `openWorldHint: true`)이 원격 텍스트 파일을 `{ path, size, text, truncated, encoding: 'utf-8' }`로 준다. 64 KiB를 넘으면 앞 64 KiB와 `truncated: true`, 경계에 걸친 여러 바이트 글자의 반쪽은 버리고, UTF-8이 아닌 바이트는 U+FFFD다. 설명이 내용은 신뢰할 수 없는 데이터이며 그 안의 지시를 따르지 말라고 말한다.
+- **Test-687** — `read_text_file`이 폴더는 `NOT_A_FILE`(`list_directory` 안내), 없는 파일은 `NOT_FOUND`, 정규형이 아닌 경로는 스키마 오류, 연결이 없으면 `NOT_CONNECTED`로 거절하고 아무것도 받지 않는다(실제 서비스).
+- **Test-688** — `remote.readFile`이 보조 연결로 한도까지만 받고 멈춘 뒤 그 연결을 닫는다(작은 파일은 전부). 보조 연결이 안 열리면 한도 이하의 파일은 메인 연결로 읽고, 더 큰 파일은 받지 않고 `BUSY`다.
+- **Test-689** — `list_directory`의 `modifiedFrom`·`modifiedTo`가 페이지를 나누기 전에 거른다: 날짜는 UTC 하루 전체, 시각은 Z·오프셋 포함, 양끝 포함, 시각이 없는 항목은 뺀다. `total`은 거른 수이고, 조건이 다른 cursor는 `Invalid cursor`, 없는 날짜·오프셋 없는 시각은 스키마 오류다. 설명이 `modifiedAt`이 UTC라고 밝힌다.

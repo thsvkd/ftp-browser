@@ -1,4 +1,5 @@
 import { posix } from 'path'
+import { Writable } from 'stream'
 import { getParentRemotePath } from '../../utils/remotePath'
 import type { FtpFileEntry } from '@shared/types/ftp'
 import { AgentError, MAX_PLAN_ITEMS, type AgentServices, type DeletePlan } from '../types'
@@ -73,6 +74,27 @@ export async function statRemote(
     out.push({ path: p, entry })
   }
   return out
+}
+
+/**
+ * readFile이 받는 쪽. 앞에서부터 `keep` 바이트만 남긴다. `stop`이면 다 모은 순간 오류로 받기를 끊는다
+ * (basic-ftp는 pipeline 오류로 그 다운로드를 끝낸다). 메인 연결은 끊으면 늦게 온 응답이 다음 작업에
+ * 섞이므로 `stop` 없이 끝까지 받고 나머지는 버린다.
+ */
+function headSink(keep: number, stop: boolean): { stream: Writable; head(): Buffer } {
+  const chunks: Buffer[] = []
+  let length = 0
+  const stream = new Writable({
+    write(chunk: Buffer, _encoding, callback): void {
+      if (length < keep) {
+        const part = chunk.subarray(0, keep - length)
+        chunks.push(part)
+        length += part.length
+      }
+      callback(stop && length >= keep ? new Error('Read limit reached.') : null)
+    }
+  })
+  return { stream, head: () => Buffer.concat(chunks, length) }
 }
 
 export function createRemoteService(
@@ -163,7 +185,8 @@ export function createRemoteService(
         throw new AgentError('INVALID_PATH', 'Refusing to delete the root folder of the server.')
       }
       requireConnected(ftp)
-      const targets = await statRemote(ftp, outermost(checked, '/'))
+      const found = await statRemote(ftp, outermost(checked, '/'))
+      const targets: DeletePlan['targets'] = []
       let totalFiles = 0
       let totalDirectories = 0
       const addFile = (): void => {
@@ -177,19 +200,22 @@ export function createRemoteService(
           else addFile()
         }
       }
-      for (const { path, entry } of targets) {
-        if (entry.type === 'directory') await count(path)
-        else addFile()
+      for (const { path, entry } of found) {
+        if (entry.type === 'directory') {
+          // §10 U4: 폴더 안 항목 수는 같은 순회에서 늘어난 개수다(폴더 자신은 뺀다).
+          const before = totalFiles + totalDirectories
+          await count(path)
+          targets.push({
+            path,
+            kind: 'directory',
+            entries: totalFiles + totalDirectories - before - 1
+          })
+        } else {
+          addFile()
+          targets.push({ path, kind: 'file' })
+        }
       }
-      return {
-        targets: targets.map(({ path, entry }) => ({
-          path,
-          kind: entry.type === 'directory' ? ('directory' as const) : ('file' as const)
-        })),
-        totalFiles,
-        totalDirectories,
-        session: sessionKey(ftp)
-      }
+      return { targets, totalFiles, totalDirectories, session: sessionKey(ftp) }
     },
 
     startDelete: (plan) => {
@@ -205,6 +231,51 @@ export function createRemoteService(
       )
       void runDelete(job.id, plan)
       return job.id
+    },
+
+    readFile: async (p, maxBytes) => {
+      const file = checkRemotePath(p)
+      requireConnected(ftp)
+      const entry = await findRemote(ftp, file)
+      if (!entry) throw new AgentError('NOT_FOUND', `Not found on the server: ${file}`)
+      if (entry.type === 'directory') {
+        throw new AgentError('NOT_A_FILE', `${file} is a folder, not a file.`)
+      }
+      // 한 바이트 더 받아 파일이 더 긴지 안다. 미리보기처럼 보조 연결을 먼저 쓰고, 안 되면 메인 연결이다.
+      const keep = maxBytes + 1
+      const secondary = await ftp.createSecondaryClient().catch(() => null)
+      let head: Buffer
+      if (secondary) {
+        const sink = headSink(keep, true)
+        try {
+          await secondary.downloadTo(sink.stream, file)
+        } catch (err) {
+          // 한도까지 모아 끊은 것은 실패가 아니다
+          if (sink.head().length < keep) throw err
+        } finally {
+          secondary.close()
+        }
+        head = sink.head()
+      } else {
+        // 메인 연결은 끝까지 받아야 해서 그동안 GUI의 목록·이름변경이 기다린다. 큰 파일은 받지 않는다.
+        if (entry.size > maxBytes) {
+          throw new AgentError(
+            'BUSY',
+            `FTP Browser could not open a second connection to the server to read only the start ` +
+              `of ${file} (${entry.size} bytes); other transfers may be using the connections ` +
+              'the server allows.'
+          )
+        }
+        const sink = headSink(keep, false)
+        await ftp.runOnMainClient((client) => client.downloadTo(sink.stream, file))
+        head = sink.head()
+      }
+      const truncated = head.length > maxBytes
+      return {
+        size: truncated ? entry.size : head.length,
+        data: head.subarray(0, maxBytes),
+        truncated
+      }
     }
   }
 }

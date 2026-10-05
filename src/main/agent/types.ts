@@ -38,8 +38,11 @@ export type DownloadConflict = 'skip' | 'rename'
 export type UploadConflict = 'skip' | 'overwrite'
 
 export interface DeletePlan {
-  /** Top-level targets as given (absolute paths), with their kind. */
-  targets: Array<{ path: string; kind: 'file' | 'directory' }>
+  /**
+   * Top-level targets as given (absolute paths), with their kind. Directories carry `entries`: the
+   * files and folders inside, counted recursively by the same walk as the totals (spec §10 U4).
+   */
+  targets: Array<{ path: string; kind: 'file' | 'directory'; entries?: number }>
   /** Every file and folder that will be removed, counted recursively. */
   totalFiles: number
   totalDirectories: number
@@ -91,6 +94,7 @@ export type AgentErrorCode =
   | 'BUSY'
   | 'TOO_MANY_ITEMS'
   | 'SESSION_CHANGED'
+  | 'NOT_A_FILE'
 
 /**
  * A failure the agent can act on. Services throw this for conditions they detect themselves;
@@ -142,6 +146,16 @@ export interface AgentServices {
     planDelete(paths: string[]): Promise<DeletePlan>
     /** Runs as an OperationManager job (visible in the GUI); returns its id at once. */
     startDelete(plan: DeletePlan): string
+    /**
+     * The first `maxBytes` of a remote file, read into memory (spec §10 U5). `truncated` says the
+     * file is longer; `size` is exact unless truncated, then the size the server lists. Throws
+     * AgentError NOT_FOUND for a missing path, NOT_A_FILE for a folder, and BUSY when no second
+     * FTP connection opens and the file is larger than `maxBytes`.
+     */
+    readFile(
+      path: string,
+      maxBytes: number
+    ): Promise<{ size: number; data: Buffer; truncated: boolean }>
   }
   local: {
     list(path: string): Promise<LocalListResult>

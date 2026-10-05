@@ -299,6 +299,7 @@ export const de = {
   'agent.tool.list_servers': 'Gespeicherte Server auflisten',
   'agent.tool.list_directory': 'Entfernten Ordner auflisten',
   'agent.tool.get_image_previews': 'Bildvorschauen ansehen',
+  'agent.tool.read_text_file': 'Entfernte Textdatei lesen',
   'agent.tool.list_local_directory': 'Lokalen Ordner auflisten',
   'agent.tool.list_jobs': 'Übertragungen und Dateivorgänge auflisten',
   'agent.tool.wait_for_jobs': 'Auf Übertragungen und Dateivorgänge warten',

@@ -42,7 +42,7 @@ describe('local changes', () => {
     const plan = await services.local.planDelete([renamed, path.join(tmp, 'b.txt')])
     expect(plan).toEqual({
       targets: [
-        { path: renamed, kind: 'directory' },
+        { path: renamed, kind: 'directory', entries: 1 },
         { path: path.join(tmp, 'b.txt'), kind: 'file' }
       ],
       totalFiles: 2,
@@ -73,6 +73,31 @@ describe('local changes', () => {
     ).rejects.toMatchObject({ code: 'INVALID_PATH' })
     expect(await fs.readFile(path.join(tmp, 'b.txt'), 'utf8')).toBe('b')
     expect(h.events.localChanged).not.toHaveBeenCalled()
+  })
+})
+
+describe('local delete plan per folder', () => {
+  it('counts the entries of each folder target on disk, an empty folder as 0', async () => {
+    // covers: Test-683
+    const full = path.join(tmp, 'full')
+    const empty = path.join(tmp, 'empty')
+    await fs.mkdir(path.join(full, 'sub'), { recursive: true })
+    await fs.writeFile(path.join(full, 'a.txt'), 'a')
+    await fs.writeFile(path.join(full, 'sub', 'b.txt'), 'b')
+    await fs.mkdir(empty)
+    await fs.writeFile(path.join(tmp, 'f.txt'), 'f')
+
+    const plan = await services.local.planDelete([full, empty, path.join(tmp, 'f.txt')])
+
+    expect(plan).toEqual({
+      targets: [
+        { path: full, kind: 'directory', entries: 3 },
+        { path: empty, kind: 'directory', entries: 0 },
+        { path: path.join(tmp, 'f.txt'), kind: 'file' }
+      ],
+      totalFiles: 3,
+      totalDirectories: 3
+    })
   })
 })
 

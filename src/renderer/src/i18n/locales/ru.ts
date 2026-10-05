@@ -320,6 +320,7 @@ export const ru = {
   'agent.tool.list_servers': 'Показать сохранённые серверы',
   'agent.tool.list_directory': 'Показать папку на сервере',
   'agent.tool.get_image_previews': 'Посмотреть превью изображений',
+  'agent.tool.read_text_file': 'Прочитать текстовый файл на сервере',
   'agent.tool.list_local_directory': 'Показать папку на компьютере',
   'agent.tool.list_jobs': 'Показать передачи и операции с файлами',
   'agent.tool.wait_for_jobs': 'Дождаться передач и операций с файлами',

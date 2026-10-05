@@ -292,6 +292,7 @@ export const en = {
   'agent.tool.list_servers': 'List saved servers',
   'agent.tool.list_directory': 'List a remote folder',
   'agent.tool.get_image_previews': 'View image previews',
+  'agent.tool.read_text_file': 'Read a remote text file',
   'agent.tool.list_local_directory': 'List a local folder',
   'agent.tool.list_jobs': 'List transfers and file operations',
   'agent.tool.wait_for_jobs': 'Wait for transfers and file operations',

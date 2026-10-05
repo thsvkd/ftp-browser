@@ -296,6 +296,7 @@ export const es = {
   'agent.tool.list_servers': 'Listar servidores guardados',
   'agent.tool.list_directory': 'Listar una carpeta remota',
   'agent.tool.get_image_previews': 'Ver vistas previas de imágenes',
+  'agent.tool.read_text_file': 'Leer un archivo de texto remoto',
   'agent.tool.list_local_directory': 'Listar una carpeta local',
   'agent.tool.list_jobs': 'Listar transferencias y operaciones de archivos',
   'agent.tool.wait_for_jobs': 'Esperar transferencias y operaciones de archivos',

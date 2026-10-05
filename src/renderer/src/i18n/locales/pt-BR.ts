@@ -292,6 +292,7 @@ export const ptBR = {
   'agent.tool.list_servers': 'Listar servidores salvos',
   'agent.tool.list_directory': 'Listar uma pasta remota',
   'agent.tool.get_image_previews': 'Ver visualizações de imagens',
+  'agent.tool.read_text_file': 'Ler um arquivo de texto remoto',
   'agent.tool.list_local_directory': 'Listar uma pasta local',
   'agent.tool.list_jobs': 'Listar transferências e operações de arquivo',
   'agent.tool.wait_for_jobs': 'Aguardar transferências e operações de arquivo',

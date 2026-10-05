@@ -270,6 +270,7 @@ export const zhTW = {
   'agent.tool.list_servers': '列出已儲存的伺服器',
   'agent.tool.list_directory': '列出遠端資料夾',
   'agent.tool.get_image_previews': '檢視圖片預覽',
+  'agent.tool.read_text_file': '讀取遠端文字檔',
   'agent.tool.list_local_directory': '列出本機資料夾',
   'agent.tool.list_jobs': '列出傳輸與檔案作業',
   'agent.tool.wait_for_jobs': '等待傳輸與檔案作業',

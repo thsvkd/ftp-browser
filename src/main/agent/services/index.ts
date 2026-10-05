@@ -34,6 +34,8 @@ export interface AgentServiceDeps {
     | 'getPort'
     | 'getUser'
     | 'getConnectGeneration'
+    | 'createSecondaryClient'
+    | 'runOnMainClient'
   >
   fileOps: Pick<FtpFileOperations, 'mkdir' | 'rename' | 'deleteFile' | 'deleteDirectory'>
   queue: Pick<TransferQueue, 'enqueueBatch' | 'cancel' | 'clearCompleted' | 'getAll'> &

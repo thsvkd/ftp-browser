@@ -95,8 +95,14 @@ export function createLocalService(
         const st = await lstatOrNull(p)
         if (!st) throw new AgentError('NOT_FOUND', `Not found: ${p}`)
         if (st.isDirectory()) {
-          targets.push({ path: p, kind: 'directory' })
+          // §10 U4: 폴더 안 항목 수는 같은 순회에서 늘어난 개수다(폴더 자신은 뺀다).
+          const before = totalFiles + totalDirectories
           await count(p)
+          targets.push({
+            path: p,
+            kind: 'directory',
+            entries: totalFiles + totalDirectories - before - 1
+          })
         } else {
           targets.push({ path: p, kind: 'file' })
           addFile()

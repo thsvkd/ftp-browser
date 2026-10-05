@@ -66,6 +66,8 @@ export interface FakeWorld {
   downloadPlan?: DownloadPlan
   uploadPlan?: UploadPlan
   deletePlan?: DeletePlan
+  /** remote.readFile contents by path; the file must also be in its parent's listing. */
+  files?: Record<string, Buffer>
 }
 
 function withPassword(server: SavedServerInfo): SavedServerInfo {
@@ -136,13 +138,34 @@ export function fakeServices(world: FakeWorld = defaultWorld()): AgentServices {
   }
   const planDelete = async (paths: string[]): Promise<DeletePlan> =>
     world.deletePlan ?? {
-      targets: paths.map((path) => ({
-        path,
-        kind: world.listings[path] || world.localListings[path] ? 'directory' : 'file'
-      })),
+      targets: paths.map((path) => {
+        const listing = world.listings[path] ?? world.localListings[path]
+        return listing
+          ? { path, kind: 'directory', entries: listing.length }
+          : { path, kind: 'file' }
+      }),
       totalFiles: paths.length,
       totalDirectories: 0
     }
+  const readFile = async (
+    path: string,
+    maxBytes: number
+  ): Promise<{ size: number; data: Buffer; truncated: boolean }> => {
+    const slash = path.lastIndexOf('/')
+    const entry = world.listings[path.slice(0, slash) || '/']?.find(
+      (e) => e.name === path.slice(slash + 1)
+    )
+    if (!entry) throw new AgentError('NOT_FOUND', `Not found on the server: ${path}`)
+    if (entry.type === 'directory') {
+      throw new AgentError('NOT_A_FILE', `${path} is a folder, not a file.`)
+    }
+    const data = world.files?.[path] ?? Buffer.alloc(0)
+    return {
+      size: data.length,
+      data: data.subarray(0, maxBytes),
+      truncated: data.length > maxBytes
+    }
+  }
   const get = (ids: string[]): JobSnapshot[] =>
     ids.map((id) => world.snapshots[id] ?? unknownJob(id))
   // FtpConnectionManager의 연결 번호처럼 connect·disconnect마다 바뀐다
@@ -186,7 +209,8 @@ export function fakeServices(world: FakeWorld = defaultWorld()): AgentServices {
       mkdir: vi.fn(async () => undefined),
       rename: vi.fn(async () => undefined),
       planDelete: vi.fn(planDelete),
-      startDelete: vi.fn(() => 'op-remote')
+      startDelete: vi.fn(() => 'op-remote'),
+      readFile: vi.fn(readFile)
     },
     local: {
       list: vi.fn(async (path: string) => {

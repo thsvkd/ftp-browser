@@ -276,6 +276,7 @@ export const ko = {
   'agent.tool.list_servers': '저장된 서버 목록 보기',
   'agent.tool.list_directory': '원격 폴더 목록 보기',
   'agent.tool.get_image_previews': '이미지 미리보기 보기',
+  'agent.tool.read_text_file': '원격 텍스트 파일 읽기',
   'agent.tool.list_local_directory': '로컬 폴더 목록 보기',
   'agent.tool.list_jobs': '전송과 파일 작업 목록 보기',
   'agent.tool.wait_for_jobs': '전송과 파일 작업 기다리기',

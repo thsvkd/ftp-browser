@@ -3,7 +3,10 @@ import { randomUUID } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { posix } from 'path'
+import { Readable, type Writable } from 'stream'
+import { pipeline } from 'stream/promises'
 import Database from 'better-sqlite3'
+import type { Client } from 'basic-ftp'
 import { vi } from 'vitest'
 import { OperationManager } from '../../../operation/OperationManager'
 import type {
@@ -47,6 +50,30 @@ function ftpError(message: string): Error {
   return Object.assign(new Error(message), { code: 550 })
 }
 
+/** basic-ftp Client 중 remote.readFile이 쓰는 것. 내용을 16 KiB씩 파이프한다(basic-ftp처럼 pipeline). */
+export class FakeFtpClient {
+  /** 받는 쪽으로 넘긴 바이트. 받는 쪽이 멈추면 더 늘지 않는다. */
+  bytesSent = 0
+
+  constructor(private readonly remote: FakeRemote) {}
+
+  downloadTo = vi.fn(async (destination: Writable, remotePath: string) => {
+    const content = this.remote.contents.get(remotePath)
+    if (!content) throw ftpError(`550 ${remotePath}`)
+    await pipeline(Readable.from(this.chunks(content)), destination)
+    return { code: 226, message: '226 Transfer complete' }
+  })
+  close = vi.fn()
+
+  private *chunks(content: Buffer): Generator<Buffer> {
+    for (let i = 0; i < content.length; i += 16 * 1024) {
+      const chunk = content.subarray(i, i + 16 * 1024)
+      this.bytesSent += chunk.length
+      yield chunk
+    }
+  }
+}
+
 /**
  * 메모리 위 원격 트리. FtpConnectionManager(list/connect…)와 FtpFileOperations(mkdir/rename/delete…)
  * 자리에 들어간다. 목 FTP 서버에는 LIST·MKD·DELE·RNFR이 없어 서비스 테스트는 이것을 쓴다.
@@ -65,6 +92,13 @@ export class FakeRemote extends EventEmitter {
   connectResult: { success: boolean; error?: string; cancelled?: boolean } = { success: true }
   /** FtpConnectionManager처럼 connect·disconnect마다 늘어난다 */
   generation = 0
+  /** RETR가 돌려주는 파일 내용(addText) */
+  contents = new Map<string, Buffer>()
+  /** 서버가 보조 연결을 거부한다(연결 수 제한) */
+  refuseSecondary = false
+  /** createSecondaryClient가 만든 클라이언트, 만든 순서대로 */
+  secondaryClients: FakeFtpClient[] = []
+  mainClient = new FakeFtpClient(this)
 
   connect = vi.fn(async (config: FtpConnectPayload) => {
     this.generation++
@@ -108,6 +142,17 @@ export class FakeRemote extends EventEmitter {
   getPort = (): number => this.port
   getUser = (): string => this.user
   getConnectGeneration = (): number => this.generation
+  createSecondaryClient = vi.fn(async (): Promise<Client> => {
+    if (this.refuseSecondary) {
+      throw Object.assign(new Error('530 Too many connections'), { code: 530 })
+    }
+    const client = new FakeFtpClient(this)
+    this.secondaryClients.push(client)
+    return client as unknown as Client
+  })
+  runOnMainClient<T>(task: (client: Client) => Promise<T>): Promise<T> {
+    return task(this.mainClient as unknown as Client)
+  }
 
   mkdir = vi.fn(async (dir: string) => {
     if (!this.ignoreMkd) {
@@ -149,6 +194,12 @@ export class FakeRemote extends EventEmitter {
   }
   addFile(p: string, size = 1): this {
     this.nodes.set(p, { type: 'file', size })
+    return this
+  }
+  addText(p: string, content: string | Buffer): this {
+    const data = Buffer.from(content)
+    this.nodes.set(p, { type: 'file', size: data.length })
+    this.contents.set(p, data)
     return this
   }
   addLink(p: string): this {

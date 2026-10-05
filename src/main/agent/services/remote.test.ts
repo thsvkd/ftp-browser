@@ -56,7 +56,7 @@ describe('remote delete', () => {
 
     expect(plan).toEqual({
       targets: [
-        { path: '/a', kind: 'directory' },
+        { path: '/a', kind: 'directory', entries: 5 },
         { path: '/x.txt', kind: 'file' }
       ],
       totalFiles: 4,
@@ -161,5 +161,69 @@ describe('normalized remote paths', () => {
     }
     expect(h.remote.list).not.toHaveBeenCalled()
     await expect(services.remote.list('/uploads')).resolves.toMatchObject({ path: '/uploads' })
+  })
+})
+
+describe('remote delete plan per folder', () => {
+  it('counts the entries of each folder target in the same walk that counts the plan', async () => {
+    // covers: Test-682
+    h.remote
+      .addDir('/a')
+      .addFile('/a/1.txt')
+      .addDir('/a/b')
+      .addFile('/a/b/2.txt')
+      .addDir('/a/b/c')
+      .addDir('/empty')
+      .addFile('/x.txt')
+
+    const plan = await services.remote.planDelete(['/a', '/empty', '/x.txt'])
+
+    expect(plan.targets).toEqual([
+      { path: '/a', kind: 'directory', entries: 4 },
+      { path: '/empty', kind: 'directory', entries: 0 },
+      { path: '/x.txt', kind: 'file' }
+    ])
+    expect(plan).toMatchObject({ totalFiles: 3, totalDirectories: 4 })
+    // 부모 '/' 한 번과 폴더마다 한 번: /a, /a/b, /a/b/c, /empty. 같은 폴더를 다시 읽지 않는다.
+    expect(h.remote.list.mock.calls.map(([dir]) => dir)).toEqual([
+      '/',
+      '/a',
+      '/a/b',
+      '/a/b/c',
+      '/empty'
+    ])
+  })
+})
+
+describe('remote.readFile', () => {
+  const KiB = 1024
+
+  it('reads at most the limit over a secondary connection, or a small file over the main one', async () => {
+    // covers: Test-688
+    h.remote.addText('/big.log', Buffer.alloc(200 * KiB, 'x')).addText('/small.txt', 'hello')
+
+    const big = await services.remote.readFile('/big.log', 64 * KiB)
+    expect(big.data).toEqual(Buffer.alloc(64 * KiB, 'x'))
+    expect(big).toMatchObject({ size: 200 * KiB, truncated: true })
+    const [client] = h.remote.secondaryClients
+    expect(client.close).toHaveBeenCalled()
+    // 한도를 넘긴 순간 멈춘다: 200 KiB를 다 받지 않는다.
+    expect(client.bytesSent).toBeLessThan(200 * KiB)
+
+    const small = await services.remote.readFile('/small.txt', 64 * KiB)
+    expect(small).toEqual({ size: 5, data: Buffer.from('hello'), truncated: false })
+    expect(h.remote.createSecondaryClient).toHaveBeenCalledTimes(2)
+    expect(h.remote.secondaryClients[1].close).toHaveBeenCalled()
+    expect(h.remote.mainClient.downloadTo).not.toHaveBeenCalled()
+
+    // 서버가 보조 연결을 거부하면 메인 연결로 읽되, 끝까지 받아야 하는 큰 파일은 읽지 않는다.
+    h.remote.refuseSecondary = true
+    expect(await services.remote.readFile('/small.txt', 64 * KiB)).toEqual(small)
+    expect(h.remote.mainClient.downloadTo).toHaveBeenCalledTimes(1)
+    await expect(services.remote.readFile('/big.log', 64 * KiB)).rejects.toMatchObject({
+      code: 'BUSY',
+      message: expect.stringContaining('/big.log')
+    })
+    expect(h.remote.mainClient.downloadTo).toHaveBeenCalledTimes(1)
   })
 })
