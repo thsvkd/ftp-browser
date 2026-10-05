@@ -15,6 +15,7 @@ import {
   McpSession,
   type Endpoint
 } from './mcpClient'
+import { saveImages, type SavedImage } from './imageFiles'
 import { runStdioBridge } from './stdioBridge'
 import {
   UsageError,
@@ -47,6 +48,8 @@ export interface FtpbIo {
   env: NodeJS.ProcessEnv
   platform: NodeJS.Platform
   home: string
+  /** The OS temp folder: image blocks are saved in <tmpdir>/ftpb-previews unless --save-dir says otherwise. */
+  tmpdir: string
   stdin: NodeJS.ReadableStream
   stdout: { write(chunk: string): unknown; isTTY?: boolean }
   stderr: { write(chunk: string): unknown }
@@ -77,6 +80,8 @@ Usage:
 
 Parameters follow the tool's schema: --limit 50, --recursive / --no-recursive, a list by
 repeating a flag (--paths /a --paths /b) or as JSON (--paths '["/a","/b"]'), objects as JSON.
+A parameter with several types takes the first its value reads as, else a string:
+connect --server 3 sends the id 3, --server "Pixel phone" the name.
 Every non-R tool takes --dry-run: it returns the plan and changes nothing.
 
 --args - reads all parameters as one JSON object from stdin. Pass untrusted strings, such as
@@ -85,7 +90,23 @@ ftpb.cmd runs through cmd.exe, which re-parses quotes, &, | and % in arguments:
   ftpb call delete --args - < args.json
 
 Output is JSON when stdout is not a terminal, or with --json; readable text otherwise.
+A tool's JSON output is its structuredContent, printed once (the app also sends it as text).
+Image blocks (get-image-previews) are saved as files in --save-dir <dir> (default:
+ftpb-previews in the OS temp folder) and printed without base64 next to the data:
+{"structuredContent":{...},"content":[{"type":"image","mimeType":...,"savedTo":"<file>"}]},
+with the remote "path" when the result names it. Open the saved files to see the images.
+--raw prints the result as the app sent it, base64 images included, and saves nothing.
 Errors go to stderr. ftpb never prompts.
+
+Example: the photos of 12 September (times are UTC; remote names go in stdin JSON)
+  ftpb connect --server "Pixel phone" --dry-run   an id, name or host from list-servers
+  ftpb connect --server "Pixel phone"
+  ftpb list-directory --path /DCIM/Camera --kind images \\
+    --modified-from 2026-09-12T00:00:00Z --modified-to 2026-09-12T23:59:59Z
+  ftpb download --dry-run --args - < job.json     {"remotePaths":[...],"localDir":"<dir>"}
+  ftpb download --args - < job.json               the same without --dry-run: a jobId
+  ftpb wait-for-jobs --ids <jobId> --timeout-sec 45   repeat until allDone is true
+  ftpb list-local-directory --path <dir>          compare the files with the plan
 
 Risk tiers (the app decides; Settings › Permissions sets allow, ask or deny per tier):
   R  reads only; always allowed
@@ -116,10 +137,18 @@ Environment: FTPB_URL and FTPB_TOKEN override the endpoint the app publishes in
 endpoint.json only while the app process that wrote it is running.
 `
 
+/** Where image blocks are saved (§10 U2), or `raw`: print the result as the app sent it. */
+interface ImageOptions {
+  raw: boolean
+  dir: string
+  isDefaultDir: boolean
+}
+
 class Output {
   constructor(
     private readonly io: FtpbIo,
-    readonly json: boolean
+    readonly json: boolean,
+    readonly images: ImageOptions
   ) {}
 
   /** A result on stdout: compact JSON, or `human` (pretty JSON by default) on a terminal. */
@@ -232,13 +261,23 @@ function firstText(result: Record<string, unknown>): string {
   return content.find((item) => item.type === 'text')?.text ?? ''
 }
 
-/** What a successful tool call prints: structuredContent, else the content blocks. */
-function toolOutput(result: Record<string, unknown>): { value: unknown; human: string } {
+/**
+ * What a successful tool call prints, each piece of data once (§10 U2): structuredContent (the
+ * app's text block is its JSON copy), else the text, parsed when it is JSON. Image blocks are
+ * saved as files and printed as `{ type: 'image', mimeType, path?, savedTo }` beside the data:
+ * `{ structuredContent, content }`. `--raw` prints the result as the app sent it.
+ */
+function toolOutput(
+  result: Record<string, unknown>,
+  images: ImageOptions
+): { value: unknown; human: string } {
+  const pretty = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`
+  if (images.raw) return { value: result, human: pretty(result) }
   const content = (result.content as Array<Record<string, unknown>> | undefined) ?? []
   const nonText = content.filter((item) => item.type !== 'text')
-  const pretty = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`
-  if (result.structuredContent !== undefined && nonText.length === 0) {
-    return { value: result.structuredContent, human: pretty(result.structuredContent) }
+  const structured = result.structuredContent
+  if (structured !== undefined && nonText.length === 0) {
+    return { value: structured, human: pretty(structured) }
   }
   if (content.length === 1 && nonText.length === 0) {
     const text = String(content[0].text ?? '')
@@ -249,19 +288,33 @@ function toolOutput(result: Record<string, unknown>): { value: unknown; human: s
       return { value: { content }, human: `${text}\n` }
     }
   }
-  const human = content
-    .map((item) =>
-      item.type === 'text'
-        ? String(item.text)
-        : `[${String(item.type)} ${String(item.mimeType ?? '')}, ${String(item.data ?? '').length} base64 chars]`
-    )
-    .join('\n')
-  const value = {
-    ...(result.structuredContent !== undefined
-      ? { structuredContent: result.structuredContent }
-      : {}),
-    content
-  }
+  const blocks = saveImages(
+    structured !== undefined ? nonText : content,
+    structured,
+    images.dir,
+    images.isDefaultDir
+  )
+  const saved = blocks.filter((item): item is SavedImage => 'savedTo' in item)
+  const human = [
+    ...(structured !== undefined ? [pretty(structured).trimEnd()] : []),
+    ...blocks
+      .filter((item): item is Record<string, unknown> => !('savedTo' in item))
+      .map((item) =>
+        item.type === 'text'
+          ? String(item.text)
+          : `[${String(item.type)} ${String(item.mimeType ?? '')}, ${String(item.data ?? '').length} base64 chars]`
+      ),
+    ...(saved.length > 0
+      ? [
+          'Images saved (open these files to see them):',
+          ...saved.map((item) => `  ${item.savedTo}`)
+        ]
+      : [])
+  ].join('\n')
+  const value =
+    structured !== undefined
+      ? { structuredContent: structured, content: blocks }
+      : { content: blocks }
   return { value, human: `${human}\n` }
 }
 
@@ -288,7 +341,7 @@ function toolResult(out: Output, result: Record<string, unknown>, unlisted?: str
       `The tool asked for ${String(result.resultType)}, which ftpb cannot answer. Use an MCP client.`
     )
   }
-  const { value, human } = toolOutput(result)
+  const { value, human } = toolOutput(result, out.images)
   out.data(value, human)
   return EXIT.OK
 }
@@ -366,7 +419,7 @@ async function runStatus(io: FtpbIo, out: Output): Promise<number> {
   const { url, pid, version } = endpoint
   const info = {
     endpoint: { url, ...(version ? { version } : {}), ...(pid ? { pid } : {}) },
-    ...(toolOutput(result).value as Record<string, unknown>)
+    ...(toolOutput(result, out.images).value as Record<string, unknown>)
   }
   out.data(info)
   return EXIT.OK
@@ -460,10 +513,24 @@ const COMMAND_USAGE: Record<string, string> = {
 export async function runFtpb(argv: string[], io: FtpbIo): Promise<number> {
   const help = argv.includes('--help') || argv.includes('-h')
   const json = argv.includes('--json') || !io.stdout.isTTY
-  const args = argv.filter((arg) => arg !== '--help' && arg !== '-h' && arg !== '--json')
-  const out = new Output(io, json)
+  let saveDir: string | undefined
+  const args: string[] = []
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (arg === '--save-dir') {
+      const value = argv[i + 1]
+      saveDir = value === undefined || value.startsWith('--') ? '' : argv[++i]
+    } else if (arg.startsWith('--save-dir=')) saveDir = arg.slice('--save-dir='.length)
+    else if (!['--help', '-h', '--json', '--raw'].includes(arg)) args.push(arg)
+  }
+  const out = new Output(io, json, {
+    raw: argv.includes('--raw'),
+    dir: saveDir ? path.resolve(saveDir) : path.join(io.tmpdir, 'ftpb-previews'),
+    isDefaultDir: !saveDir
+  })
   const [command, ...rest] = args
   try {
+    if (saveDir === '') throw new UsageError('--save-dir needs a folder: --save-dir <dir>.')
     if (!command || command === 'help') {
       out.text(HELP)
       return EXIT.OK

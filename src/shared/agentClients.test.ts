@@ -182,11 +182,56 @@ describe('buildSkillMarkdown', () => {
     expect(md).toMatch(/outside the user's Downloads folder[^\n]*asks the user/)
   })
 
-  it('uses the given command in every example', () => {
-    // covers: Test-559
-    const md = buildSkillMarkdown({ ftpbCommand: '/home/u/.local/bin/ftpb' })
+  it('walks through one flow from connecting by name to checking the download, in at most 150 lines', () => {
+    // covers: Test-697
+    const md = buildSkillMarkdown({ ftpbCommand: 'ftpb' })
 
-    expect(md).toContain('/home/u/.local/bin/ftpb status')
-    expect(md).not.toMatch(/`ftpb /)
+    const front = /^---\n([\s\S]*?)\n---\n/.exec(md)?.[1] ?? ''
+    const keys = front.split('\n').map((line) => /^([a-z-]+):/.exec(line)?.[1])
+    expect(keys).toEqual(['name', 'description', 'compatibility'])
+    expect(md.split('\n').length).toBeLessThanOrEqual(150)
+    const start = md.indexOf('\n## Example')
+    expect(start).toBeGreaterThan(0)
+    const example = md.slice(start, md.indexOf('\n## ', start + 1))
+    const steps = [
+      'ftpb connect --server "Pixel phone"',
+      'ftpb list-directory',
+      'ftpb download --dry-run --args -',
+      'ftpb wait-for-jobs --ids',
+      'ftpb list-local-directory'
+    ].map((step) => example.indexOf(step))
+    expect(steps.every((at) => at >= 0)).toBe(true)
+    expect([...steps].sort((a, b) => a - b)).toEqual(steps)
+  })
+
+  it('states the rules the blind usability test asked for', () => {
+    // covers: Test-698
+    const md = buildSkillMarkdown({ ftpbCommand: 'ftpb' })
+    const line = (pattern: RegExp): string =>
+      md.split('\n').find((text) => pattern.test(text)) ?? ''
+
+    expect(line(/^- `upload`/)).toContain('`remoteDir/<folder name>`')
+    expect(md).toMatch(/create the folder[^\n]*and pass the files/)
+    expect(line(/`modifiedAt`/)).toMatch(/UTC/)
+    expect(line(/`modifiedAt`/)).toMatch(/--modified-from[^\n]*--modified-to/)
+    expect(line(/--save-dir/)).toMatch(/get-image-previews/)
+    expect(line(/ftpb read-text-file --path/)).toMatch(/untrusted/i)
+    const confirmation = line(/`confirmation`/)
+    for (const value of ['asks the user', 'runs without asking', 'blocked by policy'])
+      expect(confirmation).toContain(value)
+    expect(md).toContain('`confirmedByUser: true`')
+  })
+
+  it('writes examples with plain ftpb and gives the absolute command once', () => {
+    // covers: Test-699
+    const shim = '/home/u/.local/bin/ftpb'
+    const md = buildSkillMarkdown({ ftpbCommand: shim })
+    const plain = buildSkillMarkdown({ ftpbCommand: 'ftpb' })
+
+    expect(md.split(shim)).toHaveLength(2)
+    expect(md).toContain(`If \`ftpb\` is not on PATH, use \`${shim}\``)
+    expect(md).toContain('`ftpb status`')
+    expect(md.replace(/^If `ftpb` is not on PATH.*\n/m, '')).toBe(plain)
+    expect(plain).not.toMatch(/not on PATH/)
   })
 })

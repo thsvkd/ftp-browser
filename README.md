@@ -35,6 +35,8 @@ Claude Code, Codex, Gemini CLI 같은 AI 에이전트가 이 앱을 대신 조�
 
 `ftpb`는 앱의 MCP 서버에 붙는 얇은 클라이언트라 앱이 꺼져 있으면 동작하지 않습니다. `ftpb tools`로 도구와 위험 등급을, `ftpb <도구> --help`로 인자를 보고 `ftpb list-directory --path /photos`처럼 실행합니다. 파이프로 받으면 JSON을 출력하고, 종료 코드는 0 성공, 1 도구 오류, 2 사용법 오류, 3 앱이 거부, 4 앱 미실행·접근 꺼짐·토큰 거부입니다. Claude Desktop처럼 로컬 HTTP에 직접 붙지 못하는 클라이언트는 `ftpb mcp-stdio` 브리지를 씁니다.
 
+`ftpb get-image-previews`가 받은 미리보기는 파일로 저장되고, 출력에는 base64 대신 그 파일 경로(`savedTo`)가 나옵니다. 저장 폴더는 `--save-dir <폴더>`로 정하며 기본은 OS 임시 폴더의 `ftpb-previews`입니다. 앱이 보낸 결과를 base64까지 그대로 보려면 `--raw`를 붙입니다.
+
 원격 파일 이름처럼 신뢰할 수 없는 문자열은 명령줄 인자가 아니라 stdin의 JSON으로 넘깁니다. `ftpb call <도구> --args -`는 인자 전체를 stdin에서 JSON 객체 하나로 읽습니다(`ftpb call delete --args - < args.json`). 특히 Windows에서는 `ftpb.cmd`를 cmd.exe가 다시 해석하므로 따옴표·`&`·`|`·`%`가 든 인자가 명령으로 바뀔 수 있습니다. 설치되는 에이전트 스킬도 이렇게 안내합니다.
 
 모든 도구는 R(읽기)·W(데이터 손실 없는 변경)·D(삭제)·X(업로드)·C(서버 설정) 중 한 등급이고, **Permissions**에서 등급마다 Allow·Ask·Block을 고릅니다. 기본값은 D·X·C가 Ask라서 에이전트가 삭제·업로드·서버 설정을 하려 하면 앱이 확인 창을 띄우며, 에이전트가 어떤 클라이언트를 쓰든 이 결정은 앱이 내립니다.

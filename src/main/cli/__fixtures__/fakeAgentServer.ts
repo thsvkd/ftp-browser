@@ -3,6 +3,7 @@ import Database from 'better-sqlite3'
 import { McpServer, type CallToolResult, type ListToolsResult } from '@modelcontextprotocol/server'
 import * as z from 'zod/v4'
 import { McpService } from '../../mcp/McpService'
+import { serverRef } from '../../mcp/tools/shared'
 
 /**
  * CLI 테스트용 MCP 엔드포인트. 앱과 같은 McpService(HTTP 경계·Bearer 인증)에 등급 `_meta`를 단
@@ -30,6 +31,11 @@ function text(value: string, isError = false): CallToolResult {
 
 function risk(tier: string, policy: string): Record<string, unknown> {
   return { 'ftp-browser/risk': tier, 'ftp-browser/policy': policy }
+}
+
+/** 가짜 `get_image_previews`가 `path`의 미리보기로 돌려주는 바이트(테스트가 저장된 파일과 비교한다) */
+export function previewBytes(path: string): Buffer {
+  return Buffer.from(`JPEG preview of ${path}`)
 }
 
 /** tools/list에서 `name`을 뺀다. SDK의 원래 목록 핸들러에 답을 맡긴 뒤 거른다. */
@@ -155,6 +161,54 @@ export async function startFakeAgentServer(): Promise<FakeAgentServer> {
             })
         }
         return text('{"done":true}')
+      }
+    )
+    // §10 U1: 실제 connect와 같은 server 스키마(정수∣문자열 유니언)
+    server.registerTool(
+      'connect',
+      {
+        title: 'Connect to a saved server',
+        description: '[RISK W: switches the server. Policy: allow — runs at once.]\nConnect.',
+        inputSchema: z.object({ server: serverRef, dryRun: z.boolean().optional() }),
+        annotations: { readOnlyHint: false, destructiveHint: false },
+        _meta: risk('W', 'allow')
+      },
+      async (args) => {
+        const data = record('connect', args)
+        return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data }
+      }
+    )
+    // §10 U2: 실제 get_image_previews처럼 previews(path·ok)와 같은 내용의 텍스트, ok 항목마다 이미지 블록.
+    // mapped: false면 structuredContent 없이 이미지 블록만 준다(경로 대응이 없는 결과).
+    server.registerTool(
+      'get_image_previews',
+      {
+        title: 'Get image previews',
+        description: '[RISK R: reads only. Policy: allow — always runs.]\nPreviews.',
+        inputSchema: z.object({ paths: z.array(z.string()), mapped: z.boolean().optional() }),
+        annotations: { readOnlyHint: true },
+        _meta: risk('R', 'allow')
+      },
+      async (args) => {
+        record('get_image_previews', args)
+        const previews = args.paths.map((path) =>
+          path.endsWith('.txt')
+            ? { path, ok: false, error: 'Not an image file.' }
+            : { path, ok: true }
+        )
+        const images = previews
+          .filter((preview) => preview.ok)
+          .map(({ path }) => ({
+            type: 'image' as const,
+            data: previewBytes(path).toString('base64'),
+            mimeType: 'image/jpeg'
+          }))
+        if (args.mapped === false) return { content: images }
+        const data = { previews }
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data) }, ...images],
+          structuredContent: data
+        }
       }
     )
     hideFromList(server, 'delete_local')

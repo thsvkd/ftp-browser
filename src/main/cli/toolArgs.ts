@@ -1,7 +1,8 @@
 /**
  * `ftpb <tool> --param value` → tool arguments, typed by the tool's JSON Schema (from tools/list).
  * Numbers, booleans, arrays (repeat the flag or pass a JSON array) and objects (JSON) are converted;
- * `--args '<json>'` gives a base object that flags override.
+ * a union (`anyOf`, `oneOf`, a type array) takes the most specific type the value reads as, else a
+ * string (§10 U1). `--args '<json>'` gives a base object that flags override.
  */
 
 export interface JsonSchema {
@@ -11,6 +12,7 @@ export interface JsonSchema {
   items?: JsonSchema
   enum?: unknown[]
   anyOf?: JsonSchema[]
+  oneOf?: JsonSchema[]
   description?: string
 }
 
@@ -41,54 +43,92 @@ export function resolveName(input: string, names: string[]): string | undefined 
   return names.find((name) => name === input) ?? names.find((n) => squash(n) === squash(input))
 }
 
-function typeOf(schema: JsonSchema | undefined): string | undefined {
-  if (!schema) return undefined
-  const { type } = schema
-  if (typeof type === 'string') return type
-  if (Array.isArray(type)) return type.find((t) => t !== 'null')
-  if (schema.anyOf) {
-    for (const option of schema.anyOf) {
-      const found = typeOf(option)
-      if (found && found !== 'null') return found
-    }
-  }
-  if (schema.enum?.length) return typeof schema.enum[0]
-  return undefined
+/** Every type `schema` accepts, from `type`, `anyOf`, `oneOf` or `enum`, without null. */
+function typesOf(schema: JsonSchema | undefined): string[] {
+  if (!schema) return []
+  const types = new Set<string>()
+  if (typeof schema.type === 'string') types.add(schema.type)
+  for (const type of Array.isArray(schema.type) ? schema.type : []) types.add(type)
+  for (const option of [...(schema.anyOf ?? []), ...(schema.oneOf ?? [])])
+    for (const type of typesOf(option)) types.add(type)
+  if (types.size === 0) for (const value of schema.enum ?? []) types.add(typeof value)
+  types.delete('null')
+  return [...types]
 }
 
-function parseJson(flag: string, value: string): unknown {
+/** The one type `schema` accepts, or undefined for a union or no type at all. */
+function soleType(schema: JsonSchema | undefined): string | undefined {
+  const types = typesOf(schema)
+  return types.length === 1 ? types[0] : undefined
+}
+
+function parseJson(value: string): unknown {
   try {
-    return JSON.parse(value)
+    return JSON.parse(value) as unknown
   } catch {
-    throw new UsageError(`--${flag} needs JSON, got ${JSON.stringify(value)}.`)
+    return undefined
   }
+}
+
+const JSON_NUMBER = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/
+
+/**
+ * Readers for the non-string types, most specific first: a union takes the first that reads the
+ * value. With a string alternative only plain JSON numbers are numbers, so a server named "007"
+ * stays a name.
+ */
+const READERS: Array<[type: string, read: (value: string, strict: boolean) => unknown]> = [
+  ['integer', (value, strict) => readNumber(value, strict, true)],
+  ['number', (value, strict) => readNumber(value, strict, false)],
+  ['boolean', (value) => (value === 'true' ? true : value === 'false' ? false : undefined)],
+  ['array', (value) => jsonOf(value, Array.isArray)],
+  ['object', (value) => jsonOf(value, isObject)]
+]
+
+const FORMS: Record<string, string> = {
+  integer: 'an integer',
+  number: 'a number',
+  boolean: 'true/false',
+  array: 'a JSON array',
+  object: 'a JSON object'
+}
+
+function readNumber(value: string, strict: boolean, integer: boolean): number | undefined {
+  if (strict ? !JSON_NUMBER.test(value) : value.trim() === '') return undefined
+  const number = Number(value)
+  return Number.isNaN(number) || (integer && !Number.isInteger(number)) ? undefined : number
+}
+
+function isObject(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function jsonOf(value: string, is: (parsed: unknown) => boolean): unknown {
+  const parsed = parseJson(value)
+  return is(parsed) ? parsed : undefined
 }
 
 function convertScalar(flag: string, value: string, schema: JsonSchema | undefined): unknown {
-  const type = typeOf(schema)
-  if (type === 'number' || type === 'integer') {
-    const number = value.trim() === '' ? NaN : Number(value)
-    if (Number.isNaN(number) || (type === 'integer' && !Number.isInteger(number))) {
-      throw new UsageError(
-        `--${flag} needs ${type === 'integer' ? 'an integer' : 'a number'}, got ${JSON.stringify(value)}.`
-      )
-    }
-    return number
-  }
-  if (type === 'boolean') {
-    if (value === 'true' || value === 'false') return value === 'true'
-    throw new UsageError(`--${flag} is true or false, got ${JSON.stringify(value)}.`)
-  }
-  if (type === 'object' || type === 'array') return parseJson(flag, value)
-  if (type === undefined) {
+  const types = typesOf(schema)
+  if (types.length === 0) {
     // No schema (unlisted tool): use the value as JSON when it parses, else as a string.
-    try {
-      return JSON.parse(value)
-    } catch {
-      return value
-    }
+    const parsed = parseJson(value)
+    return parsed === undefined ? value : parsed
   }
-  return value
+  // string, or a type ftpb has no reader for: the value as it is
+  const asString = types.some((type) => !READERS.some(([known]) => known === type))
+  for (const [type, read] of READERS) {
+    if (!types.includes(type)) continue
+    const converted = read(value, asString)
+    if (converted !== undefined) return converted
+  }
+  if (asString) return value
+  const forms = READERS.filter(([type]) => types.includes(type)).map(([type]) => FORMS[type])
+  throw new UsageError(
+    `--${flag} needs ${forms.join(' or ')}, got ${JSON.stringify(value)}. To pass a value ` +
+      "exactly, give all parameters as one JSON object: --args '<json>', or --args - to read it " +
+      'from stdin.'
+  )
 }
 
 /** Parse the flags after `ftpb <tool>` against `schema` (undefined: the tool is not listed). */
@@ -127,7 +167,7 @@ export function parseToolArgs(argv: string[], schema?: JsonSchema): Record<strin
     }
 
     if (flag === 'args') {
-      const value = parseJson(flag, next())
+      const value = parseJson(next())
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new UsageError('--args needs a JSON object.')
       }
@@ -145,7 +185,7 @@ export function parseToolArgs(argv: string[], schema?: JsonSchema): Record<strin
 
     const name = resolve(flag)
     const property = properties[name]
-    const type = typeOf(property)
+    const type = soleType(property)
     if (type === 'boolean' || (!schema && inline === undefined && isFlagEnd(argv[i + 1]))) {
       if (inline !== undefined) flags[name] = convertScalar(flag, inline, { type: 'boolean' })
       else if (argv[i + 1] === 'true' || argv[i + 1] === 'false') flags[name] = argv[++i] === 'true'
@@ -185,7 +225,7 @@ function resolveIfBoolean(
   properties: Record<string, JsonSchema>
 ): string | undefined {
   const name = Object.keys(properties).find((n) => squash(n) === squash(flag))
-  return name && typeOf(properties[name]) === 'boolean' ? name : undefined
+  return name && soleType(properties[name]) === 'boolean' ? name : undefined
 }
 
 function camel(flag: string): string {
@@ -205,16 +245,17 @@ export function policyOf(tool: ToolInfo): string {
 }
 
 function placeholder(schema: JsonSchema | undefined): string {
-  const type = typeOf(schema)
+  const type = soleType(schema)
   if (schema?.enum?.length) return `<${schema.enum.map(String).join('|')}>`
   if (type === 'array') {
-    const itemType = typeOf(schema?.items)
-    return itemType === 'object' || itemType === 'array' || !itemType
+    const itemTypes = typesOf(schema?.items)
+    return itemTypes.length === 0 || itemTypes.includes('object') || itemTypes.includes('array')
       ? '<json>'
       : `${placeholder(schema?.items)} (repeatable)`
   }
   if (type === 'object') return '<json>'
-  return `<${type ?? 'value'}>`
+  // a union shows every type it accepts: <integer|string>
+  return `<${typesOf(schema).join('|') || 'value'}>`
 }
 
 /** `ftpb <tool> --help`: what it does, its tier and policy, and one line per flag. */
@@ -223,7 +264,9 @@ export function toolHelp(tool: ToolInfo): string {
   const required = new Set(tool.inputSchema?.required ?? [])
   const rows = Object.entries(properties).map(([name, schema]) => {
     const usage =
-      typeOf(schema) === 'boolean' ? `--${kebab(name)}` : `--${kebab(name)} ${placeholder(schema)}`
+      soleType(schema) === 'boolean'
+        ? `--${kebab(name)}`
+        : `--${kebab(name)} ${placeholder(schema)}`
     const notes = [required.has(name) ? 'required' : '', schema.description ?? '']
       .filter(Boolean)
       .join('  ')

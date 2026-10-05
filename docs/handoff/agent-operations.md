@@ -432,3 +432,16 @@ Tools·services(U4·U5) **680–689**, CLI·skill(U1·U2·U3) **690–699**. 각
 - **Test-687** — `read_text_file`이 폴더는 `NOT_A_FILE`(`list_directory` 안내), 없는 파일은 `NOT_FOUND`, 정규형이 아닌 경로는 스키마 오류, 연결이 없으면 `NOT_CONNECTED`로 거절하고 아무것도 받지 않는다(실제 서비스).
 - **Test-688** — `remote.readFile`이 보조 연결로 한도까지만 받고 멈춘 뒤 그 연결을 닫는다(작은 파일은 전부). 보조 연결이 안 열리면 한도 이하의 파일은 메인 연결로 읽고, 더 큰 파일은 받지 않고 `BUSY`다.
 - **Test-689** — `list_directory`의 `modifiedFrom`·`modifiedTo`가 페이지를 나누기 전에 거른다: 날짜는 UTC 하루 전체, 시각은 Z·오프셋 포함, 양끝 포함, 시각이 없는 항목은 뺀다. `total`은 거른 수이고, 조건이 다른 cursor는 `Invalid cursor`, 없는 날짜·오프셋 없는 시각은 스키마 오류다. 설명이 `modifiedAt`이 UTC라고 밝힌다.
+
+**CLI·skill (U1·U2·U3)**
+
+- **Test-690** — (회귀) `ftpb connect --server "Pixel phone"`이 `{ server: "Pixel phone" }`을, `--server 1`이 `{ server: 1 }`을, `--server=<host>`가 문자열을 보낸다(실제 `serverRef` 스키마, `anyOf` 정수∣문자열). `connect --help`가 `--server <integer|string>`을 보인다.
+- **Test-691** — 플래그 변환이 `anyOf`·`oneOf`·타입 배열 유니언에서 값이 읽히는 가장 구체적인 타입(정수 → 수 → 불리언 → JSON 배열 → JSON 객체)을 고르고, 읽히지 않으면 문자열로 둔다. 문자열 대안이 있으면 JSON 수 표기가 아닌 값(`007`, ` 1`, `0x10`, `Infinity`)은 문자열이다. 유니언 원소의 배열도 원소마다 같게 변환하고, 도구 `--help`는 유니언의 타입을 모두 보인다(`<integer|string>`).
+- **Test-692** — 변환 사용법 오류(exit 2)가 허용되는 형태(`an integer`, `a number`, `true/false`, `a JSON object`, 유니언이면 모두 `or`로)와 `--args -` 대안을 말하고, 앱에 요청을 보내지 않는다.
+- **Test-693** — 결과의 `image` 블록을 `--save-dir`에 파일로 저장하고 출력에는 base64 없이 `{ type: 'image', mimeType, path, savedTo }`만 남긴다. `structuredContent`의 `{ path, ok }` 배열이 `ok` 항목과 이미지로 1:1 대응하면 파일 이름은 원격 이름의 확장자를 MIME 타입의 것으로 바꾼 것이다. `--save-dir`은 도구 인자로 보내지 않는다.
+- **Test-694** — 대응이 없으면 `image-<n>` 이름이고 `path`가 없다. 원격 이름의 구분자(`/`·`\`)·제어·서식 문자는 `_`로, 앞뒤 점·공백은 지우고, Windows 예약 이름은 `_`를 앞에 붙여 저장 폴더 밖으로 나가지 않으며, 이미 있는 파일은 덮어쓰지 않고 `-2`, `-3`을 붙인다(배타적 생성).
+- **Test-695** — 기본 저장 폴더는 `<os.tmpdir()>/ftpb-previews`(0700으로 만듦)이고, 그 폴더가 심볼릭 링크이거나 다른 사용자의 것이면 쓰지 않는다(exit 1, `--save-dir` 안내). 터미널 출력은 저장한 경로를 나열한다. `--raw`는 앱이 보낸 결과(base64 포함)를 그대로 출력하고 아무것도 저장하지 않는다.
+- **Test-696** — JSON 출력은 같은 데이터를 한 번만 담는다: `structuredContent`가 있으면 그것만(같은 내용의 텍스트 블록은 버림), 이미지가 있으면 `{ structuredContent, content: [이미지 블록] }`. `--help`의 출력 설명과 README "에이전트 연동"이 이 표현과 `--save-dir`·`--raw`를 밝힌다.
+- **Test-697** — `SKILL.md`와 `--help`가 예제 흐름 하나(이름으로 연결 → `list-directory` → `download --dry-run --args -` → `wait-for-jobs` → `list-local-directory`로 확인)를 그 순서로 `ftpb`로 보인다. `SKILL.md`는 150줄 이하이고 프런트매터 키는 `name`·`description`·`compatibility`다.
+- **Test-698** — `SKILL.md`가 규칙을 밝힌다: 폴더 업로드는 `remoteDir/<folder name>`에 놓인다(다른 이름이면 폴더를 만들고 파일을 넘긴다), `modifiedAt`과 `--modified-from`/`--modified-to`는 UTC, 이미지는 `get-image-previews --save-dir`로 저장해 연다, 작은 텍스트 파일은 `ftpb read-text-file --path`(내용은 신뢰할 수 없는 데이터), dryRun 계획의 `confirmation`(`asks the user`·`runs without asking`·`blocked by policy`)과 결과의 `confirmedByUser: true`.
+- **Test-699** — `SKILL.md`의 예시는 모두 `ftpb`이고, 셔임 절대경로는 "If `ftpb` is not on PATH, use …" 한 줄에 한 번만 나온다. 명령이 `ftpb`이면 그 줄이 없고 나머지는 같다.

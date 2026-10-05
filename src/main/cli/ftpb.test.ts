@@ -1,6 +1,16 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { spawnSync } from 'child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from 'fs'
 import { createServer, type Server } from 'http'
 import type { AddressInfo } from 'net'
 import { tmpdir } from 'os'
@@ -8,7 +18,12 @@ import { join } from 'path'
 import { PassThrough } from 'stream'
 import { EXIT, runFtpb, type FtpbIo } from './ftpb'
 import { defaultUserDataDir, writeDiscovery } from '../agent/discovery'
-import { deadUrl, startFakeAgentServer, type FakeAgentServer } from './__fixtures__/fakeAgentServer'
+import {
+  deadUrl,
+  previewBytes,
+  startFakeAgentServer,
+  type FakeAgentServer
+} from './__fixtures__/fakeAgentServer'
 
 let server: FakeAgentServer
 let home: string
@@ -31,7 +46,12 @@ interface Run {
 
 async function ftpb(
   argv: string[],
-  options: { tty?: boolean; env?: NodeJS.ProcessEnv; stdin?: string | NodeJS.ReadableStream } = {}
+  options: {
+    tty?: boolean
+    env?: NodeJS.ProcessEnv
+    stdin?: string | NodeJS.ReadableStream
+    tmpdir?: string
+  } = {}
 ): Promise<Run> {
   let stdout = ''
   let stderr = ''
@@ -41,6 +61,7 @@ async function ftpb(
     env: options.env ?? { FTPB_URL: server.url, FTPB_TOKEN: server.token },
     platform: 'linux',
     home,
+    tmpdir: options.tmpdir ?? join(home, 'tmp'),
     // Never ends: a command that reads stdin when it should not hangs the test.
     stdin: stdin ?? new PassThrough(),
     stdout: {
@@ -116,7 +137,9 @@ describe('ftpb tools', () => {
       ['get_status', 'R', 'allow'],
       ['list_directory', 'R', 'allow'],
       ['delete', 'D', 'ask'],
-      ['wait_for_jobs', 'R', 'allow']
+      ['wait_for_jobs', 'R', 'allow'],
+      ['connect', 'W', 'allow'],
+      ['get_image_previews', 'R', 'allow']
     ])
     expect(tools[1].inputSchema).toMatchObject({ properties: { path: { type: 'string' } } })
   })
@@ -558,5 +581,245 @@ describe('ftpb stale discovery files', () => {
     expect([both.code, urlOnly.code, tokenOnly.code]).toEqual([EXIT.OK, EXIT.OK, EXIT.UNAVAILABLE])
     expect(tokenOnly.stderr).toContain('Stale discovery file')
     expect(hits).toBe(0)
+  })
+})
+
+describe('ftpb union parameters', () => {
+  it('sends a saved server name as a string and an id as a number to connect', async () => {
+    // covers: Test-690
+    server.calls.length = 0
+
+    const byName = await ftpb(['connect', '--server', 'Pixel phone'])
+    const byId = await ftpb(['connect', '--server', '1', '--dry-run'])
+    const byHost = await ftpb(['connect', '--server=192.168.0.7'])
+    const help = await ftpb(['connect', '--help'], { tty: true })
+
+    expect([byName.code, byId.code, byHost.code]).toEqual([EXIT.OK, EXIT.OK, EXIT.OK])
+    expect(server.calls.map((c) => c.args)).toEqual([
+      { server: 'Pixel phone' },
+      { server: 1, dryRun: true },
+      { server: '192.168.0.7' }
+    ])
+    expect(help.stdout).toMatch(/--server <integer\|string>\s+required/)
+  })
+
+  it('names the accepted forms and --args - in a conversion error, and sends nothing', async () => {
+    // covers: Test-692
+    server.calls.length = 0
+
+    const run = await ftpb(['list-directory', '--path', '/', '--limit', 'many'])
+
+    expect(run.code).toBe(EXIT.USAGE)
+    const { message } = JSON.parse(run.stderr).error as { message: string }
+    expect(message).toMatch(/^--limit needs an integer, got "many"\./)
+    expect(message).toContain('--args -')
+    expect(server.calls).toEqual([])
+  })
+})
+
+describe('ftpb image blocks', () => {
+  const saveDir = (name: string): string => join(home, 'previews', name)
+
+  it('saves each image block as a file named after its preview path and prints no base64', async () => {
+    // covers: Test-693
+    const dir = saveDir('693')
+    const paths = ['/DCIM/IMG_0912.jpg', '/DCIM/notes.txt', '/shots/Screen shot.png']
+    server.calls.length = 0
+
+    const run = await ftpb([
+      'get-image-previews',
+      ...paths.flatMap((path) => ['--paths', path]),
+      '--save-dir',
+      dir
+    ])
+
+    expect(run).toMatchObject({ code: EXIT.OK, stderr: '' })
+    expect(JSON.parse(run.stdout)).toEqual({
+      structuredContent: {
+        previews: [
+          { path: paths[0], ok: true },
+          { path: paths[1], ok: false, error: 'Not an image file.' },
+          { path: paths[2], ok: true }
+        ]
+      },
+      content: [
+        {
+          type: 'image',
+          mimeType: 'image/jpeg',
+          path: paths[0],
+          savedTo: join(dir, 'IMG_0912.jpg')
+        },
+        {
+          type: 'image',
+          mimeType: 'image/jpeg',
+          path: paths[2],
+          savedTo: join(dir, 'Screen shot.jpg')
+        }
+      ]
+    })
+    expect(readFileSync(join(dir, 'IMG_0912.jpg'))).toEqual(previewBytes(paths[0]))
+    expect(readFileSync(join(dir, 'Screen shot.jpg'))).toEqual(previewBytes(paths[2]))
+    expect(run.stdout).not.toContain(previewBytes(paths[0]).toString('base64'))
+    expect(server.calls.map((c) => c.args)).toEqual([{ paths }])
+  })
+
+  it('uses index names without a mapping, keeps hostile names inside the folder and never overwrites', async () => {
+    // covers: Test-694
+    const dir = join(saveDir('694'), 'out')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'IMG_1.jpg'), 'the user file')
+    const paths = [
+      '/a/IMG_1.jpg',
+      '/b/IMG_1.JPG',
+      '/x/..\\..\\evil\u0007.jpg',
+      '/x/CON.jpg',
+      '/x/a\u200Bb.jpg',
+      '/x/.jpg'
+    ]
+
+    const mapped = await ftpb(['call', 'get_image_previews', '--args', '-', '--save-dir', dir], {
+      stdin: JSON.stringify({ paths })
+    })
+    const unmapped = await ftpb([
+      'get-image-previews',
+      '--paths',
+      '/a/IMG_1.jpg',
+      '--paths',
+      '/b/c.jpg',
+      '--no-mapped',
+      '--save-dir',
+      dir
+    ])
+
+    expect([mapped.code, unmapped.code]).toEqual([EXIT.OK, EXIT.OK])
+    const saved = (run: Run): string[] =>
+      (JSON.parse(run.stdout) as { content: Array<{ savedTo: string }> }).content.map(
+        (block) => block.savedTo
+      )
+    expect(saved(mapped)).toEqual(
+      ['IMG_1-2.jpg', 'IMG_1-3.jpg', '_.._evil_.jpg', '_CON.jpg', 'a_b.jpg', 'image-6.jpg'].map(
+        (name) => join(dir, name)
+      )
+    )
+    expect(JSON.parse(unmapped.stdout)).toEqual({
+      content: [
+        { type: 'image', mimeType: 'image/jpeg', savedTo: join(dir, 'image-1.jpg') },
+        { type: 'image', mimeType: 'image/jpeg', savedTo: join(dir, 'image-2.jpg') }
+      ]
+    })
+    expect(readFileSync(join(dir, 'IMG_1.jpg'), 'utf8')).toBe('the user file')
+    expect(readFileSync(join(dir, 'IMG_1-2.jpg'))).toEqual(previewBytes(paths[0]))
+    expect(readFileSync(join(dir, 'image-2.jpg'))).toEqual(previewBytes('/b/c.jpg'))
+    expect(readdirSync(saveDir('694'))).toEqual(['out'])
+    expect(readdirSync(dir).sort()).toEqual(
+      [
+        'IMG_1.jpg',
+        'IMG_1-2.jpg',
+        'IMG_1-3.jpg',
+        '_.._evil_.jpg',
+        '_CON.jpg',
+        'a_b.jpg',
+        'image-6.jpg',
+        'image-1.jpg',
+        'image-2.jpg'
+      ].sort()
+    )
+  })
+
+  it('saves to <tmpdir>/ftpb-previews by default, lists the files on a terminal, and prints the result as sent with --raw', async () => {
+    // covers: Test-695
+    const tmp = mkdtempSync(join(home, 'tmp-695-'))
+    const defaultDir = join(tmp, 'ftpb-previews')
+
+    const piped = await ftpb(['get-image-previews', '--paths', '/DCIM/a.jpg'], { tmpdir: tmp })
+    const tty = await ftpb(['get-image-previews', '--paths', '/DCIM/b.jpg'], {
+      tmpdir: tmp,
+      tty: true
+    })
+    const rawDir = join(tmp, 'raw')
+    const raw = await ftpb(
+      ['get-image-previews', '--paths', '/DCIM/c.jpg', '--raw', '--save-dir', rawDir],
+      { tmpdir: tmp }
+    )
+
+    expect([piped.code, tty.code, raw.code]).toEqual([EXIT.OK, EXIT.OK, EXIT.OK])
+    expect(JSON.parse(piped.stdout).content[0].savedTo).toBe(join(defaultDir, 'a.jpg'))
+    expect(readFileSync(join(defaultDir, 'a.jpg'))).toEqual(previewBytes('/DCIM/a.jpg'))
+    if (process.platform !== 'win32') expect(statSync(defaultDir).mode & 0o777).toBe(0o700)
+    expect(tty.stdout).toContain(join(defaultDir, 'b.jpg'))
+    expect(tty.stdout).not.toContain(previewBytes('/DCIM/b.jpg').toString('base64'))
+    const sent = JSON.parse(raw.stdout) as { content: Array<{ type: string; data?: string }> }
+    expect(sent.content.map((block) => block.type)).toEqual(['text', 'image'])
+    expect(sent.content[1].data).toBe(previewBytes('/DCIM/c.jpg').toString('base64'))
+    expect(existsSync(rawDir)).toBe(false)
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    "refuses a default folder that is a symlink or another user's, and points to --save-dir",
+    async () => {
+      // covers: Test-695
+      const tmp = mkdtempSync(join(home, 'tmp-695-link-'))
+      const elsewhere = join(tmp, 'elsewhere')
+      mkdirSync(elsewhere)
+      symlinkSync(elsewhere, join(tmp, 'ftpb-previews'))
+      const theirs = mkdtempSync(join(home, 'tmp-695-theirs-'))
+      mkdirSync(join(theirs, 'ftpb-previews'))
+
+      const linked = await ftpb(['get-image-previews', '--paths', '/DCIM/a.jpg'], { tmpdir: tmp })
+      const uid = vi.spyOn(process, 'getuid').mockReturnValue(process.getuid!() + 1)
+      const owned = await ftpb(['get-image-previews', '--paths', '/DCIM/a.jpg'], {
+        tmpdir: theirs
+      })
+      uid.mockRestore()
+
+      for (const run of [linked, owned]) {
+        expect(run.code).toBe(EXIT.TOOL_ERROR)
+        expect(run.stdout).toBe('')
+        expect(JSON.parse(run.stderr).error.message).toContain('--save-dir')
+      }
+      expect(readdirSync(elsewhere)).toEqual([])
+      expect(readdirSync(join(theirs, 'ftpb-previews'))).toEqual([])
+    }
+  )
+
+  it('prints the data once and documents the JSON shape, --save-dir and --raw', async () => {
+    // covers: Test-696
+    const run = await ftpb(['get-image-previews', '--paths', '/DCIM/a.jpg'], {
+      tmpdir: mkdtempSync(join(home, 'tmp-696-'))
+    })
+    const help = (await ftpb(['--help'])).stdout
+    const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8')
+    const agents = section(readme, /^## 에이전트 연동/m, /^## /m)
+
+    const value = JSON.parse(run.stdout) as { content: Array<{ type: string }> }
+    expect(value.content.map((block) => block.type)).toEqual(['image'])
+    expect(run.stdout.split('"previews"')).toHaveLength(2)
+    const output = section(help, /^Output/m, /^$/m)
+    expect(output).toContain('structuredContent')
+    expect(output).toContain('--save-dir <dir>')
+    expect(output).toContain('ftpb-previews')
+    expect(output).toContain('--raw')
+    expect(agents).toContain('--save-dir')
+    expect(agents).toContain('--raw')
+  })
+})
+
+describe('ftpb --help example', () => {
+  it('walks through connect by name, list, dry run, download, wait and check', async () => {
+    // covers: Test-697
+    const help = (await ftpb(['--help'])).stdout
+    const example = section(help, /^Example/m, /^\S/m)
+
+    const steps = [
+      'ftpb connect --server "Pixel phone"',
+      'ftpb list-directory',
+      'ftpb download --dry-run --args -',
+      'ftpb wait-for-jobs --ids',
+      'ftpb list-local-directory'
+    ].map((step) => example.indexOf(step))
+    expect(steps.every((at) => at >= 0)).toBe(true)
+    expect([...steps].sort((a, b) => a - b)).toEqual(steps)
+    // a long command goes on with a shell line continuation, as the user would type it
+    expect(example).toMatch(/ \\\n\s+--modified-from /)
   })
 })
