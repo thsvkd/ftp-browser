@@ -151,6 +151,99 @@ describe('AgentConfirmDialog', () => {
     expect(panel.textContent).not.toMatch(/[\r\n‮]/)
   })
 
+  it('shows where the action writes, labelled, for uploads, downloads and renames', async () => {
+    // covers: Test-645
+    const user = userEvent.setup()
+    render(<AgentConfirmDialog />)
+    const writes: [Partial<AgentConfirmRequest>, string][] = [
+      [{ id: 'up', tool: 'upload', tier: 'X', destination: '/site/public' }, '/site/public'],
+      [
+        { id: 'down', tool: 'download', tier: 'W', destination: 'C:\\Users\\kim\\Desktop' },
+        'C:\\Users\\kim\\Desktop'
+      ],
+      [
+        { id: 'mv', tool: 'rename', tier: 'W', destination: '/photos/2026/b.jpg' },
+        '/photos/2026/b.jpg'
+      ]
+    ]
+    for (const [overrides, shown] of writes) {
+      emit('agent:confirmRequest', request(overrides))
+      const label = within(dialog()).getByText('To')
+      // 라벨과 값이 한 쌍(dt·dd)이다.
+      expect(label.tagName).toBe('DT')
+      expect(label.nextElementSibling?.textContent).toBe(shown)
+      await user.click(within(dialog()).getByRole('button', { name: 'Deny' }))
+    }
+
+    // 목적지가 없는 요청(삭제)에는 그 줄이 없다.
+    emit('agent:confirmRequest', request({ id: 'rm' }))
+    expect(within(dialog()).queryByText('To')).toBeNull()
+  })
+
+  it('renders the destination and the self-declared client name as escaped text', () => {
+    // covers: Test-646
+    render(<AgentConfirmDialog />)
+    emit(
+      'agent:confirmRequest',
+      request({
+        tool: 'upload',
+        tier: 'X',
+        client: 'claude\u200b-code\u0085',
+        host: 'nas\u2060.local\ufeff',
+        destination: '/up/<img src=x onerror="alert(1)">\nx/photo\u202egpj\u200d\u009b'
+      })
+    )
+
+    const panel = dialog()
+    expect(panel.querySelector('img')).toBeNull()
+    // 폭 없는 문자와 C1이 숨으면 'claude-code'로 보인다. 보이는 표기로 바꾼다.
+    expect(within(panel).queryByText('claude-code')).toBeNull()
+    expect(panel.textContent).toContain('claude\\u200B-code\\u0085')
+    expect(panel.textContent).toContain('nas\\u2060.local\\uFEFF')
+    expect(panel.textContent).toContain(
+      '/up/<img src=x onerror="alert(1)">\\nx/photo\\u202Egpj\\u200D\\u009B'
+    )
+    expect(panel.textContent).not.toMatch(
+      /[\n\u0080-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]/
+    )
+  })
+
+  it('shows local writes with the W badge, their title and the Downloads-folder rule', async () => {
+    // covers: Test-648
+    const user = userEvent.setup()
+    render(<AgentConfirmDialog />)
+    const rule =
+      'Outside your Downloads folder, the agent must ask before writing to this computer.'
+    const localWrites: [string, RegExp][] = [
+      ['download', /Download files/],
+      ['create_local_directory', /Create a local folder/],
+      ['rename_local', /Rename local items/]
+    ]
+    for (const [tool, title] of localWrites) {
+      emit(
+        'agent:confirmRequest',
+        request({ id: tool, tool, tier: 'W', host: undefined, destination: '/home/kim/.ssh' })
+      )
+      const panel = within(screen.getByRole('alertdialog', { name: title }))
+      expect(panel.getByText('W')).toBeTruthy()
+      expect(panel.getByText('Change')).toBeTruthy()
+      expect(panel.getByText(rule)).toBeTruthy()
+      await user.click(panel.getByRole('button', { name: 'Deny' }))
+    }
+
+    // 원격에 쓰는 W 도구와 다른 등급의 도구에는 이 안내가 없다.
+    const others = [
+      ['create_directory', 'W'],
+      ['upload', 'X'],
+      ['delete_local', 'D']
+    ] as const
+    for (const [tool, tier] of others) {
+      emit('agent:confirmRequest', request({ id: tool, tool, tier }))
+      expect(within(dialog()).queryByText(rule)).toBeNull()
+      await user.click(within(dialog()).getByRole('button', { name: 'Deny' }))
+    }
+  })
+
   it('closes the dialog when main cancels the request, without answering it', () => {
     // covers: Test-506
     render(<AgentConfirmDialog />)

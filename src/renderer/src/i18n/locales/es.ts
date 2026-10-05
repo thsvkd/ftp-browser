@@ -317,6 +317,9 @@ export const es = {
   'agent.confirm.client': 'Agente',
   'agent.confirm.unknownClient': 'Desconocido',
   'agent.confirm.server': 'Servidor',
+  'agent.confirm.destination': 'Destino',
+  'agent.confirm.localWriteRule':
+    'Fuera de tu carpeta Descargas, el agente debe preguntar antes de escribir en este equipo.',
   'agent.confirm.items': 'Elementos',
   'agent.confirm.overwrites': 'Sobrescribe',
   'agent.confirm.total': 'Total: {{items}}',

@@ -297,6 +297,9 @@ export const ko = {
   'agent.confirm.client': '에이전트',
   'agent.confirm.unknownClient': '알 수 없음',
   'agent.confirm.server': '서버',
+  'agent.confirm.destination': '대상 위치',
+  'agent.confirm.localWriteRule':
+    '다운로드 폴더 밖에서 이 컴퓨터에 쓰기 전에는 에이전트가 반드시 물어야 합니다.',
   'agent.confirm.items': '항목',
   'agent.confirm.overwrites': '덮어씀',
   'agent.confirm.total': '합계: {{items}}',

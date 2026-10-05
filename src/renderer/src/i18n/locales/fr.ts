@@ -318,6 +318,9 @@ export const fr = {
   'agent.confirm.client': 'Agent',
   'agent.confirm.unknownClient': 'Inconnu',
   'agent.confirm.server': 'Serveur',
+  'agent.confirm.destination': 'Destination',
+  'agent.confirm.localWriteRule':
+    'Hors de votre dossier Téléchargements, l’agent doit demander avant d’écrire sur cet ordinateur.',
   'agent.confirm.items': 'Éléments',
   'agent.confirm.overwrites': 'Remplace',
   'agent.confirm.total': 'Total : {{items}}',

@@ -320,6 +320,9 @@ export const de = {
   'agent.confirm.client': 'Agent',
   'agent.confirm.unknownClient': 'Unbekannt',
   'agent.confirm.server': 'Server',
+  'agent.confirm.destination': 'Ziel',
+  'agent.confirm.localWriteRule':
+    'Außerhalb Ihres Download-Ordners muss der Agent fragen, bevor er auf diesen Computer schreibt.',
   'agent.confirm.items': 'Elemente',
   'agent.confirm.overwrites': 'Überschreibt',
   'agent.confirm.total': 'Gesamt: {{items}}',

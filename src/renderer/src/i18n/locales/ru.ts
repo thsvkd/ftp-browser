@@ -341,6 +341,9 @@ export const ru = {
   'agent.confirm.client': 'Агент',
   'agent.confirm.unknownClient': 'Неизвестно',
   'agent.confirm.server': 'Сервер',
+  'agent.confirm.destination': 'Куда',
+  'agent.confirm.localWriteRule':
+    'За пределами папки «Загрузки» агент должен спрашивать разрешение, прежде чем записывать на этот компьютер.',
   'agent.confirm.items': 'Элементы',
   'agent.confirm.overwrites': 'Заменит',
   'agent.confirm.total': 'Всего: {{items}}',

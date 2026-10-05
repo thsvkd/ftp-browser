@@ -313,6 +313,9 @@ export const ptBR = {
   'agent.confirm.client': 'Agente',
   'agent.confirm.unknownClient': 'Desconhecido',
   'agent.confirm.server': 'Servidor',
+  'agent.confirm.destination': 'Destino',
+  'agent.confirm.localWriteRule':
+    'Fora da sua pasta Downloads, o agente precisa pedir permissão antes de gravar neste computador.',
   'agent.confirm.items': 'Itens',
   'agent.confirm.overwrites': 'Substitui',
   'agent.confirm.total': 'Total: {{items}}',

@@ -301,6 +301,9 @@ export const ja = {
   'agent.confirm.client': 'エージェント',
   'agent.confirm.unknownClient': '不明',
   'agent.confirm.server': 'サーバー',
+  'agent.confirm.destination': '書き込み先',
+  'agent.confirm.localWriteRule':
+    'ダウンロードフォルダーの外でこのコンピューターに書き込む前に、エージェントは必ず確認を求めます。',
   'agent.confirm.items': '項目',
   'agent.confirm.overwrites': '上書き',
   'agent.confirm.total': '合計: {{items}}',

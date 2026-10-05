@@ -19,11 +19,10 @@ export function useAgentActivityToast(): void {
       const activity = args[0] as AgentActivity
       const show = SHOW[activity.outcome]
       if (!show) return
+      // 항목이 없는 도구(connect, disconnect 등)에는 "0개 항목"을 보이지 않는다.
+      const count = activity.totalItems ?? 0
       toast[show.kind](t(show.key, { action: toolTitle(t, activity.tool) }), {
-        description:
-          activity.totalItems !== undefined
-            ? t('common.itemCount', { count: activity.totalItems })
-            : undefined
+        description: count > 0 ? t('common.itemCount', { count }) : undefined
       })
     })
   }, [])

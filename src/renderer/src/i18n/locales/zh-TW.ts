@@ -291,6 +291,9 @@ export const zhTW = {
   'agent.confirm.client': '代理程式',
   'agent.confirm.unknownClient': '未知',
   'agent.confirm.server': '伺服器',
+  'agent.confirm.destination': '目標位置',
+  'agent.confirm.localWriteRule':
+    '在「下載」資料夾以外寫入這台電腦前，代理程式必須先徵得您的同意。',
   'agent.confirm.items': '項目',
   'agent.confirm.overwrites': '將覆寫',
   'agent.confirm.total': '總計：{{items}}',

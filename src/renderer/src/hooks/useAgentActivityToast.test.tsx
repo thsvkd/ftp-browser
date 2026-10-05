@@ -48,4 +48,20 @@ describe('useAgentActivityToast', () => {
       description: undefined
     })
   })
+
+  it('leaves out the item count for actions without items', () => {
+    // covers: Test-651
+    renderHook(() => useAgentActivityToast())
+
+    listener?.({ tool: 'connect', tier: 'W', outcome: 'done', totalItems: 0 })
+    listener?.({ tool: 'cancel_jobs', tier: 'W', outcome: 'done', totalItems: 2 })
+
+    expect(toast.success).toHaveBeenCalledWith('Agent finished: Connect to a saved server', {
+      description: undefined
+    })
+    expect(toast.success).toHaveBeenCalledWith(
+      'Agent finished: Cancel transfers and file operations',
+      { description: '2 items' }
+    )
+  })
 })

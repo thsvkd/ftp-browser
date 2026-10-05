@@ -314,6 +314,9 @@ export const it = {
   'agent.confirm.client': 'Agente',
   'agent.confirm.unknownClient': 'Sconosciuto',
   'agent.confirm.server': 'Server',
+  'agent.confirm.destination': 'Destinazione',
+  'agent.confirm.localWriteRule':
+    'Fuori dalla cartella Download, l’agente deve chiedere prima di scrivere su questo computer.',
   'agent.confirm.items': 'Elementi',
   'agent.confirm.overwrites': 'Sovrascrive',
   'agent.confirm.total': 'Totale: {{items}}',

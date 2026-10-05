@@ -290,6 +290,8 @@ export const zhCN = {
   'agent.confirm.client': '智能体',
   'agent.confirm.unknownClient': '未知',
   'agent.confirm.server': '服务器',
+  'agent.confirm.destination': '目标位置',
+  'agent.confirm.localWriteRule': '在“下载”文件夹以外向这台电脑写入前，智能体必须先征得你的同意。',
   'agent.confirm.items': '项目',
   'agent.confirm.overwrites': '将覆盖',
   'agent.confirm.total': '总计：{{items}}',

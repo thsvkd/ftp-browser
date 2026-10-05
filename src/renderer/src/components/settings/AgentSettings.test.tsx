@@ -185,6 +185,34 @@ describe('Settings › Agent access', () => {
     ).toBeTruthy()
   })
 
+  it('reloads the setup snippets after installing the command-line tool', async () => {
+    // covers: Test-650
+    const state = serve()
+    // PATH에 없는 곳에 설치하면 스니펫이 셔임의 절대 경로를 쓴다.
+    const absolute = SETUPS[0].snippet.replace('"ftpb auth header"', `"${CLI_PATH} auth header"`)
+    let installed = false
+    state.handlers['agent:getClientSetups'] = () =>
+      Promise.resolve({
+        success: true,
+        data: installed ? [{ ...SETUPS[0], snippet: absolute }, SETUPS[1]] : SETUPS
+      })
+    state.handlers['agent:installCli'] = () => {
+      installed = true
+      return Promise.resolve({
+        success: true,
+        data: { installed: true, path: CLI_PATH, onPath: false }
+      })
+    }
+    const user = userEvent.setup()
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    expect(await screen.findByText(SETUPS[0].snippet)).toBeTruthy()
+    await user.click(await screen.findByRole('button', { name: 'Install' }))
+
+    expect(await screen.findByText(absolute)).toBeTruthy()
+    expect(screen.queryByText(SETUPS[0].snippet)).toBeNull()
+  })
+
   it('installs the agent skill and lists where it went', async () => {
     // covers: Test-514
     const paths = ['/home/kim/.agents/skills/ftp-browser', '/home/kim/.claude/skills/ftp-browser']

@@ -109,7 +109,12 @@ export function AgentSettings({
   const installCli = async (): Promise<void> => {
     setInstallingCli(true)
     const status = await run<CliInstallStatus>('agent:installCli', t('settings.agentCliFailed'))
-    if (status) setCli(status)
+    if (status) {
+      setCli(status)
+      // 스니펫은 설치된 ftpb를 가리킨다(PATH에 없으면 절대 경로). 설치가 바꿨을 수 있으니 다시 읽는다.
+      const fresh = await load<AgentClientSetup[]>('agent:getClientSetups')
+      if (fresh) setSetups(fresh)
+    }
     setInstallingCli(false)
   }
 

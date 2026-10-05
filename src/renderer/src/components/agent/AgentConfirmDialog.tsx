@@ -21,6 +21,12 @@ import { TierBadge } from './TierBadge'
 const MAX_ITEMS = 20
 
 /**
+ * 로컬에 쓰는 W 도구. 다운로드 폴더 안이면 W 정책을 따르고 밖이면 늘 묻는다(handoff agent-operations
+ * §9 R2). 이 확인이 왜 떴는지 사용자가 알 수 있게 규칙을 한 줄 보인다.
+ */
+const LOCAL_WRITE_TOOLS = new Set(['download', 'create_local_directory', 'rename_local'])
+
+/**
  * 에이전트 도구 호출의 확인 대화상자(handoff agent-operations P3–P6). 사용자의 ConfirmDialog와
  * 슬롯이 따로라 서로 취소하지 않는다. 기본 포커스와 Esc·바깥 클릭은 모두 거부다.
  * 원격 이름과 클라이언트 이름은 믿을 수 없는 문자열이므로 텍스트로만, 제어 문자는 보이게 그린다.
@@ -115,6 +121,21 @@ export function AgentConfirmDialog(): React.JSX.Element | null {
             </>
           )}
         </dl>
+
+        {request.destination && (
+          // 어디에 쓰는지가 승인의 핵심이라 눈에 띄게, 자르지 않고 보인다(§9 R4).
+          <dl className="mt-3 rounded-md bg-gray-50 px-2.5 py-1.5 ring-1 ring-inset ring-gray-300">
+            <dt className="text-[11px] font-medium text-gray-600">
+              {t('agent.confirm.destination')}
+            </dt>
+            <dd className="break-all font-mono text-xs font-semibold text-gray-900">
+              {plainText(request.destination)}
+            </dd>
+          </dl>
+        )}
+        {LOCAL_WRITE_TOOLS.has(request.tool) && (
+          <p className="mt-2 text-xs text-amber-800">{t('agent.confirm.localWriteRule')}</p>
+        )}
 
         <ul
           aria-label={t('agent.confirm.items')}
