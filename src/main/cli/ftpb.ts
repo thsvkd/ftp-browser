@@ -82,7 +82,11 @@ Parameters follow the tool's schema: --limit 50, --recursive / --no-recursive, a
 repeating a flag (--paths /a --paths /b) or as JSON (--paths '["/a","/b"]'), objects as JSON.
 A parameter with several types takes the first its value reads as, else a string:
 connect --server 3 sends the id 3, --server "Pixel phone" the name.
+Path lists (remotePaths, localPaths, paths) take at most 100 items per call
+(get-image-previews --paths: 8); split a bigger selection into several calls.
 Every non-R tool takes --dry-run: it returns the plan and changes nothing.
+download and upload return a jobId at once; delete waits up to 45 s and may already
+return done: true, else follow its operationId with wait-for-jobs.
 
 --args - reads all parameters as one JSON object from stdin. Pass untrusted strings, such as
 remote file names, that way and never as command-line arguments; above all on Windows, where
@@ -98,15 +102,19 @@ with the remote "path" when the result names it. Open the saved files to see the
 --raw prints the result as the app sent it, base64 images included, and saves nothing.
 Errors go to stderr. ftpb never prompts.
 
-Example: the photos of 12 September (times are UTC; remote names go in stdin JSON)
+Example: the photos of 12 September (remote names go in stdin JSON)
   ftpb connect --server "Pixel phone" --dry-run   an id, name or host from list-servers
   ftpb connect --server "Pixel phone"
   ftpb list-directory --path /DCIM/Camera --kind images \\
-    --modified-from 2026-09-12T00:00:00Z --modified-to 2026-09-12T23:59:59Z
+    --modified-from 2026-09-12 --modified-to 2026-09-12   a date means the whole UTC day
   ftpb download --dry-run --args - < job.json     {"remotePaths":[...],"localDir":"<dir>"}
   ftpb download --args - < job.json               the same without --dry-run: a jobId
   ftpb wait-for-jobs --ids <jobId> --timeout-sec 45   repeat until allDone is true
   ftpb list-local-directory --path <dir>          compare the files with the plan
+  modifiedAt is the time the server reports, read as UTC: MLSD times are UTC by the
+  standard, but some servers (phones especially) send their local clock, and a server
+  with only LIST gives none. Camera file names carry the device's local time: when a
+  day boundary matters, cross-check the names and modifiedAt.
 
 Risk tiers (the app decides; Settings › Permissions sets allow, ask or deny per tier):
   R  reads only; always allowed
@@ -115,6 +123,8 @@ Risk tiers (the app decides; Settings › Permissions sets allow, ask or deny pe
   X  sends local files to the server: upload
   C  credentials and saved servers
   allow runs at once, ask shows the user a dialog in FTP Browser, deny hides the tool.
+  A real call that asks waits while the user answers, up to 120 seconds, then exits 3
+  with CONFIRMATION_TIMEOUT: allow it at least 130 s. --dry-run never waits.
   A local write (download target, new local folder, local rename) that lands
   outside the user's Downloads folder always asks the user, whatever the W policy
   (deny still refuses).

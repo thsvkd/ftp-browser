@@ -234,4 +234,24 @@ describe('buildSkillMarkdown', () => {
     expect(md.replace(/^If `ftpb` is not on PATH.*\n/m, '')).toBe(plain)
     expect(plain).not.toMatch(/not on PATH/)
   })
+
+  it('picks a day with one date-only filter, says where times come from and how long a dialog waits', () => {
+    // covers: Test-700
+    const md = buildSkillMarkdown({ ftpbCommand: 'ftpb' })
+    const line = (pattern: RegExp): string =>
+      md.split('\n').find((text) => pattern.test(text)) ?? ''
+
+    expect(md.match(/--modified-(from|to) \S+/g)).toEqual([
+      '--modified-from 2026-09-12',
+      '--modified-to 2026-09-12'
+    ])
+    expect(line(/--modified-from 2026-09-12/)).toMatch(/whole UTC day/)
+    expect(md).not.toMatch(/UTC\+\d/)
+    expect(md).toMatch(/MLSD/)
+    expect(md).toMatch(/file names[^\n]*local time/)
+    const wait = line(/120 seconds/)
+    expect(wait).toContain('`CONFIRMATION_TIMEOUT` (exit 3)')
+    expect(wait).toMatch(/at least 130 s/)
+    expect(wait).toMatch(/`--dry-run` never waits/)
+  })
 })

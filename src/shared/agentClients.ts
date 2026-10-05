@@ -356,21 +356,22 @@ to stderr. \`ftpb\` never prompts.
 
 ## Example: download the photos of one day
 
-The user asks for the photos they took on 12 September, and their clock is UTC+2.
+The user asks for the photos they took on 12 September.
 
 \`\`\`sh
 ftpb list-servers                                  # id, name and host of each saved server
 ftpb connect --server "Pixel phone" --dry-run      # --server takes an id, name or host
 ftpb connect --server "Pixel phone"
 ftpb list-directory --path /DCIM/Camera --kind images \\
-  --modified-from 2026-09-11T22:00:00Z --modified-to 2026-09-12T21:59:59Z   # that day in UTC
+  --modified-from 2026-09-12 --modified-to 2026-09-12   # a date means the whole UTC day
 ftpb download --dry-run --args - <<'EOF'
 {"remotePaths": ["/DCIM/Camera/IMG_20260912_101706.jpg"], "localDir": "<agentFolder.path>/phone-0912"}
 EOF
 \`\`\`
 
-Show the plan to the user (files, sizes, skipped files, whether they will be asked), then run the
-same download without \`--dry-run\`. It returns a \`jobId\`:
+The name \`IMG_20260912_101706.jpg\` carries the phone's local time, and the listed time may differ: near
+midnight, check both (see "Files, times and previews"). Show the plan to the user (files, sizes, skipped files,
+whether they will be asked), then run the same download without \`--dry-run\`. It returns a \`jobId\`:
 
 \`\`\`sh
 ftpb wait-for-jobs --ids <jobId> --timeout-sec 45  # repeat until allDone is true
@@ -407,8 +408,10 @@ dialog in FTP Browser) or \`deny\` (the tool is hidden). \`ftpb status\` shows t
 - Use D, X and C tools only when the user explicitly asked for that action.
 - Run every non-R tool with \`--dry-run\` first. It returns the plan (exact files, counts, sizes,
   overwrites) and changes nothing. Show the plan to the user, then run it without \`--dry-run\`.
+  A dry run matters most for D, X and C calls and W calls on several items; with W on \`allow\`, a one-item remote W call (\`connect\`, \`create-directory\`, \`rename\`) may skip it.
 - The plan's \`confirmation\` says what the real call will do: \`asks the user\`, \`runs without asking\` or \`blocked by policy\`.
   A result the user approved in FTP Browser carries \`confirmedByUser: true\`.
+- A real call whose plan says \`asks the user\` (by default D, X and C calls, and local writes outside Downloads) waits while the user answers, up to 120 seconds, then fails with \`CONFIRMATION_TIMEOUT\` (exit 3): allow it at least 130 s. \`--dry-run\` never waits.
 - Local writes (the \`download\` target, \`create_local_directory\`, \`rename_local\`) inside the user's
   Downloads folder follow the W policy; outside the user's Downloads folder FTP Browser always asks the user (and refuses when W is \`deny\`).
   \`ftpb status\` shows that folder. Download into it unless the user named another place.
@@ -419,8 +422,14 @@ dialog in FTP Browser) or \`deny\` (the tool is hidden). \`ftpb status\` shows t
 
 ## Files, times and previews
 
-- \`modifiedAt\` in listings is UTC, and so are \`list-directory --modified-from\` / \`--modified-to\` (an ISO date or time).
-  Camera file names usually carry local time: turn the user's day into UTC first.
+- \`list-directory --modified-from\` / \`--modified-to\` compare with \`modifiedAt\` as UTC: a date such as \`2026-09-12\`
+  means that whole UTC day, and entries without a time are left out.
+- \`modifiedAt\` is the time the server reports. MLSD times are UTC by the standard, but some servers (phones especially)
+  send their local clock; a server with only LIST gives no time (\`modifiedAt\` is empty).
+- Camera file names (\`IMG_20260912_101706.jpg\`) carry the device's local time. When a day boundary matters, cross-check
+  the names and \`modifiedAt\`.
+- \`remotePaths\` (\`download\`), \`localPaths\` (\`upload\`) and \`paths\` (\`delete\`, \`delete-local\`) take at most 100
+  items per call, \`get-image-previews --paths\` at most 8: split a bigger selection into several calls.
 - \`upload\` puts a local folder at \`remoteDir/<folder name>\`. To upload a folder's contents into a folder with another
   name, create the folder (\`ftpb create-directory --path <remote folder>\`) and pass the files.
 - To see images, run \`ftpb get-image-previews --paths <path> --save-dir <dir>\` and open the saved files. Each preview is
@@ -429,7 +438,8 @@ dialog in FTP Browser) or \`deny\` (the tool is hidden). \`ftpb status\` shows t
 
 ## Long transfers
 
-\`download\`, \`upload\` and folder deletes return job ids at once. Call the \`wait_for_jobs\` tool,
+\`download\` and \`upload\` return a \`jobId\` at once. \`delete\` and \`delete-local\` wait up to 45 s, so the
+result may already say \`done: true\`; if not, follow its \`operationId\`. Call the \`wait_for_jobs\` tool,
 \`ftpb wait-for-jobs --ids <id> --timeout-sec 45\`, and repeat until every job is done.
 \`ftpb list-jobs\` shows all jobs; \`ftpb cancel-jobs\` stops them.
 

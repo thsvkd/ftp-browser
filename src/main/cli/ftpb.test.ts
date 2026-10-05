@@ -18,6 +18,7 @@ import { join } from 'path'
 import { PassThrough } from 'stream'
 import { EXIT, runFtpb, type FtpbIo } from './ftpb'
 import { defaultUserDataDir, writeDiscovery } from '../agent/discovery'
+import { buildSkillMarkdown } from '@shared/agentClients'
 import {
   deadUrl,
   previewBytes,
@@ -821,5 +822,26 @@ describe('ftpb --help example', () => {
     expect([...steps].sort((a, b) => a - b)).toEqual(steps)
     // a long command goes on with a shell line continuation, as the user would type it
     expect(example).toMatch(/ \\\n\s+--modified-from /)
+  })
+
+  it('filters the day like SKILL.md and says how long a confirmation dialog waits', async () => {
+    // covers: Test-700
+    const help = (await ftpb(['--help'])).stdout
+    const example = section(help, /^Example/m, /^\S/m)
+    const range = /--modified-from \S+ --modified-to \S+/
+
+    expect(range.exec(example)?.[0]).toBe('--modified-from 2026-09-12 --modified-to 2026-09-12')
+    expect(range.exec(buildSkillMarkdown({ ftpbCommand: 'ftpb' }))?.[0]).toBe(
+      range.exec(example)?.[0]
+    )
+    expect(example).toMatch(/whole UTC day/)
+    expect(example).toMatch(/MLSD/)
+    expect(example).toMatch(/names[^]*local time/)
+    expect(help).not.toMatch(/T00:00:00Z|T23:59:59Z/)
+    const tiers = section(help, /^Risk tiers/m, /^\S/m)
+    expect(tiers).toMatch(/120 seconds/)
+    expect(tiers).toContain('CONFIRMATION_TIMEOUT')
+    expect(tiers).toMatch(/at least 130 s/)
+    expect(tiers).toMatch(/--dry-run never waits/)
   })
 })

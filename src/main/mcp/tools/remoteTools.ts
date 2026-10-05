@@ -63,7 +63,8 @@ const listDirectory = readTool({
   openWorld: true,
   description:
     'List a directory on the FTP server FTP Browser is connected to. Directories come first, ' +
-    'then names in order. `modifiedAt` is UTC. modifiedFrom and modifiedTo keep entries ' +
+    'then names in order. `modifiedAt` is the time the server reports (MLSD, read as UTC; empty ' +
+    'when the server only supports LIST). modifiedFrom and modifiedTo keep entries ' +
     'modified in that range (both ends included; a date means the whole UTC day) and leave out ' +
     'entries the server gives no time for. Returns at most `limit` entries; pass `nextCursor` ' +
     `back as \`cursor\` with the same path and filters for the next page. ${UNTRUSTED}`,

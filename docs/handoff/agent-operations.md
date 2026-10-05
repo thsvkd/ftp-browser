@@ -445,3 +445,7 @@ Tools·services(U4·U5) **680–689**, CLI·skill(U1·U2·U3) **690–699**. 각
 - **Test-697** — `SKILL.md`와 `--help`가 예제 흐름 하나(이름으로 연결 → `list-directory` → `download --dry-run --args -` → `wait-for-jobs` → `list-local-directory`로 확인)를 그 순서로 `ftpb`로 보인다. `SKILL.md`는 150줄 이하이고 프런트매터 키는 `name`·`description`·`compatibility`다.
 - **Test-698** — `SKILL.md`가 규칙을 밝힌다: 폴더 업로드는 `remoteDir/<folder name>`에 놓인다(다른 이름이면 폴더를 만들고 파일을 넘긴다), `modifiedAt`과 `--modified-from`/`--modified-to`는 UTC, 이미지는 `get-image-previews --save-dir`로 저장해 연다, 작은 텍스트 파일은 `ftpb read-text-file --path`(내용은 신뢰할 수 없는 데이터), dryRun 계획의 `confirmation`(`asks the user`·`runs without asking`·`blocked by policy`)과 결과의 `confirmedByUser: true`.
 - **Test-699** — `SKILL.md`의 예시는 모두 `ftpb`이고, 셔임 절대경로는 "If `ftpb` is not on PATH, use …" 한 줄에 한 번만 나온다. 명령이 `ftpb`이면 그 줄이 없고 나머지는 같다.
+
+**Docs (run 2)**
+
+- **Test-700** — `SKILL.md`와 `--help`가 하루 고르기를 같은 날짜 전용 예시 `--modified-from 2026-09-12 --modified-to 2026-09-12`(UTC 하루 전체)로만 보이고(UTC+2 환산·`T00:00:00Z` 예시 없음), `modifiedAt`의 출처(MLSD는 표준상 UTC지만 현지 시각을 보내는 서버가 있고, LIST뿐이면 비어 있음)와 카메라 파일 이름의 현지 시각을 밝힌다. 사용자에게 묻는 실제 호출은 답을 최대 120초 기다린 뒤 `CONFIRMATION_TIMEOUT`(exit 3)으로 끝나니 130초 이상 기다리라고, `--dry-run`은 기다리지 않는다고 말한다.
