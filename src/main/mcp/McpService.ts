@@ -137,6 +137,9 @@ export class McpService {
     this.server = server
     this.handler = handler
     this.error = undefined
+    // 포트 0(테스트)이면 OS가 고른 포트를 기억한다. url·발견 파일이 그 포트를 쓰고,
+    // 다시 켤 때도 같은 포트로 연다.
+    this.port = (server.address() as AddressInfo).port
     this.publishDiscovery()
   }
 

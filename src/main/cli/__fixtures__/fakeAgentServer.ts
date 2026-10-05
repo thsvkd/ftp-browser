@@ -163,14 +163,15 @@ export async function startFakeAgentServer(): Promise<FakeAgentServer> {
 
   const db = new Database(':memory:')
   db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
-  const port = await freePort()
-  const service = new McpService(db, createToolServer, port)
-  await service.setEnabled(true)
+  // 포트 0: OS가 고른 포트에 바로 연다. 빈 포트를 골라 닫은 뒤 다시 열면 그 사이에 다른 테스트
+  // worker의 서버가 그 포트를 가져가 요청이 그쪽(다른 토큰)으로 갈 수 있다(Test-668).
+  const service = new McpService(db, createToolServer, 0)
+  const { url } = await service.setEnabled(true)
   const row = db.prepare("SELECT value FROM settings WHERE key = 'mcpToken'").get() as {
     value: string
   }
   return {
-    url: `http://127.0.0.1:${port}/mcp`,
+    url,
     token: row.value,
     calls,
     stop: async () => {

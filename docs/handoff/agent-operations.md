@@ -397,6 +397,7 @@ Main(R1·R2·R4 main·R5·R8) **600–624**, Transfer(R3·R9) **625–634**, CLI
 - **Test-665** — 그 User-Agent는 출력 가능한 ASCII만 남기고(제어문자·CR/LF·비ASCII 제거) 100자를 넘지 않으며(뒤의 `(via ftpb mcp-stdio)`는 남긴다) `version`이 없으면 이름만 쓴다. `clientInfo`가 없거나 이름이 문자열이 아니거나 거른 뒤 비면 User-Agent를 정하지 않는다.
 - **Test-666** — (E2E) `ftpb mcp-stdio` 뒤의 핸드셰이크 클라이언트의 확인 요청 `client`가 "node"나 빈 값이 아니라 `claude-desktop/1 (via ftpb mcp-stdio)`다(실제 도구 레지스트리).
 - **Test-667** — 확인 요청의 `host`가 포트 21이 아니면 `host:port`(IPv6 리터럴은 `[host]:port`), 21이면 호스트만이다: 연결된 세션을 쓰는 원격 도구(`create_directory`·`rename`·`delete`·`download`·`upload`)와 `disconnect`, 저장 서버를 쓰는 `connect`·`delete_server`, 입력을 쓰는 `open_server_editor` 모두.
+- **Test-668** — (회귀) 포트 0으로 만든 `McpService`가 OS가 고른 포트를 `getState().url`·`command`(·발견 파일)에 보이고, 끄고 다시 켜도 그 포트로 연다. `McpService.test.ts`와 CLI 테스트의 `fakeAgentServer`는 빈 포트를 골라 닫은 뒤 다시 여는 대신 이것을 쓴다(그 사이 다른 테스트 worker가 포트를 가져갈 수 있었다). Test-295의 간헐 실패 자체는 틀린 토큰 `x${token.slice(1)}`이 `x`로 시작하는 토큰(1/64)에서 진짜 토큰과 같아진 탓이라, 첫 글자를 늘 다른 글자로 바꾸도록 테스트를 고쳤다.
 
 ---
 

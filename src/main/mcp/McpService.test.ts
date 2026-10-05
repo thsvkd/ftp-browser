@@ -10,15 +10,6 @@ import { McpService, buildClaudeCodeCommand } from './McpService'
 import { createMcpToolServer } from './mcpTools'
 import { makeDeps } from './__fixtures__/agentToolHarness'
 
-/** 상수 포트(47821)를 쓰지 않도록 비어 있는 포트를 고른다. */
-async function freePort(): Promise<number> {
-  const probe = net.createServer()
-  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve))
-  const { port } = probe.address() as AddressInfo
-  await new Promise((resolve) => probe.close(resolve))
-  return port
-}
-
 function memoryDb(): Database.Database {
   const db = new Database(':memory:')
   db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
@@ -80,14 +71,19 @@ async function connectClient(url: string, token: string): Promise<Client> {
 }
 
 let db: Database.Database
-let port: number
 let service: McpService
 
-beforeEach(async () => {
+/** 서비스가 연 포트(끈 뒤에는 마지막으로 연 포트) */
+function port(): number {
+  return Number(new URL(service.getState().url).port)
+}
+
+beforeEach(() => {
   toolServer.mockClear()
   db = memoryDb()
-  port = await freePort()
-  service = new McpService(db, toolServer, port)
+  // 포트 0: OS가 고른 포트에 바로 연다. 빈 포트를 골라 닫은 뒤 다시 열면 그 사이에
+  // 다른 테스트 worker가 그 포트를 가져갈 수 있다(Test-668).
+  service = new McpService(db, toolServer, 0)
 })
 
 afterEach(async () => {
@@ -100,7 +96,7 @@ describe('McpService HTTP boundary', () => {
     // covers: Test-231
     await service.setEnabled(true)
 
-    expect(await postToolCall(port, {})).toBe(401)
+    expect(await postToolCall(port(), {})).toBe(401)
     expect(toolServer).not.toHaveBeenCalled()
   })
 
@@ -108,7 +104,7 @@ describe('McpService HTTP boundary', () => {
     // covers: Test-232
     await service.setEnabled(true)
 
-    expect(await postToolCall(port, { Authorization: 'Bearer not-the-token' })).toBe(401)
+    expect(await postToolCall(port(), { Authorization: 'Bearer not-the-token' })).toBe(401)
     expect(toolServer).not.toHaveBeenCalled()
   })
 
@@ -117,7 +113,7 @@ describe('McpService HTTP boundary', () => {
     await service.setEnabled(true)
     const auth = { Authorization: `Bearer ${tokenIn(db)}` }
 
-    expect(await postToolCall(port, { ...auth, Host: `evil.example:${port}` })).toBe(403)
+    expect(await postToolCall(port(), { ...auth, Host: `evil.example:${port()}` })).toBe(403)
     expect(toolServer).not.toHaveBeenCalled()
   })
 
@@ -126,7 +122,7 @@ describe('McpService HTTP boundary', () => {
     await service.setEnabled(true)
     const auth = { Authorization: `Bearer ${tokenIn(db)}` }
 
-    expect(await postToolCall(port, { ...auth, Origin: 'https://evil.example' })).toBe(403)
+    expect(await postToolCall(port(), { ...auth, Origin: 'https://evil.example' })).toBe(403)
     expect(toolServer).not.toHaveBeenCalled()
   })
 
@@ -160,7 +156,8 @@ describe('McpService HTTP boundary', () => {
   it('reports a port already in use in the state instead of throwing', async () => {
     // covers: Test-237
     const blocker = net.createServer()
-    await new Promise<void>((resolve) => blocker.listen(port, '127.0.0.1', resolve))
+    await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve))
+    service = new McpService(db, toolServer, (blocker.address() as AddressInfo).port)
     try {
       const state = await service.setEnabled(true)
 
@@ -175,12 +172,14 @@ describe('McpService HTTP boundary', () => {
     // covers: Test-295
     await service.setEnabled(true)
     const token = tokenIn(db)!
+    // 첫 글자만 다른 토큰. `x${token.slice(1)}`은 토큰이 x로 시작하면(1/64) 진짜 토큰이라 200을 받았다.
+    const wrong = `${token.startsWith('x') ? 'y' : 'x'}${token.slice(1)}`
 
     for (const scheme of ['Bearer', 'bearer', 'BEARER', 'bEaReR']) {
-      expect(await postToolCall(port, { Authorization: `${scheme} ${token}` }), scheme).toBe(200)
-      expect(await postToolCall(port, { Authorization: `${scheme} x${token.slice(1)}` })).toBe(401)
+      expect(await postToolCall(port(), { Authorization: `${scheme} ${token}` }), scheme).toBe(200)
+      expect(await postToolCall(port(), { Authorization: `${scheme} ${wrong}` })).toBe(401)
     }
-    expect(await postToolCall(port, { Authorization: `Basic ${token}` })).toBe(401)
+    expect(await postToolCall(port(), { Authorization: `Basic ${token}` })).toBe(401)
   })
 
   it('shares one in-flight listen between overlapping enable and disable calls', async () => {
@@ -198,7 +197,7 @@ describe('McpService HTTP boundary', () => {
     await Promise.all([on, off])
 
     expect(service.getState()).toMatchObject({ enabled: false, running: false })
-    await expect(postToolCall(port, {})).rejects.toMatchObject({ code: 'ECONNREFUSED' })
+    await expect(postToolCall(port(), {})).rejects.toMatchObject({ code: 'ECONNREFUSED' })
   })
 
   it('refuses connections after stop and listens again on every restart', async () => {
@@ -211,9 +210,25 @@ describe('McpService HTTP boundary', () => {
       await client.listTools()
 
       expect((await service.setEnabled(false)).running).toBe(false)
-      await expect(postToolCall(port, {})).rejects.toMatchObject({ code: 'ECONNREFUSED' })
+      await expect(postToolCall(port(), {})).rejects.toMatchObject({ code: 'ECONNREFUSED' })
       await client.close()
     }
+  })
+
+  it('reports the port the OS picked for port 0 and listens on it again after a restart', async () => {
+    // covers: Test-668
+    expect(service.getState().url).toBe('http://127.0.0.1:0/mcp')
+
+    const state = await service.setEnabled(true)
+    const bound = service.address()!.port
+
+    expect(bound).toBeGreaterThan(0)
+    expect(state.url).toBe(`http://127.0.0.1:${bound}/mcp`)
+    expect(state.command).toContain(state.url)
+    await service.setEnabled(false)
+    expect(service.getState().url).toBe(state.url)
+    expect((await service.setEnabled(true)).url).toBe(state.url)
+    expect(service.address()?.port).toBe(bound)
   })
 })
 
@@ -229,7 +244,7 @@ describe('McpService settings', () => {
     expect(service.getState().command).toContain(token)
     await service.stop()
 
-    service = new McpService(db, toolServer, port)
+    service = new McpService(db, toolServer, 0)
     await service.init()
 
     expect(service.getState()).toMatchObject({ enabled: true, running: true })
@@ -249,7 +264,7 @@ describe('McpService settings', () => {
 
     expect(newToken).not.toBe(oldToken)
     expect(state.command).toContain(newToken)
-    expect(await postToolCall(port, { Authorization: `Bearer ${oldToken}` })).toBe(401)
+    expect(await postToolCall(port(), { Authorization: `Bearer ${oldToken}` })).toBe(401)
     const client = await connectClient(state.url, newToken)
     expect((await client.listTools()).tools).toHaveLength(TOOL_COUNT)
     await client.close()
@@ -270,7 +285,7 @@ describe('McpService discovery file', () => {
     const userData = mkdtempSync(join(tmpdir(), 'ftpb-discovery-'))
     try {
       await service.stop()
-      service = new McpService(db, toolServer, port, { userDataDir: userData, version: '9.8.7' })
+      service = new McpService(db, toolServer, 0, { userDataDir: userData, version: '9.8.7' })
       const endpoint = join(userData, 'agent', 'endpoint.json')
       const tokenFile = join(userData, 'agent', 'token')
 
