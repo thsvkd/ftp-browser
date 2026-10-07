@@ -37,6 +37,8 @@ export const ErrorCode = {
   SERVER_NOT_FOUND: 'SERVER_NOT_FOUND',
   INVALID_PORT: 'INVALID_PORT',
   INVALID_MAX_TRANSFERS: 'INVALID_MAX_TRANSFERS',
+  /** The saved password exists but cannot be decrypted on this computer; the user must re-enter it. */
+  SAVED_PASSWORD_UNREADABLE: 'SAVED_PASSWORD_UNREADABLE',
 
   // General
   UNKNOWN: 'UNKNOWN'

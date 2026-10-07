@@ -17,11 +17,24 @@ export interface FtpServer {
   host: string
   port: number
   username: string
-  password: string
+  /**
+   * Whether a password is saved for this server. The password itself never leaves the main
+   * process: it is stored encrypted and read only to log in (docs/handoff/saved-password-encryption.md).
+   */
+  hasPassword: boolean
   secure: boolean
   /** Simultaneous transfer connections; the app lowers it by itself if the server refuses. */
   maxTransfers?: number
   lastConnected?: string
+}
+
+/** What the renderer sends to save a server. */
+export interface FtpServerInput extends Omit<FtpServer, 'hasPassword' | 'lastConnected'> {
+  /**
+   * `undefined` keeps the password saved for `id` (none for a new server), `''` removes it, any
+   * other value replaces it.
+   */
+  password?: string
 }
 
 export interface RecentPath {
@@ -40,10 +53,27 @@ export interface FtpConnectPayload {
   host: string
   port: number
   user: string
-  password: string
+  /** The password typed for this login. Omitted when {@link savedPasswordOf} supplies it. */
+  password?: string
+  /**
+   * Log in with the password saved for this server id instead of a typed one; main reads it
+   * itself, so the renderer never holds it. A successful connect then keeps the saved password.
+   */
+  savedPasswordOf?: number
   secure: boolean
   /** Simultaneous transfer connections. Omitted (quick connect): DEFAULT_MAX_TRANSFERS. */
   maxTransfers?: number
+}
+
+/** How well saved passwords are protected on this computer (main → renderer). */
+export interface PasswordProtection {
+  /**
+   * 'keyring': encrypted with a key the OS keeps (Keychain, DPAPI, Secret Service/KWallet).
+   * 'basic': encrypted with a fixed key because Linux has no secret store (`basic_text`): this
+   * only hides passwords from casual reading. 'none': encryption is unavailable, so passwords are
+   * stored as plain text.
+   */
+  level: 'keyring' | 'basic' | 'none'
 }
 
 export interface FtpFileEntry {
