@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createAgentServices } from './index'
 import { createHarness, type Harness } from './__fixtures__/fakes'
 import { AgentError, type AgentServices } from '../types'
+import { fakeCipherOf } from '../../db/__fixtures__/fakeCipher'
 
 let h: Harness
 let services: AgentServices
@@ -144,6 +145,33 @@ describe('session.connect', () => {
 
     h.operations.complete(op.id)
     await expect(services.session.connect(id)).resolves.toEqual({ path: '/' })
+  })
+})
+
+describe('saved passwords', () => {
+  it('connect logs in with the decrypted password and keeps it; list has no password', async () => {
+    // covers: Test-718
+    const id = Number(
+      h.db
+        .prepare(
+          "INSERT INTO servers (name, host, port, username, password_cipher, secure) VALUES ('NAS', 'nas.local', 21, 'me', ?, 0)"
+        )
+        .run(fakeCipherOf('agent-Secret-718')).lastInsertRowid
+    )
+    const stored = (): unknown =>
+      h.db.prepare('SELECT password_enc, password_cipher FROM servers WHERE id = ?').get(id)
+    const before = stored()
+
+    await services.session.connect(id)
+
+    expect(h.remote.connect).toHaveBeenCalledWith(
+      expect.objectContaining({ id, user: 'me', password: 'agent-Secret-718' })
+    )
+    expect(stored()).toEqual(before)
+    const json = JSON.stringify([services.servers.list(), services.servers.resolve(id)])
+    expect(json).not.toMatch(/password/i)
+    expect(json).not.toContain('agent-Secret-718')
+    expect(json).not.toContain('Buffer')
   })
 })
 

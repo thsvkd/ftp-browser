@@ -9,6 +9,7 @@ import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
 import { Toolbar } from '@renderer/components/layout/Toolbar'
 import { ConfirmDialog } from '@renderer/components/common/ConfirmDialog'
 import type { FtpServer } from '@shared/types/ftp'
+import { ErrorCode } from '@shared/types/ipc'
 import { NotConnectedPane } from './NotConnectedPane'
 
 const mockInvoke = vi.fn()
@@ -19,7 +20,7 @@ const NAS: FtpServer = {
   host: 'nas.local',
   port: 21,
   username: '',
-  password: '',
+  hasPassword: false,
   secure: false
 }
 
@@ -32,6 +33,9 @@ function mockIpc(
     if (overrides[channel]) return overrides[channel](...args)
     if (channel === 'ftp:getRecentServers') return Promise.resolve({ success: true, data: servers })
     if (channel === 'ftp:getRecentPaths') return Promise.resolve({ success: true, data: [] })
+    if (channel === 'ftp:getPasswordProtection') {
+      return Promise.resolve({ success: true, data: { level: 'keyring' } })
+    }
     if (channel === 'ftp:list') {
       return Promise.resolve({ success: true, data: { path: '/', entries: [] } })
     }
@@ -131,7 +135,7 @@ describe('ConnectBar — saved servers', () => {
         host: '192.168.0.7',
         port: 2221,
         username: 'phone',
-        password: 'pw',
+        hasPassword: true,
         secure: false,
         maxTransfers: 6
       }
@@ -151,7 +155,8 @@ describe('ConnectBar — saved servers', () => {
       host: '192.168.0.7',
       port: 2221,
       user: 'phone',
-      password: 'pw',
+      // 저장된 비밀번호는 렌더러가 모른다. main이 그 서버의 것을 읽어 로그인한다.
+      savedPasswordOf: 1,
       secure: false,
       maxTransfers: 6
     })
@@ -273,7 +278,7 @@ describe('ServerManagerDialog', () => {
   })
 })
 
-const ALICE: FtpServer = { ...NAS, username: 'alice', password: 'pw' }
+const ALICE: FtpServer = { ...NAS, username: 'alice', hasPassword: true }
 const PHONE: FtpServer = { ...NAS, id: 2, name: 'Phone', host: 'phone.local' }
 const connectPayload = (): unknown => invokeCalls(mockInvoke, 'ftp:connect')[0]?.[0]
 const savedButton = (): Promise<HTMLElement> =>
@@ -301,6 +306,7 @@ describe('regressions — address and saved accounts', () => {
     expect(connectPayload()).toMatchObject({ user: 'bob', password: 'anonymous@' })
     // id 없이 보내야 main이 저장된 alice 계정을 덮어쓰지 않는다(N1)
     expect(connectPayload()).not.toHaveProperty('id')
+    expect(connectPayload()).not.toHaveProperty('savedPasswordOf')
   })
 
   it('keeps the saved account without user@, and goes anonymous with anonymous@ (M4)', async () => {
@@ -313,14 +319,16 @@ describe('regressions — address and saved accounts', () => {
     expect(connectPayload()).toMatchObject({
       id: 1,
       user: 'alice',
-      password: 'pw',
+      savedPasswordOf: 1,
       name: 'Home NAS'
     })
+    expect(connectPayload()).not.toHaveProperty('password')
 
     mockInvoke.mockClear()
     await connectWith(user, 'anonymous@nas.local')
     expect(connectPayload()).toMatchObject({ user: 'anonymous', password: 'anonymous@' })
     expect(connectPayload()).not.toHaveProperty('id')
+    expect(connectPayload()).not.toHaveProperty('savedPasswordOf')
   })
 
   it('matches an older saved row case-insensitively and keeps its stored host (M3)', async () => {
@@ -342,6 +350,135 @@ describe('regressions — address and saved accounts', () => {
 
     expect(addressInput().value).toBe('me@nas.local')
     expect((screen.getByPlaceholderText('Password') as HTMLInputElement).value).toBe('secret')
+  })
+})
+
+describe('saved password — toolbar', () => {
+  const draft = (): ReturnType<typeof useServerStore.getState>['draft'] =>
+    useServerStore.getState().draft
+  const passwordField = (): HTMLInputElement =>
+    screen.getByLabelText('Password', { selector: 'input' }) as HTMLInputElement
+
+  it('carries the saved password only to the saved account, never to a typed one', () => {
+    // covers: Test-721
+    useServerStore.setState({ servers: [ALICE] })
+    const { setAddress } = useServerStore.getState()
+
+    setAddress('nas.local')
+    expect(draft()).toMatchObject({ id: 1, username: 'alice', password: '', savedPassword: true })
+    setAddress('alice@nas.local')
+    expect(draft()).toMatchObject({ username: 'alice', savedPassword: true })
+
+    // 다른 사용자에게는 저장된 비밀번호를 넘기지 않는다. 지우면 저장된 계정으로 돌아간다.
+    setAddress('bob@nas.local')
+    expect(draft()).toMatchObject({ username: 'bob', password: '', savedPassword: false })
+    setAddress('nas.local')
+    expect(draft()).toMatchObject({ username: 'alice', password: '', savedPassword: true })
+
+    // 주소에 적은 비밀번호가 저장된 것을 대신한다.
+    setAddress('alice:typed@nas.local')
+    expect(draft()).toMatchObject({ username: 'alice', password: 'typed', savedPassword: false })
+
+    // 저장된 서버에서 벗어나면 끌고 가지 않는다.
+    useServerStore.setState({ draft: emptyDraft() })
+    setAddress('nas.local')
+    setAddress('nas.local:2121')
+    expect(draft()).toMatchObject({ host: 'nas.local', port: '2121', savedPassword: false })
+    expect(draft().id).toBeUndefined()
+  })
+
+  it('logs in with the saved password by server id, or with the typed one instead', async () => {
+    // covers: Test-722
+    mockIpc([ALICE])
+    const user = userEvent.setup()
+    renderToolbar()
+    await savedButton()
+
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    expect(connectPayload()).toMatchObject({ id: 1, user: 'alice', savedPasswordOf: 1 })
+    expect(connectPayload()).not.toHaveProperty('password')
+    await waitFor(() => expect(useServerStore.getState().connecting).toBe(false))
+
+    mockInvoke.mockClear()
+    await user.type(passwordField(), 'typed')
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    expect(connectPayload()).toMatchObject({ id: 1, user: 'alice', password: 'typed' })
+    expect(connectPayload()).not.toHaveProperty('savedPasswordOf')
+  })
+
+  it('shows a saved password as an empty field with a placeholder until one is typed', async () => {
+    // covers: Test-724
+    mockIpc([ALICE])
+    const user = userEvent.setup()
+    renderToolbar()
+    await savedButton()
+
+    expect(passwordField().value).toBe('')
+    expect(passwordField().placeholder).toBe('Saved password')
+    await user.type(passwordField(), 'typed')
+    expect(passwordField().value).toBe('typed')
+    await user.clear(passwordField())
+
+    await user.click(screen.getByRole('button', { name: 'Server manager' }))
+    const dialog = screen.getByRole('dialog', { name: 'Server manager' })
+    const field = within(dialog).getByLabelText('Password') as HTMLInputElement
+    expect(field.value).toBe('')
+    expect(field.placeholder).toBe('Saved password')
+    // 보기 버튼은 입력한 것만 보인다. 저장된 비밀번호는 렌더러에 없다.
+    await user.click(within(dialog).getByRole('button', { name: 'Show password' }))
+    expect(field.type).toBe('text')
+    expect(field.value).toBe('')
+    await user.type(field, 'new-pw')
+    expect(field.value).toBe('new-pw')
+  })
+
+  it('stops offering the saved password once the toolbar server is deleted', async () => {
+    // covers: Test-729
+    mockIpc([ALICE])
+    const user = userEvent.setup()
+    renderToolbar()
+    await savedButton()
+    await user.click(screen.getByRole('button', { name: 'Server manager' }))
+    const dialog = screen.getByRole('dialog', { name: 'Server manager' })
+
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    const confirm = await screen.findByRole('alertdialog')
+    await user.click(within(confirm).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(draft().id).toBeUndefined())
+
+    // 서버와 함께 그 비밀번호도 지워졌다. 저장 안 된 새 서버는 저장된 비밀번호를 쓰지 않는다.
+    expect(draft()).toMatchObject({ username: 'alice', savedPassword: false })
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(passwordField().placeholder).toBe('Password')
+  })
+
+  it('asks to enter the password again when this computer cannot read the saved one', async () => {
+    // covers: Test-726
+    mockIpc([ALICE], {
+      'ftp:connect': () =>
+        Promise.resolve({
+          success: false,
+          error: 'Error while decrypting the ciphertext',
+          code: ErrorCode.SAVED_PASSWORD_UNREADABLE
+        })
+    })
+    const user = userEvent.setup()
+    renderToolbar()
+    await savedButton()
+
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain(
+      "The saved password can't be read on this computer. Enter it again."
+    )
+    expect(alert.textContent).not.toContain('decrypting')
+    // 다른 것은 지우지 않는다: 툴바는 그대로 저장된 서버와 그 비밀번호를 가리킨다.
+    expect(addressInput().value).toBe('alice@nas.local:21')
+    expect(draft()).toMatchObject({ id: 1, username: 'alice', savedPassword: true })
+    expect(passwordField().placeholder).toBe('Saved password')
   })
 })
 
@@ -577,7 +714,7 @@ describe('agent:openServerEditor', () => {
     })
     vi.stubGlobal('api', api)
     // 같은 주소의 저장된 서버가 있어도 그 비밀번호를 끌어오지 않는다.
-    mockIpc([{ ...NAS, host: 'ftp.office.lan', port: 2121, username: 'kim', password: 'secret' }])
+    mockIpc([{ ...NAS, host: 'ftp.office.lan', port: 2121, username: 'kim', hasPassword: true }])
     renderToolbar()
     await savedButton()
 
@@ -593,6 +730,8 @@ describe('agent:openServerEditor', () => {
     expect(field('Port').value).toBe('2121')
     expect(field('Username').value).toBe('kim')
     expect(field('Password').value).toBe('')
+    expect(field('Password').placeholder).not.toBe('Saved password')
+    expect(within(dialog).queryByRole('button', { name: 'Remove saved password' })).toBeNull()
     expect(within(dialog).getByRole('switch').getAttribute('aria-checked')).toBe('true')
     // 사람이 저장하기 전에는 아무것도 저장되지 않는다.
     expect(invokeCalls(mockInvoke, 'ftp:saveServer')).toEqual([])

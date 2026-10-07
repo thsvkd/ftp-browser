@@ -12,6 +12,7 @@ const INVOKE_CHANNELS = [
   'ftp:getRecentServers',
   'ftp:deleteServer',
   'ftp:saveServer',
+  'ftp:getPasswordProtection',
   'ftp:getRecentPaths',
   'ftp:downloadPreview',
   'ftp:deleteBatch',

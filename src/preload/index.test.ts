@@ -140,6 +140,17 @@ describe('preload api', () => {
     }
   })
 
+  it('should allow asking how saved passwords are protected', async () => {
+    // covers: Test-728
+    // 렌더러 테스트는 window.api를 목으로 바꾸므로 허용 목록 누락은 여기서만 잡힌다.
+    const api = await loadExposedApi()
+    const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>
+
+    await invoke('ftp:getPasswordProtection')
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('ftp:getPasswordProtection')
+  })
+
   it('should allow saving a server without connecting', async () => {
     const api = await loadExposedApi()
     const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>

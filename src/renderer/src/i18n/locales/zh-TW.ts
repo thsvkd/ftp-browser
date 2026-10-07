@@ -35,6 +35,9 @@ export const zhTW = {
   'connect.password': '密碼',
   'connect.showPassword': '顯示密碼',
   'connect.hidePassword': '隱藏密碼',
+  'connect.savedPassword': '已儲存的密碼',
+  'connect.removeSavedPassword': '移除已儲存的密碼',
+  'connect.savedPasswordUnreadable': '無法在這台電腦上讀取已儲存的密碼。請重新輸入。',
   'connect.secure': '使用 FTPS (TLS)',
   'connect.failed': '無法連線。請檢查您的登入資訊，然後再試一次。',
   'connect.connectingTo': '正在連線到 {{name}}…',
@@ -76,6 +79,8 @@ export const zhTW = {
   'servers.invalidPort': '請輸入 1 到 65535 之間的連接埠。',
   'servers.invalidMaxTransfers': '請輸入 1 到 20 之間的傳輸數。',
   'servers.tlsBadge': '使用 FTPS (TLS)',
+  'servers.passwordProtectionBasic': '沒有系統金鑰圈：已儲存的密碼只是經過混淆，並未受到保護。',
+  'servers.passwordProtectionNone': '已儲存的密碼以純文字形式存放在這台電腦上。',
 
   'status.disconnected': '未連線',
   'status.connecting': '正在連線…',

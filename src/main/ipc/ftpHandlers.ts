@@ -6,17 +6,22 @@ import { getDatabase } from '../db/database'
 import {
   deleteServer,
   getRecentPaths,
+  HAS_PASSWORD_SQL,
+  KEEP_PASSWORD,
   listServers,
   recordConnection,
   saveServer,
   ServerSaveError
 } from '../db/servers'
+import { SavedPasswordUnreadableError, type PasswordVault } from '../db/passwordVault'
 import { ipcError } from '../utils/errorClassifier'
 import type {
   FtpConnectPayload,
   FtpConnectionState,
   FtpListResult,
   FtpServer,
+  FtpServerInput,
+  PasswordProtection,
   RecentPath
 } from '@shared/types/ftp'
 import type { DeleteTarget } from '@shared/types/operation'
@@ -35,7 +40,8 @@ export interface FtpHandlersResult {
 
 export function registerFtpHandlers(
   win: BrowserWindow,
-  operationManager: OperationManager
+  operationManager: OperationManager,
+  passwords: PasswordVault
 ): FtpHandlersResult {
   const manager = new FtpConnectionManager()
   const fileOps = new FtpFileOperations(manager)
@@ -48,14 +54,26 @@ export function registerFtpHandlers(
     'ftp:connect',
     async (_event, payload: FtpConnectPayload): Promise<IpcResult<void>> => {
       try {
-        const result = await manager.connect(payload)
+        // 입력한 비밀번호가 없으면 저장된 비밀번호를 main이 직접 읽는다. 렌더러는 그 값을 모른다(E8).
+        // 풀 수 없으면 연결을 시도하지 않는다(E5).
+        const { savedPasswordOf, ...login } = payload
+        const usesSaved = login.password === undefined && savedPasswordOf !== undefined
+        const password = usesSaved ? await passwords.reveal(savedPasswordOf) : login.password
+        const config: FtpConnectPayload = { ...login, password: password || 'anonymous@' }
+        const result = await manager.connect(config)
         if (result.cancelled) {
           return { success: false, error: 'Connection cancelled' }
         }
         if (result.success) {
           // UPSERT server info (keyed on host+port)
           try {
-            recordConnection(getDatabase(), payload)
+            // 갱신하는 서버의 저장된 비밀번호로 연결했으면 그대로 두고, 아니면 로그인한 비밀번호를
+            // 암호화해 저장한다(E8). 암호화도 저장의 일부라 실패해도 연결은 성공이다.
+            const write =
+              usesSaved && login.id === savedPasswordOf
+                ? KEEP_PASSWORD
+                : await passwords.toWrite(config.password)
+            recordConnection(getDatabase(), config, write)
           } catch (dbErr) {
             // Non-critical: don't fail the connection if DB save fails
             console.warn('[ftpHandlers] Failed to persist server info:', dbErr)
@@ -64,6 +82,9 @@ export function registerFtpHandlers(
         }
         return { success: false, error: result.error ?? 'Connection failed' }
       } catch (err) {
+        if (err instanceof SavedPasswordUnreadableError) {
+          return { success: false, error: err.message, code: err.code }
+        }
         return ipcError(err)
       }
     }
@@ -74,10 +95,10 @@ export function registerFtpHandlers(
       const db = getDatabase()
       const row = db
         .prepare(
-          'SELECT host, port, username, password_enc, secure FROM servers ORDER BY last_connected DESC LIMIT 1'
+          `SELECT host, port, username, ${HAS_PASSWORD_SQL} AS has_password, secure FROM servers ORDER BY last_connected DESC LIMIT 1`
         )
         .get() as
-        | { host: string; port: number; username: string; password_enc: string; secure: number }
+        | { host: string; port: number; username: string; has_password: number; secure: number }
         | undefined
       if (!row) return { success: true, data: null }
       return {
@@ -87,7 +108,7 @@ export function registerFtpHandlers(
           host: row.host,
           port: row.port,
           username: row.username || '',
-          password: row.password_enc || '',
+          hasPassword: row.has_password === 1,
           secure: row.secure === 1
         }
       }
@@ -106,13 +127,26 @@ export function registerFtpHandlers(
     }
   })
 
-  ipcMain.handle('ftp:saveServer', (_event, server: FtpServer): IpcResult<FtpServer> => {
-    try {
-      return { success: true, data: saveServer(getDatabase(), server) }
-    } catch (err) {
-      if (err instanceof ServerSaveError) {
-        return { success: false, error: err.message, code: err.code }
+  ipcMain.handle(
+    'ftp:saveServer',
+    async (_event, input: FtpServerInput): Promise<IpcResult<FtpServer>> => {
+      try {
+        // undefined는 유지, ''는 삭제, 값은 교체(E9). 암호화는 DB 트랜잭션 전에 끝낸다(E3).
+        const write = await passwords.toWrite(input.password)
+        return { success: true, data: saveServer(getDatabase(), input, write) }
+      } catch (err) {
+        if (err instanceof ServerSaveError) {
+          return { success: false, error: err.message, code: err.code }
+        }
+        return ipcError(err)
       }
+    }
+  )
+
+  ipcMain.handle('ftp:getPasswordProtection', async (): Promise<IpcResult<PasswordProtection>> => {
+    try {
+      return { success: true, data: await passwords.protection() }
+    } catch (err) {
       return ipcError(err)
     }
   })

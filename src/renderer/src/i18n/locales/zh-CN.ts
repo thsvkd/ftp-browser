@@ -35,6 +35,9 @@ export const zhCN = {
   'connect.password': '密码',
   'connect.showPassword': '显示密码',
   'connect.hidePassword': '隐藏密码',
+  'connect.savedPassword': '已保存的密码',
+  'connect.removeSavedPassword': '删除已保存的密码',
+  'connect.savedPasswordUnreadable': '无法在此电脑上读取已保存的密码。请重新输入。',
   'connect.secure': '使用 FTPS (TLS)',
   'connect.failed': '无法连接。请检查登录信息，然后重试。',
   'connect.connectingTo': '正在连接到 {{name}}…',
@@ -76,6 +79,8 @@ export const zhCN = {
   'servers.invalidPort': '请输入 1 到 65535 之间的端口。',
   'servers.invalidMaxTransfers': '请输入 1 到 20 之间的传输数。',
   'servers.tlsBadge': '使用 FTPS (TLS)',
+  'servers.passwordProtectionBasic': '没有系统密钥环：已保存的密码只是经过混淆，并未受到保护。',
+  'servers.passwordProtectionNone': '已保存的密码以纯文本形式存储在此电脑上。',
 
   'status.disconnected': '未连接',
   'status.connecting': '正在连接…',

@@ -35,6 +35,10 @@ export const ja = {
   'connect.password': 'パスワード',
   'connect.showPassword': 'パスワードを表示',
   'connect.hidePassword': 'パスワードを非表示',
+  'connect.savedPassword': '保存済みのパスワード',
+  'connect.removeSavedPassword': '保存済みのパスワードを削除',
+  'connect.savedPasswordUnreadable':
+    '保存済みのパスワードをこのコンピューターで読み取れません。もう一度入力してください。',
   'connect.secure': 'FTPS(TLS) を使用する',
   'connect.failed': '接続できませんでした。ログイン情報を確認して、もう一度お試しください。',
   'connect.connectingTo': '{{name}} に接続しています…',
@@ -77,6 +81,10 @@ export const ja = {
   'servers.invalidPort': '1 から 65535 までのポート番号を入力してください。',
   'servers.invalidMaxTransfers': '同時転送数は 1 から 20 までで入力してください。',
   'servers.tlsBadge': 'FTPS(TLS) を使用',
+  'servers.passwordProtectionBasic':
+    'システムのキーリングがありません。保存済みのパスワードは読みにくくされているだけで、保護されていません。',
+  'servers.passwordProtectionNone':
+    '保存済みのパスワードは、このコンピューターにプレーンテキストで保存されます。',
 
   'status.disconnected': '未接続',
   'status.connecting': '接続中…',

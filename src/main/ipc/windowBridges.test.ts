@@ -10,6 +10,7 @@ import { registerFtpHandlers } from './ftpHandlers'
 import { registerOperationHandlers } from './operationHandlers'
 import { registerTransferHandlers } from './transferHandlers'
 import type { BrowserWindow } from 'electron'
+import type { PasswordVault } from '../db/passwordVault'
 
 describe('event bridges after the window is closed', () => {
   it('drops ftp, transfer and operation events instead of sending to a destroyed window', () => {
@@ -21,7 +22,7 @@ describe('event bridges after the window is closed', () => {
     })
     const win = { isDestroyed: () => destroyed, webContents: { send } } as unknown as BrowserWindow
     const operations = registerOperationHandlers(win)
-    const { manager, fileOps } = registerFtpHandlers(win, operations)
+    const { manager, fileOps } = registerFtpHandlers(win, operations, {} as PasswordVault)
     const queue = registerTransferHandlers(win, fileOps, manager)
     const emitAll = (): void => {
       manager.emit('connectionStatus', { status: 'connected', host: 'h' })

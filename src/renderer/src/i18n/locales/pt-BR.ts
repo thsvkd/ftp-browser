@@ -37,6 +37,10 @@ export const ptBR = {
   'connect.password': 'Senha',
   'connect.showPassword': 'Mostrar senha',
   'connect.hidePassword': 'Ocultar senha',
+  'connect.savedPassword': 'Senha salva',
+  'connect.removeSavedPassword': 'Remover senha salva',
+  'connect.savedPasswordUnreadable':
+    'Não é possível ler a senha salva neste computador. Digite-a novamente.',
   'connect.secure': 'Usar FTPS (TLS)',
   'connect.failed': 'Não foi possível conectar. Verifique seus dados de login e tente novamente.',
   'connect.connectingTo': 'Conectando a {{name}}…',
@@ -80,6 +84,10 @@ export const ptBR = {
   'servers.invalidPort': 'Digite uma porta de 1 a 65535.',
   'servers.invalidMaxTransfers': 'Digite um número de transferências de 1 a 20.',
   'servers.tlsBadge': 'Usa FTPS (TLS)',
+  'servers.passwordProtectionBasic':
+    'Sem chaveiro do sistema: as senhas salvas são apenas ofuscadas, não protegidas.',
+  'servers.passwordProtectionNone':
+    'As senhas salvas são armazenadas como texto simples neste computador.',
 
   'status.disconnected': 'Desconectado',
   'status.connecting': 'Conectando…',

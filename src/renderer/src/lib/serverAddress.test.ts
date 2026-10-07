@@ -9,6 +9,7 @@ import {
   emptyDraft,
   toDraft
 } from './serverAddress'
+import type { FtpServer } from '@shared/types/ftp'
 
 describe('parseServerAddress', () => {
   it('keeps a bare host as is', () => {
@@ -121,7 +122,7 @@ describe('max transfers in a draft', () => {
     host: 'nas',
     port: 21,
     username: '',
-    password: '',
+    hasPassword: false,
     secure: false
   }
 
@@ -147,5 +148,32 @@ describe('max transfers in a draft', () => {
     expect(sameFields({ ...d, maxTransfers: '' }, saved)).toBe(true)
     // 잘못된 값은 기본값과 같다고 보지 않는다
     expect(sameFields({ ...toDraft(saved), maxTransfers: '0' }, saved)).toBe(false)
+  })
+})
+
+describe('saved password in a draft', () => {
+  const saved: FtpServer = {
+    id: 1,
+    name: '',
+    host: 'nas',
+    port: 21,
+    username: 'me',
+    hasPassword: true,
+    secure: false
+  }
+
+  it('leaves the field empty, marks the saved password in use and counts it as unchanged', () => {
+    // covers: Test-720
+    expect(toDraft(saved)).toMatchObject({ password: '', savedPassword: true })
+    expect(toDraft({ ...saved, hasPassword: false }).savedPassword).toBe(false)
+    expect(emptyDraft().savedPassword).toBe(false)
+
+    expect(sameFields(toDraft(saved), saved)).toBe(true)
+    const none = { ...saved, hasPassword: false }
+    expect(sameFields(toDraft(none), none)).toBe(true)
+    // 새로 입력하거나 지우면 바뀐 것이다.
+    expect(sameFields({ ...toDraft(saved), password: 'new' }, saved)).toBe(false)
+    expect(sameFields({ ...toDraft(saved), savedPassword: false }, saved)).toBe(false)
+    expect(sameFields({ ...toDraft(none), password: 'new' }, none)).toBe(false)
   })
 })

@@ -5,6 +5,7 @@ import {
   isValidMaxTransfers,
   type FtpConnectPayload,
   type FtpServer,
+  type FtpServerInput,
   type RecentPath
 } from '@shared/types/ftp'
 
@@ -18,16 +19,51 @@ export class ServerSaveError extends Error {
   }
 }
 
+/**
+ * 저장된 비밀번호를 어떻게 쓸지(E3). 암호화는 passwordVault가 트랜잭션 밖에서 먼저 끝낸다
+ * (better-sqlite3 트랜잭션 안에서는 await할 수 없다).
+ * - `keep`: 그대로 둔다(새 서버면 비밀번호 없음)
+ * - `clear`: 두 컬럼을 모두 비운다
+ * - `cipher`: 암호문을 `password_cipher`에 쓰고 예전 평문(`password_enc`)은 비운다
+ * - `plain`: 암호화를 쓸 수 없을 때만. 평문을 `password_enc`에 쓴다(예전과 같음)
+ */
+export type PasswordWrite =
+  | { kind: 'keep' }
+  | { kind: 'clear' }
+  | { kind: 'cipher'; cipher: Buffer }
+  | { kind: 'plain'; password: string }
+
+export const KEEP_PASSWORD: PasswordWrite = { kind: 'keep' }
+const CLEAR_PASSWORD: PasswordWrite = { kind: 'clear' }
+
+/**
+ * 비밀번호가 저장돼 있는지. 암호문(`password_cipher`)이나 예전 평문(`password_enc`) 중 하나다(E1).
+ * 목록은 이 식만 읽으므로 비밀번호 값은 main 안에서도 서버 목록을 따라다니지 않는다.
+ */
+export const HAS_PASSWORD_SQL = "(password_cipher IS NOT NULL OR IFNULL(password_enc, '') <> '')"
+
+const SERVER_COLUMNS = `id, name, host, port, username, ${HAS_PASSWORD_SQL} AS has_password, secure, max_transfers, last_connected`
+
 interface ServerRow {
   id: number
   name: string
   host: string
   port: number
   username: string | null
-  password_enc: string | null
+  has_password: number
   secure: number
   max_transfers: number
   last_connected: string | null
+}
+
+/** `keep`이 아니면 두 비밀번호 컬럼을 함께 쓴다. 한 행에서 둘 중 하나만 값을 가진다(E1). */
+function writePassword(db: Database.Database, id: number, write: PasswordWrite): void {
+  if (write.kind === 'keep') return
+  db.prepare('UPDATE servers SET password_enc = ?, password_cipher = ? WHERE id = ?').run(
+    write.kind === 'plain' ? write.password : null,
+    write.kind === 'cipher' ? write.cipher : null,
+    id
+  )
 }
 
 const isValidPort = (port: number): boolean => Number.isInteger(port) && port >= 1 && port <= 65535
@@ -37,8 +73,13 @@ const isValidPort = (port: number): boolean => Number.isInteger(port) && port >=
  * - `id`가 있으면 그 행을 고친다. 주소(host:port)가 바뀌면 최근 경로도 따라 옮긴다.
  * - `id`가 없으면 새로 만든다. 같은 주소의 서버가 이미 있으면 덮어쓰지 않고 거절한다.
  * 호스트는 대소문자를 가리지 않고 비교한다(예전 행에는 'NAS.local'처럼 대문자가 남아 있다).
+ * 비밀번호는 `password`대로 쓴다. 돌려주는 서버에는 저장 여부(`hasPassword`)만 있다.
  */
-export function saveServer(db: Database.Database, server: FtpServer): FtpServer {
+export function saveServer(
+  db: Database.Database,
+  server: Omit<FtpServerInput, 'password'>,
+  password: PasswordWrite
+): FtpServer {
   const host = server.host.trim()
   if (!isValidPort(server.port)) {
     throw new ServerSaveError(ErrorCode.INVALID_PORT, `Invalid port: ${server.port}`)
@@ -49,14 +90,7 @@ export function saveServer(db: Database.Database, server: FtpServer): FtpServer 
       `Invalid max transfers: ${server.maxTransfers}`
     )
   }
-  const fields = [
-    server.name.trim(),
-    host,
-    server.port,
-    server.username,
-    server.password,
-    server.secure ? 1 : 0
-  ]
+  const fields = [server.name.trim(), host, server.port, server.username, server.secure ? 1 : 0]
 
   const id = db.transaction((): number => {
     const old =
@@ -85,19 +119,22 @@ export function saveServer(db: Database.Database, server: FtpServer): FtpServer 
     }
 
     if (!old || server.id === undefined) {
-      return Number(
+      const id = Number(
         db
           .prepare(
-            'INSERT INTO servers (name, host, port, username, password_enc, secure, max_transfers) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO servers (name, host, port, username, secure, max_transfers) VALUES (?, ?, ?, ?, ?, ?)'
           )
           .run(...fields, server.maxTransfers ?? DEFAULT_MAX_TRANSFERS).lastInsertRowid
       )
+      writePassword(db, id, password)
+      return id
     }
 
     // 동시 전송 수가 빠진 저장은 recordConnection처럼 저장된 값을 그대로 둔다
     db.prepare(
-      'UPDATE servers SET name = ?, host = ?, port = ?, username = ?, password_enc = ?, secure = ?, max_transfers = COALESCE(?, max_transfers) WHERE id = ?'
+      'UPDATE servers SET name = ?, host = ?, port = ?, username = ?, secure = ?, max_transfers = COALESCE(?, max_transfers) WHERE id = ?'
     ).run(...fields, server.maxTransfers ?? null, server.id)
+    writePassword(db, server.id, password)
     if (old.host !== host || old.port !== server.port) {
       // 새 주소에 남은 고아 경로가 있으면 UNIQUE에 걸리므로 덮어쓴다.
       db.prepare(
@@ -107,11 +144,7 @@ export function saveServer(db: Database.Database, server: FtpServer): FtpServer 
     return server.id
   })()
 
-  const row = db
-    .prepare(
-      'SELECT id, name, host, port, username, password_enc, secure, max_transfers, last_connected FROM servers WHERE id = ?'
-    )
-    .get(id) as ServerRow
+  const row = db.prepare(`SELECT ${SERVER_COLUMNS} FROM servers WHERE id = ?`).get(id) as ServerRow
   return toServer(row)
 }
 
@@ -121,12 +154,17 @@ export function saveServer(db: Database.Database, server: FtpServer): FtpServer 
  *   별칭은 비어 있지 않을 때만 바꾼다.
  * - `id`가 없는데 같은 주소의 저장된 서버가 있으면(다른 계정·익명으로 연결) 그 서버의
  *   계정은 건드리지 않고 연결 시각만 찍는다. 없으면 새 서버로 저장한다.
+ * 비밀번호는 `password`대로 쓴다(저장된 비밀번호로 연결했으면 `keep`, 입력했으면 그 암호문).
  * 익명 로그인의 기본값('anonymous' / 'anonymous@')은 저장하지 않는다.
  */
-export function recordConnection(db: Database.Database, payload: FtpConnectPayload): void {
+export function recordConnection(
+  db: Database.Database,
+  payload: FtpConnectPayload,
+  password: PasswordWrite
+): void {
   const anonymous = /^anonymous$/i.test(payload.user.trim())
   const user = anonymous ? '' : payload.user
-  const password = anonymous && payload.password === 'anonymous@' ? '' : payload.password
+  const write = anonymous && payload.password === 'anonymous@' ? CLEAR_PASSWORD : password
   const name = payload.name?.trim() ?? ''
   const secure = payload.secure ? 1 : 0
   // 값이 없거나 범위 밖이면(빠른 연결) 저장된 값을 그대로 두고, 새 서버면 기본값을 쓴다.
@@ -141,12 +179,15 @@ export function recordConnection(db: Database.Database, payload: FtpConnectPaylo
         .prepare(
           `UPDATE servers SET
              name = CASE WHEN ? <> '' THEN ? ELSE name END,
-             username = ?, password_enc = ?, secure = ?, max_transfers = COALESCE(?, max_transfers),
+             username = ?, secure = ?, max_transfers = COALESCE(?, max_transfers),
              last_connected = datetime('now')
            WHERE id = ?`
         )
-        .run(name, name, user, password, secure, maxTransfers, payload.id)
-      if (updated.changes > 0) return
+        .run(name, name, user, secure, maxTransfers, payload.id)
+      if (updated.changes > 0) {
+        writePassword(db, payload.id, write)
+        return
+      }
     }
     const touched = db
       .prepare(
@@ -154,18 +195,20 @@ export function recordConnection(db: Database.Database, payload: FtpConnectPaylo
       )
       .run(payload.host, payload.port)
     if (touched.changes > 0) return
-    db.prepare(
-      `INSERT INTO servers (name, host, port, username, password_enc, secure, max_transfers, last_connected)
-       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-    ).run(
-      name,
-      payload.host,
-      payload.port,
-      user,
-      password,
-      secure,
-      maxTransfers ?? DEFAULT_MAX_TRANSFERS
-    )
+    const id = db
+      .prepare(
+        `INSERT INTO servers (name, host, port, username, secure, max_transfers, last_connected)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
+      )
+      .run(
+        name,
+        payload.host,
+        payload.port,
+        user,
+        secure,
+        maxTransfers ?? DEFAULT_MAX_TRANSFERS
+      ).lastInsertRowid
+    writePassword(db, Number(id), write)
   })()
 }
 
@@ -177,7 +220,7 @@ export function toServer(r: ServerRow): FtpServer {
     host: r.host,
     port: r.port,
     username: r.username || '',
-    password: r.password_enc || '',
+    hasPassword: r.has_password === 1,
     secure: r.secure === 1,
     maxTransfers: r.max_transfers,
     lastConnected: r.last_connected ?? undefined
@@ -187,20 +230,68 @@ export function toServer(r: ServerRow): FtpServer {
 /** 마지막 연결 순. 연결한 적 없는 서버(NULL)는 SQLite DESC 정렬에서 맨 뒤로 간다. */
 export function listServers(db: Database.Database): FtpServer[] {
   const rows = db
-    .prepare(
-      'SELECT id, name, host, port, username, password_enc, secure, max_transfers, last_connected FROM servers ORDER BY last_connected DESC, id DESC'
-    )
+    .prepare(`SELECT ${SERVER_COLUMNS} FROM servers ORDER BY last_connected DESC, id DESC`)
     .all() as ServerRow[]
   return rows.map(toServer)
 }
 
 export function getServerById(db: Database.Database, id: number): FtpServer | undefined {
-  const row = db
-    .prepare(
-      'SELECT id, name, host, port, username, password_enc, secure, max_transfers, last_connected FROM servers WHERE id = ?'
-    )
-    .get(id) as ServerRow | undefined
+  const row = db.prepare(`SELECT ${SERVER_COLUMNS} FROM servers WHERE id = ?`).get(id) as
+    | ServerRow
+    | undefined
   return row && toServer(row)
+}
+
+/** 저장된 비밀번호 컬럼 그대로. passwordVault만 읽는다. 없는 id면 undefined. */
+export function getStoredPassword(
+  db: Database.Database,
+  id: number
+): { cipher: Buffer | null; plain: string | null } | undefined {
+  return db
+    .prepare('SELECT password_cipher AS cipher, password_enc AS plain FROM servers WHERE id = ?')
+    .get(id) as { cipher: Buffer | null; plain: string | null } | undefined
+}
+
+/** 아직 암호화하지 않은 예전 평문 비밀번호(E4) */
+export function listPlainPasswords(db: Database.Database): Array<{ id: number; plain: string }> {
+  return db
+    .prepare(
+      "SELECT id, password_enc AS plain FROM servers WHERE IFNULL(password_enc, '') <> '' AND password_cipher IS NULL ORDER BY id"
+    )
+    .all() as Array<{ id: number; plain: string }>
+}
+
+/**
+ * 읽은 평문이 그대로일 때만 암호문으로 바꾼다(비교 후 교체). 그사이 사용자가 바꾼 행은 덮지 않는다.
+ * 바꿨으면 true.
+ */
+export function replacePlainPassword(
+  db: Database.Database,
+  id: number,
+  plain: string,
+  cipher: Buffer
+): boolean {
+  return (
+    db
+      .prepare(
+        'UPDATE servers SET password_cipher = ?, password_enc = NULL WHERE id = ? AND password_enc = ? AND password_cipher IS NULL'
+      )
+      .run(cipher, id, plain).changes > 0
+  )
+}
+
+/** 읽은 암호문이 그대로일 때만 새 암호문으로 바꾼다(재암호화, 비교 후 교체). 바꿨으면 true. */
+export function replaceCipher(
+  db: Database.Database,
+  id: number,
+  oldCipher: Buffer,
+  newCipher: Buffer
+): boolean {
+  return (
+    db
+      .prepare('UPDATE servers SET password_cipher = ? WHERE id = ? AND password_cipher = ?')
+      .run(newCipher, id, oldCipher).changes > 0
+  )
 }
 
 /** 저장된 서버와 그 최근 경로를 지운다. 없는 id면 아무것도 하지 않는다. */

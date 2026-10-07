@@ -37,6 +37,10 @@ export const es = {
   'connect.password': 'Contraseña',
   'connect.showPassword': 'Mostrar contraseña',
   'connect.hidePassword': 'Ocultar contraseña',
+  'connect.savedPassword': 'Contraseña guardada',
+  'connect.removeSavedPassword': 'Quitar la contraseña guardada',
+  'connect.savedPasswordUnreadable':
+    'No se puede leer la contraseña guardada en este equipo. Vuelve a escribirla.',
   'connect.secure': 'Usar FTPS (TLS)',
   'connect.failed':
     'No se pudo conectar. Comprueba tus datos de inicio de sesión e inténtalo de nuevo.',
@@ -82,6 +86,10 @@ export const es = {
   'servers.invalidPort': 'Escribe un puerto entre 1 y 65535.',
   'servers.invalidMaxTransfers': 'Escribe un número de transferencias entre 1 y 20.',
   'servers.tlsBadge': 'Usa FTPS (TLS)',
+  'servers.passwordProtectionBasic':
+    'No hay llavero del sistema: las contraseñas guardadas solo están ocultas, no protegidas.',
+  'servers.passwordProtectionNone':
+    'Las contraseñas guardadas se almacenan como texto sin formato en este equipo.',
 
   'status.disconnected': 'Desconectado',
   'status.connecting': 'Conectando…',

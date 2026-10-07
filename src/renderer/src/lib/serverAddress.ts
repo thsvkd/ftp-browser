@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_TRANSFERS, type FtpServer } from '@shared/types/ftp'
+import { DEFAULT_MAX_TRANSFERS, type FtpServer, type FtpServerInput } from '@shared/types/ftp'
 
 export interface ParsedServerAddress {
   host: string
@@ -99,7 +99,13 @@ export interface ServerDraft {
   host: string
   port: string
   username: string
+  /** The password typed for this draft; '' when none is typed. */
   password: string
+  /**
+   * Logs in with the password saved for `id` while {@link password} is empty. The renderer never
+   * holds a saved password itself; main reads it (docs/handoff/saved-password-encryption.md E10).
+   */
+  savedPassword: boolean
   secure: boolean
   /** Simultaneous transfer connections, as typed (digits only). */
   maxTransfers: string
@@ -113,6 +119,7 @@ export const emptyDraft = (): ServerDraft => ({
   port: '21',
   username: '',
   password: '',
+  savedPassword: false,
   secure: false,
   maxTransfers: String(DEFAULT_MAX_TRANSFERS),
   path: ''
@@ -124,7 +131,8 @@ export const toDraft = (s: FtpServer, path = ''): ServerDraft => ({
   host: s.host,
   port: String(s.port),
   username: s.username,
-  password: s.password,
+  password: '',
+  savedPassword: s.hasPassword,
   secure: s.secure,
   maxTransfers: String(s.maxTransfers ?? DEFAULT_MAX_TRANSFERS),
   path
@@ -166,7 +174,9 @@ export const sameFields = (d: ServerDraft, s: FtpServer): boolean =>
   d.host === s.host &&
   (parseInt(d.port, 10) || 21) === s.port &&
   d.username === s.username &&
-  d.password === s.password &&
+  // 새로 입력하지 않았고 저장된 비밀번호를 지우지도 않았으면 비밀번호는 그대로다.
+  d.password === '' &&
+  d.savedPassword === s.hasPassword &&
   d.secure === s.secure &&
   (d.maxTransfers.trim() ? Number(d.maxTransfers) : DEFAULT_MAX_TRANSFERS) ===
     (s.maxTransfers ?? DEFAULT_MAX_TRANSFERS)
@@ -222,10 +232,14 @@ export const findSaved = (
  * The fields to send for a draft, with anything still pasted into the host field split out.
  * A plain host keeps its case, so an older 'NAS.local' row still matches on (host, port).
  * An empty port means 21 and an empty transfer count the default; anything else is kept as typed
- * so {@link isValidPort} and `isValidMaxTransfers` can reject it.
+ * so {@link isValidPort} and `isValidMaxTransfers` can reject it. `password` is the typed one
+ * only ('' when none is typed); {@link ServerDraft.savedPassword} says whether to use the saved one.
  */
 export function resolveDraft(d: ServerDraft): {
-  server: Omit<FtpServer, 'lastConnected' | 'maxTransfers'> & { maxTransfers: number }
+  server: Omit<FtpServerInput, 'maxTransfers' | 'password'> & {
+    maxTransfers: number
+    password: string
+  }
   path?: string
 } {
   const parsed = parseServerAddress(d.host)

@@ -35,6 +35,10 @@ export const ko = {
   'connect.password': '비밀번호',
   'connect.showPassword': '비밀번호 표시',
   'connect.hidePassword': '비밀번호 숨기기',
+  'connect.savedPassword': '저장된 비밀번호',
+  'connect.removeSavedPassword': '저장된 비밀번호 지우기',
+  'connect.savedPasswordUnreadable':
+    '저장된 비밀번호를 이 컴퓨터에서 읽을 수 없습니다. 비밀번호를 다시 입력하세요.',
   'connect.secure': 'FTPS(TLS) 사용',
   'connect.failed': '연결하지 못했습니다. 로그인 정보를 확인한 후 다시 시도하세요.',
   'connect.connectingTo': '{{name}}에 연결하는 중…',
@@ -77,6 +81,9 @@ export const ko = {
   'servers.invalidPort': '1에서 65535 사이의 포트를 입력하세요.',
   'servers.invalidMaxTransfers': '동시 전송 수는 1에서 20 사이로 입력하세요.',
   'servers.tlsBadge': 'FTPS(TLS) 사용',
+  'servers.passwordProtectionBasic':
+    '시스템 키링이 없습니다. 저장된 비밀번호는 알아보기 어렵게만 바뀔 뿐 보호되지 않습니다.',
+  'servers.passwordProtectionNone': '저장된 비밀번호는 이 컴퓨터에 일반 텍스트로 저장됩니다.',
 
   'status.disconnected': '연결 안 됨',
   'status.connecting': '연결 중…',

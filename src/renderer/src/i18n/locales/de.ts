@@ -37,6 +37,10 @@ export const de = {
   'connect.password': 'Passwort',
   'connect.showPassword': 'Passwort anzeigen',
   'connect.hidePassword': 'Passwort ausblenden',
+  'connect.savedPassword': 'Gespeichertes Passwort',
+  'connect.removeSavedPassword': 'Gespeichertes Passwort entfernen',
+  'connect.savedPasswordUnreadable':
+    'Das gespeicherte Passwort kann auf diesem Computer nicht gelesen werden. Geben Sie es erneut ein.',
   'connect.secure': 'FTPS (TLS) verwenden',
   'connect.failed':
     'Keine Verbindung möglich. Überprüfen Sie Ihre Anmeldedaten, und versuchen Sie es erneut.',
@@ -82,6 +86,10 @@ export const de = {
   'servers.invalidPort': 'Geben Sie einen Port von 1 bis 65535 ein.',
   'servers.invalidMaxTransfers': 'Geben Sie eine Anzahl von 1 bis 20 ein.',
   'servers.tlsBadge': 'Verwendet FTPS (TLS)',
+  'servers.passwordProtectionBasic':
+    'Kein Systemschlüsselbund: Gespeicherte Passwörter sind nur verschleiert, nicht geschützt.',
+  'servers.passwordProtectionNone':
+    'Gespeicherte Passwörter werden auf diesem Computer als Klartext gespeichert.',
 
   'status.disconnected': 'Getrennt',
   'status.connecting': 'Verbindung wird hergestellt…',

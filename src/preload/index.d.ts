@@ -10,6 +10,7 @@ type InvokeChannel =
   | 'ftp:getRecentPaths'
   | 'ftp:deleteServer'
   | 'ftp:saveServer'
+  | 'ftp:getPasswordProtection'
   | 'ftp:downloadPreview'
   | 'ftp:deleteBatch'
   | 'ftp:rename'

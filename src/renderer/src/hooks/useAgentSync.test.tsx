@@ -18,7 +18,7 @@ const OFFICE: FtpServer = {
   host: 'ftp.office.lan',
   port: 2121,
   username: 'kim',
-  password: 'secret',
+  hasPassword: true,
   secure: true
 }
 

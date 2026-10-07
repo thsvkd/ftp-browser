@@ -40,6 +40,10 @@ export const en = {
   'connect.password': 'Password',
   'connect.showPassword': 'Show password',
   'connect.hidePassword': 'Hide password',
+  'connect.savedPassword': 'Saved password',
+  'connect.removeSavedPassword': 'Remove saved password',
+  'connect.savedPasswordUnreadable':
+    "The saved password can't be read on this computer. Enter it again.",
   'connect.secure': 'Use FTPS (TLS)',
   'connect.failed': "Couldn't connect. Check your login details and try again.",
   'connect.connectingTo': 'Connecting to {{name}}…',
@@ -83,6 +87,9 @@ export const en = {
   'servers.invalidPort': 'Enter a port from 1 to 65535.',
   'servers.invalidMaxTransfers': 'Enter a number of transfers from 1 to 20.',
   'servers.tlsBadge': 'Uses FTPS (TLS)',
+  'servers.passwordProtectionBasic':
+    'No system keyring: saved passwords are only obscured, not protected.',
+  'servers.passwordProtectionNone': 'Saved passwords are stored as plain text on this computer.',
 
   'status.disconnected': 'Disconnected',
   'status.connecting': 'Connecting…',

@@ -9,6 +9,8 @@ import Database from 'better-sqlite3'
 import type { Client } from 'basic-ftp'
 import { vi } from 'vitest'
 import { OperationManager } from '../../../operation/OperationManager'
+import { createPasswordVault } from '../../../db/passwordVault'
+import { FakeCipher } from '../../../db/__fixtures__/fakeCipher'
 import type {
   ConnectionStatus,
   FtpConnectPayload,
@@ -31,6 +33,7 @@ export function createTestDb(): Database.Database {
   const migrations = path.join(__dirname, '../../../db/migrations')
   db.exec(fs.readFileSync(path.join(migrations, '001_initial.sql'), 'utf-8'))
   db.exec(fs.readFileSync(path.join(migrations, '002_server_max_transfers.sql'), 'utf-8'))
+  db.exec(fs.readFileSync(path.join(migrations, '003_server_password_cipher.sql'), 'utf-8'))
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_servers_host_port ON servers(host, port)')
   db.exec(`CREATE TABLE IF NOT EXISTS server_recent_paths (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -293,6 +296,7 @@ export function createHarness(overrides: Partial<AgentServiceDeps> = {}): Harnes
       collectFiles: vi.fn()
     },
     events,
+    passwords: createPasswordVault(db, new FakeCipher()),
     platform: 'linux',
     ...overrides
   }

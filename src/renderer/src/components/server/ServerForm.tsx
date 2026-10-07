@@ -1,5 +1,5 @@
 import { useId, useState, type ReactNode } from 'react'
-import { Eye, EyeOff, Folder } from 'lucide-react'
+import { Eye, EyeOff, Folder, ShieldAlert } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useT } from '@renderer/i18n'
 import {
@@ -183,13 +183,16 @@ export function ServerForm({
   onPatch,
   recent = [],
   disabled,
-  autoFocusHost
+  autoFocusHost,
+  passwordWarning
 }: {
   draft: ServerDraft
   onPatch: (fields: Partial<ServerDraft>) => void
   recent?: RecentPath[]
   disabled?: boolean
   autoFocusHost?: boolean
+  /** One line under the login fields, e.g. that saved passwords are not really protected here. */
+  passwordWarning?: string
 }): React.JSX.Element {
   const id = useId()
   const t = useT()
@@ -260,30 +263,53 @@ export function ServerForm({
           )}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-[14px]">
-        {row(
-          t('connect.username'),
-          `${id}-user`,
-          <input
-            id={`${id}-user`}
-            value={draft.username}
-            disabled={disabled}
-            spellCheck={false}
-            autoComplete="off"
-            placeholder="anonymous"
-            className={inputCls}
-            onChange={(e) => onPatch({ username: e.target.value })}
-          />
-        )}
-        {row(
-          t('connect.password'),
-          `${id}-pw`,
-          <PasswordInput
-            id={`${id}-pw`}
-            value={draft.password}
-            disabled={disabled}
-            onChange={(password) => onPatch({ password })}
-          />
+      <div className="flex flex-col gap-1.5">
+        <div className="grid grid-cols-2 gap-[14px]">
+          {row(
+            t('connect.username'),
+            `${id}-user`,
+            <input
+              id={`${id}-user`}
+              value={draft.username}
+              disabled={disabled}
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="anonymous"
+              className={inputCls}
+              onChange={(e) => onPatch({ username: e.target.value })}
+            />
+          )}
+          {row(
+            t('connect.password'),
+            `${id}-pw`,
+            <div className="flex flex-col items-start gap-1">
+              {/* 저장된 비밀번호는 렌더러에 없다. 칸은 비워 두고 자리표시로만 알린다(E10). */}
+              <PasswordInput
+                id={`${id}-pw`}
+                value={draft.password}
+                disabled={disabled}
+                placeholder={draft.savedPassword ? t('connect.savedPassword') : undefined}
+                onChange={(password) => onPatch({ password })}
+                className="w-full"
+              />
+              {draft.savedPassword && (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onPatch({ savedPassword: false })}
+                  className="text-[11.5px] text-gray-500 hover:text-red-600 hover:underline disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {t('connect.removeSavedPassword')}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        {passwordWarning && (
+          <p className="flex items-start gap-1.5 text-xs text-amber-700">
+            <ShieldAlert size={13} strokeWidth={STROKE} className="mt-px shrink-0" />
+            {passwordWarning}
+          </p>
         )}
       </div>
       <Switch

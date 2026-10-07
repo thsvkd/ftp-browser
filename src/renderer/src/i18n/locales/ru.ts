@@ -41,6 +41,10 @@ export const ru = {
   'connect.password': 'Пароль',
   'connect.showPassword': 'Показать пароль',
   'connect.hidePassword': 'Скрыть пароль',
+  'connect.savedPassword': 'Сохранённый пароль',
+  'connect.removeSavedPassword': 'Удалить сохранённый пароль',
+  'connect.savedPasswordUnreadable':
+    'Не удаётся прочитать сохранённый пароль на этом компьютере. Введите его ещё раз.',
   'connect.secure': 'Использовать FTPS (TLS)',
   'connect.failed': 'Не удалось подключиться. Проверьте данные для входа и повторите попытку.',
   'connect.connectingTo': 'Подключение к серверу {{name}}…',
@@ -86,6 +90,10 @@ export const ru = {
   'servers.invalidPort': 'Введите порт от 1 до 65535.',
   'servers.invalidMaxTransfers': 'Введите число передач от 1 до 20.',
   'servers.tlsBadge': 'Используется FTPS (TLS)',
+  'servers.passwordProtectionBasic':
+    'Нет системного хранилища ключей: сохранённые пароли лишь скрыты от прямого чтения, но не защищены.',
+  'servers.passwordProtectionNone':
+    'Сохранённые пароли хранятся на этом компьютере в виде обычного текста.',
 
   'status.disconnected': 'Нет подключения',
   'status.connecting': 'Подключение…',

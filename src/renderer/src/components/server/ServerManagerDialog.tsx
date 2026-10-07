@@ -17,7 +17,12 @@ import {
   type ServerDraft
 } from '@renderer/lib/serverAddress'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
-import { isValidMaxTransfers, type FtpServer, type RecentPath } from '@shared/types/ftp'
+import {
+  isValidMaxTransfers,
+  type FtpServer,
+  type PasswordProtection,
+  type RecentPath
+} from '@shared/types/ftp'
 import { ServerForm } from './ServerForm'
 import { ErrorNote, ServerAvatar, Spinner, TlsBadge } from './serverUi'
 import { STROKE, arrowIndex, btn, inputCls, onEnterEsc, selectedCls } from './styles'
@@ -52,6 +57,7 @@ export function ServerManagerDialog({
   const [draft, setDraft] = useState<ServerDraft>(initial)
   const [recent, setRecent] = useState<RecentPath[]>([])
   const [saveError, setSaveError] = useState('')
+  const [protection, setProtection] = useState<PasswordProtection['level']>()
   const listRef = useRef<HTMLDivElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   // 렌더 중에 읽어야 autoFocus가 옮기기 전의 포커스(연 버튼)를 잡는다.
@@ -82,6 +88,24 @@ export function ServerManagerDialog({
       stale = true
     }
   }, [selHost, selPort])
+
+  // 저장된 비밀번호를 이 컴퓨터가 얼마나 보호하는지 묻는다. 묻지 못하면 경고 없이 둔다(E11).
+  useEffect(() => {
+    window.api
+      .invoke<IpcResult<PasswordProtection>>('ftp:getPasswordProtection')
+      .then((result) => {
+        if (result.success) setProtection(result.data.level)
+      })
+      .catch((err: unknown) =>
+        console.warn('[ServerManager] Failed to read the password protection:', err)
+      )
+  }, [])
+  const passwordWarning =
+    protection === 'basic'
+      ? t('servers.passwordProtectionBasic')
+      : protection === 'none'
+        ? t('servers.passwordProtectionNone')
+        : undefined
 
   // 저장된 서버로 열리면 목록에 포커스를 둬 ↑/↓·Delete가 바로 먹게 한다.
   // 닫히면 연 쪽으로 포커스를 돌려준다(ConfirmDialog와 같은 방식).
@@ -369,6 +393,7 @@ export function ServerManagerDialog({
                 recent={recent}
                 disabled={connecting}
                 autoFocusHost={selId === 'new' && initial.id === undefined}
+                passwordWarning={passwordWarning}
               />
             </div>
             {error && (

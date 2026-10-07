@@ -37,6 +37,10 @@ export const it = {
   'connect.password': 'Password',
   'connect.showPassword': 'Mostra password',
   'connect.hidePassword': 'Nascondi password',
+  'connect.savedPassword': 'Password salvata',
+  'connect.removeSavedPassword': 'Rimuovi la password salvata',
+  'connect.savedPasswordUnreadable':
+    'Impossibile leggere la password salvata su questo computer. Inseriscila di nuovo.',
   'connect.secure': 'Usa FTPS (TLS)',
   'connect.failed': 'Impossibile connettersi. Controlla i dati di accesso e riprova.',
   'connect.connectingTo': 'Connessione a {{name}} in corso…',
@@ -81,6 +85,10 @@ export const it = {
   'servers.invalidPort': 'Inserisci una porta da 1 a 65535.',
   'servers.invalidMaxTransfers': 'Inserisci un numero di trasferimenti da 1 a 20.',
   'servers.tlsBadge': 'Usa FTPS (TLS)',
+  'servers.passwordProtectionBasic':
+    'Nessun portachiavi di sistema: le password salvate sono solo offuscate, non protette.',
+  'servers.passwordProtectionNone':
+    'Le password salvate sono memorizzate come testo normale su questo computer.',
 
   'status.disconnected': 'Disconnesso',
   'status.connecting': 'Connessione in corso…',

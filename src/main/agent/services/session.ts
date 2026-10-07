@@ -2,6 +2,7 @@ import {
   deleteServer,
   getRecentPaths,
   getServerById,
+  KEEP_PASSWORD,
   listServers,
   recordConnection
 } from '../../db/servers'
@@ -71,10 +72,10 @@ export function createServersService({
 }
 
 export function createSessionService(
-  deps: Pick<AgentServiceDeps, 'db' | 'ftp' | 'queue' | 'operations' | 'events'>,
+  deps: Pick<AgentServiceDeps, 'db' | 'ftp' | 'queue' | 'operations' | 'events' | 'passwords'>,
   servers: AgentServices['servers']
 ): AgentServices['session'] {
-  const { db, ftp, queue, operations, events } = deps
+  const { db, ftp, queue, operations, events, passwords } = deps
 
   // T1·§9 R8: 서버를 바꾸거나 끊으면 진행 중인 전송·작업이 끊기거나 엉뚱한 서버로 간다
   const isBusy = (): boolean =>
@@ -108,6 +109,8 @@ export function createSessionService(
       const wanted = requestedPath === undefined ? undefined : checkRemotePath(requestedPath)
       refuseIfBusy('connecting')
       const server = getServerById(db, servers.resolve(ref).id)!
+      // 저장된 비밀번호는 main 안에서만 푼다(E13). 풀 수 없으면 연결하지 않는다.
+      const password = await passwords.reveal(server.id!)
       // 저장된 서버를 저장된 계정으로 연결하므로 id를 보낸다(GUI의 sameAccount와 같다)
       const payload: FtpConnectPayload = {
         id: server.id,
@@ -115,7 +118,7 @@ export function createSessionService(
         host: server.host,
         port: server.port,
         user: server.username || 'anonymous',
-        password: server.password || 'anonymous@',
+        password: password || 'anonymous@',
         secure: server.secure,
         maxTransfers: server.maxTransfers
       }
@@ -126,7 +129,8 @@ export function createSessionService(
         )
       }
       try {
-        recordConnection(db, payload)
+        // 저장된 비밀번호로 연결했으므로 그대로 둔다
+        recordConnection(db, payload, KEEP_PASSWORD)
       } catch (err) {
         // ftp:connect와 같이 저장 실패로 연결을 실패시키지 않는다
         console.warn('[agent] Failed to persist server info:', err)

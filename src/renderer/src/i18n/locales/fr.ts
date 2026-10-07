@@ -37,6 +37,10 @@ export const fr = {
   'connect.password': 'Mot de passe',
   'connect.showPassword': 'Afficher le mot de passe',
   'connect.hidePassword': 'Masquer le mot de passe',
+  'connect.savedPassword': 'Mot de passe enregistré',
+  'connect.removeSavedPassword': 'Supprimer le mot de passe enregistré',
+  'connect.savedPasswordUnreadable':
+    'Le mot de passe enregistré ne peut pas être lu sur cet ordinateur. Saisissez-le à nouveau.',
   'connect.secure': 'Utiliser FTPS (TLS)',
   'connect.failed':
     'Impossible de se connecter. Vérifiez vos informations de connexion, puis réessayez.',
@@ -82,6 +86,10 @@ export const fr = {
   'servers.invalidPort': 'Saisissez un port compris entre 1 et 65535.',
   'servers.invalidMaxTransfers': 'Saisissez un nombre de transferts compris entre 1 et 20.',
   'servers.tlsBadge': 'Utilise FTPS (TLS)',
+  'servers.passwordProtectionBasic':
+    'Aucun trousseau système : les mots de passe enregistrés sont seulement masqués, pas protégés.',
+  'servers.passwordProtectionNone':
+    'Les mots de passe enregistrés sont stockés en texte brut sur cet ordinateur.',
 
   'status.disconnected': 'Déconnecté',
   'status.connecting': 'Connexion…',

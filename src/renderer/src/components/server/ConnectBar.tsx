@@ -248,7 +248,8 @@ export function ConnectBar(): React.JSX.Element {
             <PasswordInput
               value={draft.password}
               disabled={connecting}
-              placeholder={t('connect.password')}
+              // 저장된 비밀번호는 렌더러에 없다. 칸은 비워 두고 자리표시로만 알린다(E10).
+              placeholder={draft.savedPassword ? t('connect.savedPassword') : t('connect.password')}
               onChange={(password) => patch({ password })}
               className="w-[118px] border-l border-gray-200"
               inputClassName={cn(BARE, 'bg-transparent text-[12.5px]')}

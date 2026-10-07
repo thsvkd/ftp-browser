@@ -1,7 +1,8 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { app, shell, BrowserWindow, safeStorage } from 'electron'
 import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
 import { initDatabase } from './db/database'
+import { createPasswordVault } from './db/passwordVault'
 import { registerFtpHandlers } from './ipc/ftpHandlers'
 import { registerLocalFsHandlers } from './ipc/localFsHandlers'
 import { registerOperationHandlers } from './ipc/operationHandlers'
@@ -127,10 +128,21 @@ app.whenReady().then(() => {
   applyApplicationMenu(process.platform)
   const win = createWindow()
   const db = initDatabase()
+  // 저장된 비밀번호는 safeStorage 비동기 API로 암호화한다(앱 ready 뒤에만 쓸 수 있다).
+  // 예전 평문 행은 백그라운드에서 옮기고, 실패한 행은 평문 그대로 남는다(E4·E5).
+  const passwords = createPasswordVault(db, safeStorage)
+  void passwords.migrate().then(
+    ({ migrated, failed }) => {
+      if (migrated > 0 || failed > 0) {
+        console.log(`[passwords] Encrypted ${migrated} saved password(s), ${failed} failed`)
+      }
+    },
+    (err) => console.error('[passwords] Saved-password migration failed:', err)
+  )
 
   // Register IPC handlers
   const operationManager = registerOperationHandlers(win)
-  const { manager, fileOps } = registerFtpHandlers(win, operationManager)
+  const { manager, fileOps } = registerFtpHandlers(win, operationManager, passwords)
   const localFs = registerLocalFsHandlers(win, operationManager)
   const transferQueue = registerTransferHandlers(win, fileOps, manager)
   const { cacheManager, generator } = registerThumbnailHandlers(win, db, manager)
@@ -151,7 +163,8 @@ app.whenReady().then(() => {
     queue: transferQueue,
     operations: operationManager,
     localFs,
-    events: agentEvents
+    events: agentEvents,
+    passwords
   })
   const agentPolicy = new AgentPolicyStore(db)
   const confirmations = new ConfirmationBroker(getWindow)

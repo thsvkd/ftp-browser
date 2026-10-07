@@ -5,7 +5,8 @@ import type {
   FtpConnectionState,
   ConnectionStatus
 } from '@shared/types/ftp'
-import type { IpcResult } from '@shared/types/ipc'
+import { ErrorCode, type IpcResult } from '@shared/types/ipc'
+import { t } from '@renderer/i18n'
 
 interface FtpListData {
   path: string
@@ -100,7 +101,13 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
       }
       return true
     }
-    set({ error: result.error })
+    // 저장된 비밀번호를 이 컴퓨터에서 풀 수 없으면 다시 입력하라고 알린다(E12).
+    set({
+      error:
+        result.code === ErrorCode.SAVED_PASSWORD_UNREADABLE
+          ? t('connect.savedPasswordUnreadable')
+          : result.error
+    })
     return false
   },
 

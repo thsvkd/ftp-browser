@@ -5,6 +5,7 @@ import type { TransferQueue } from '../../transfer/TransferQueue'
 import type { OperationManager } from '../../operation/OperationManager'
 import type { LocalFileSystem } from '../../local/LocalFileSystem'
 import type { AgentEventSink } from '../events'
+import type { PasswordVault } from '../../db/passwordVault'
 import type { AgentServices } from '../types'
 import type { TransferUpdate } from '@shared/types/transfer'
 import type { OperationJob } from '@shared/types/operation'
@@ -56,6 +57,8 @@ export interface AgentServiceDeps {
   localFs: Pick<LocalFileSystem, 'list' | 'mkdir' | 'rename' | 'delete' | 'collectFiles'>
   /** local:changed(G2), agent:session(G3). ftp:remoteChanged는 attachRemoteChangeForwarding이 맡는다. */
   events: Pick<AgentEventSink, 'localChanged' | 'session'>
+  /** 저장된 비밀번호를 연결할 때만 main 안에서 푼다(saved-password-encryption E13) */
+  passwords: Pick<PasswordVault, 'reveal'>
   /** 로컬 파일 이름 규칙(toLocalFileName). 기본은 process.platform. */
   platform?: string
 }

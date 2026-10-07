@@ -13,6 +13,9 @@ export function initDatabase(): Database.Database {
 
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  // 지우거나 바꾼 행이 페이지에 남긴 바이트를 0으로 덮는다. 평문 비밀번호를 암호문으로 바꾼 뒤
+  // 옛 값이 파일에 남지 않게 한다(docs/handoff/saved-password-encryption.md Test-717).
+  db.pragma('secure_delete = FAST')
 
   // Run migrations
   const migrationPath = path.join(__dirname, 'migrations', '001_initial.sql')
@@ -170,6 +173,26 @@ export function initDatabase(): Database.Database {
     // item_count 캐시와 달리 이 컬럼이 없으면 서버 목록을 읽지 못하므로 에러로 남긴다
     if (!String(err).includes('duplicate column name')) {
       console.error('[database] Failed to add servers.max_transfers column:', err)
+    }
+  }
+
+  // 003: 저장된 비밀번호의 암호문(safeStorage). password_enc는 예전 평문 전용으로 남고, 평문은
+  // 시작할 때 passwordVault.migrate가 옮긴다. 새 DB도 001의 CREATE TABLE 뒤에 이 ALTER로 컬럼을 얻는다.
+  let serverPasswordCipherSql: string
+  try {
+    serverPasswordCipherSql = fs.readFileSync(
+      path.join(__dirname, 'migrations', '003_server_password_cipher.sql'),
+      'utf-8'
+    )
+  } catch {
+    serverPasswordCipherSql = 'ALTER TABLE servers ADD COLUMN password_cipher BLOB'
+  }
+  try {
+    db.exec(serverPasswordCipherSql)
+  } catch (err) {
+    // 이 컬럼이 없으면 서버 목록을 읽지 못하므로 에러로 남긴다
+    if (!String(err).includes('duplicate column name')) {
+      console.error('[database] Failed to add servers.password_cipher column:', err)
     }
   }
 
