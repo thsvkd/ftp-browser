@@ -84,6 +84,7 @@ export const ko = {
   'servers.passwordProtectionBasic':
     '시스템 키링이 없습니다. 저장된 비밀번호는 알아보기 어렵게만 바뀔 뿐 보호되지 않습니다.',
   'servers.passwordProtectionNone': '저장된 비밀번호는 이 컴퓨터에 일반 텍스트로 저장됩니다.',
+  'servers.passwordAddressChanged': '새 주소에 쓸 비밀번호를 다시 입력하거나 지우세요.',
 
   'status.disconnected': '연결 안 됨',
   'status.connecting': '연결 중…',

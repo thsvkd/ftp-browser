@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { emptyDraft, toDraft } from '@renderer/lib/serverAddress'
 import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
+import { ErrorCode } from '@shared/types/ipc'
 import type { FtpServer, FtpServerInput, PasswordProtection } from '@shared/types/ftp'
 import { ServerManagerDialog } from './ServerManagerDialog'
 
@@ -231,5 +232,76 @@ describe('ServerManagerDialog — saved password', () => {
     )
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(screen.queryByText(warnings)).toBeNull()
+  })
+
+  const MOVED_HINT = 'Enter the password again for the new address, or remove it.'
+
+  it('asks for the password again before moving a saved server to another address', async () => {
+    // covers: Test-742
+    const user = userEvent.setup()
+    const { unmount } = render(<ServerManagerDialog initial={toDraft(LOCKED)} onClose={vi.fn()} />)
+    const host = (): HTMLInputElement => screen.getByLabelText('Host') as HTMLInputElement
+
+    // 별칭·사용자·FTPS, 대소문자만 바뀐 호스트는 같은 주소다: 저장된 비밀번호를 그대로 쓴다
+    await user.type(screen.getByLabelText(/^Name/), ' 2')
+    await user.type(screen.getByLabelText('Username'), 'x')
+    await user.click(screen.getByRole('switch'))
+    await user.clear(host())
+    await user.type(host(), 'NAS.Local')
+    expect(screen.queryByText(MOVED_HINT)).toBeNull()
+
+    // 다른 호스트: 비밀번호 칸 아래에 알리고, 저장도 연결도 하지 않는다
+    await user.clear(host())
+    await user.type(host(), 'moved.local')
+    expect(screen.getByText(MOVED_HINT)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect((await screen.findByRole('alert')).textContent).toContain(MOVED_HINT)
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(invokeCalls(mockInvoke, 'ftp:saveServer')).toHaveLength(0)
+    expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(0)
+
+    // 비밀번호를 다시 입력하면 그 비밀번호로 옮긴다
+    await user.type(passwordField(), 'new-pw')
+    expect(screen.queryByText(MOVED_HINT)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:saveServer')).toHaveLength(1))
+    expect(savePayload(0)).toMatchObject({ id: 1, host: 'moved.local', password: 'new-pw' })
+    unmount()
+
+    // 다른 포트: 저장된 비밀번호를 지우면 비밀번호 없이 옮긴다
+    render(<ServerManagerDialog initial={toDraft(LOCKED)} onClose={vi.fn()} />)
+    await user.clear(screen.getByLabelText('Port'))
+    await user.type(screen.getByLabelText('Port'), '2121')
+    expect(screen.getByText(MOVED_HINT)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Remove saved password' }))
+    expect(screen.queryByText(MOVED_HINT)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:saveServer')).toHaveLength(2))
+    expect(savePayload(1)).toMatchObject({ id: 1, port: 2121, password: '' })
+  })
+
+  it('explains in the current language when main refuses to move a saved password', async () => {
+    // covers: Test-743
+    const fallback = mockInvoke.getMockImplementation()!
+    mockInvoke.mockImplementation((channel: string, ...args: unknown[]) =>
+      channel === 'ftp:saveServer'
+        ? Promise.resolve({
+            success: false,
+            error: 'refused by main',
+            code: ErrorCode.SAVED_PASSWORD_ADDRESS_CHANGED
+          })
+        : fallback(channel, ...args)
+    )
+    const user = userEvent.setup()
+    render(<ServerManagerDialog initial={toDraft(LOCKED)} onClose={vi.fn()} />)
+
+    // 렌더러가 아는 주소는 그대로지만(예: 목록이 오래됨) main이 거절한다
+    await user.type(screen.getByLabelText(/^Name/), ' 2')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain(MOVED_HINT)
+    expect(alert.textContent).not.toContain('refused by main')
+    expect(invokeCalls(mockInvoke, 'ftp:saveServer')).toHaveLength(1)
   })
 })

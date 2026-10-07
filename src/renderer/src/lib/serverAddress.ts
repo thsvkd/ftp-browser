@@ -258,6 +258,20 @@ export function resolveDraft(d: ServerDraft): {
   }
 }
 
+/**
+ * True when the draft moves saved server `s` to another address (host case aside) while still
+ * relying on its saved password. A saved password stays with the address it was saved for, so the
+ * user must type the password again or remove it (docs/handoff/saved-password-encryption.md E16).
+ */
+export function movesSavedPassword(d: ServerDraft, s: FtpServer): boolean {
+  const { server } = resolveDraft(d)
+  return (
+    d.savedPassword &&
+    !server.password &&
+    (!sameHost(server.host, s.host) || server.port !== s.port)
+  )
+}
+
 /** The address text with the password taken out of `user:password@`, so it never stays on screen. */
 export function stripPassword(text: string): string {
   const info = splitUserinfo(text)

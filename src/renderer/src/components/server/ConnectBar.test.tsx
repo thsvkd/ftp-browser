@@ -4,6 +4,7 @@ import { act, render, screen, cleanup, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { emptyDraft } from '@renderer/lib/serverAddress'
 import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
 import { Toolbar } from '@renderer/components/layout/Toolbar'
@@ -356,8 +357,9 @@ describe('regressions — address and saved accounts', () => {
 describe('saved password — toolbar', () => {
   const draft = (): ReturnType<typeof useServerStore.getState>['draft'] =>
     useServerStore.getState().draft
+  // 툴바의 비밀번호 칸은 저장된 비밀번호를 쓰는 동안 이름이 "Saved password"다(E20)
   const passwordField = (): HTMLInputElement =>
-    screen.getByLabelText('Password', { selector: 'input' }) as HTMLInputElement
+    screen.getByLabelText(/^(Saved password|Password)$/, { selector: 'input' }) as HTMLInputElement
 
   it('carries the saved password only to the saved account, never to a typed one', () => {
     // covers: Test-721
@@ -416,7 +418,7 @@ describe('saved password — toolbar', () => {
     await savedButton()
 
     expect(passwordField().value).toBe('')
-    expect(passwordField().placeholder).toBe('Saved password')
+    expect(passwordField().title).toBe('Saved password')
     await user.type(passwordField(), 'typed')
     expect(passwordField().value).toBe('typed')
     await user.clear(passwordField())
@@ -452,6 +454,49 @@ describe('saved password — toolbar', () => {
     expect(draft()).toMatchObject({ username: 'alice', savedPassword: false })
     await user.click(within(dialog).getByRole('button', { name: 'Close' }))
     expect(passwordField().placeholder).toBe('Password')
+    expect(passwordField().title).toBe('')
+  })
+
+  it('fits a language-neutral placeholder in the toolbar and names the field "Saved password"', async () => {
+    // covers: Test-744
+    mockIpc([ALICE, { ...NAS, id: 2, host: 'open.local', username: 'bob' }])
+    const user = userEvent.setup()
+    renderToolbar()
+    await savedButton()
+
+    // 좁은 툴바 칸에는 점만 두고, 현지화된 "저장된 비밀번호"는 이름·툴팁으로 알린다
+    const field = screen.getByLabelText('Saved password', { selector: 'input' }) as HTMLInputElement
+    expect(field.placeholder).toBe('••••••••')
+    expect(field.title).toBe('Saved password')
+    expect(field.value).toBe('')
+
+    // 편집기는 넓으니 현지화된 자리표시를 그대로 둔다
+    await user.click(screen.getByRole('button', { name: 'Server manager' }))
+    const dialog = screen.getByRole('dialog', { name: 'Server manager' })
+    expect((within(dialog).getByLabelText('Password') as HTMLInputElement).placeholder).toBe(
+      'Saved password'
+    )
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }))
+
+    try {
+      act(() => useSettingsStore.setState({ language: 'de' }))
+      const de = screen.getByLabelText('Gespeichertes Passwort', {
+        selector: 'input'
+      }) as HTMLInputElement
+      expect(de).toBe(field)
+      expect(de.placeholder).toBe('••••••••')
+      expect(de.title).toBe('Gespeichertes Passwort')
+    } finally {
+      act(() => useSettingsStore.setState({ language: 'system' }))
+    }
+
+    // 저장된 비밀번호가 없는 서버는 예전처럼 "Password"
+    act(() => useServerStore.getState().setAddress('bob@open.local'))
+    const plain = (await screen.findByLabelText('Password', {
+      selector: 'input'
+    })) as HTMLInputElement
+    expect(plain.placeholder).toBe('Password')
+    expect(plain.title).toBe('')
   })
 
   it('asks to enter the password again when this computer cannot read the saved one', async () => {
@@ -478,7 +523,7 @@ describe('saved password — toolbar', () => {
     // 다른 것은 지우지 않는다: 툴바는 그대로 저장된 서버와 그 비밀번호를 가리킨다.
     expect(addressInput().value).toBe('alice@nas.local:21')
     expect(draft()).toMatchObject({ id: 1, username: 'alice', savedPassword: true })
-    expect(passwordField().placeholder).toBe('Saved password')
+    expect(passwordField().title).toBe('Saved password')
   })
 })
 

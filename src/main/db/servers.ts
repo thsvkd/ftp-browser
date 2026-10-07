@@ -74,6 +74,7 @@ const isValidPort = (port: number): boolean => Number.isInteger(port) && port >=
  * - `id`가 없으면 새로 만든다. 같은 주소의 서버가 이미 있으면 덮어쓰지 않고 거절한다.
  * 호스트는 대소문자를 가리지 않고 비교한다(예전 행에는 'NAS.local'처럼 대문자가 남아 있다).
  * 비밀번호는 `password`대로 쓴다. 돌려주는 서버에는 저장 여부(`hasPassword`)만 있다.
+ * 저장된 비밀번호를 그대로 둔 채(`keep`) 주소를 옮기려 하면 거절한다(E16).
  */
 export function saveServer(
   db: Database.Database,
@@ -96,9 +97,11 @@ export function saveServer(
     const old =
       server.id === undefined
         ? undefined
-        : (db.prepare('SELECT host, port FROM servers WHERE id = ?').get(server.id) as
-            | { host: string; port: number }
-            | undefined)
+        : (db
+            .prepare(
+              `SELECT host, port, ${HAS_PASSWORD_SQL} AS has_password FROM servers WHERE id = ?`
+            )
+            .get(server.id) as { host: string; port: number; has_password: number } | undefined)
     if (server.id !== undefined && !old) {
       throw new ServerSaveError(ErrorCode.SERVER_NOT_FOUND, 'This server is no longer saved.')
     }
@@ -114,6 +117,13 @@ export function saveServer(
         throw new ServerSaveError(
           ErrorCode.SERVER_EXISTS,
           `Another saved server already uses ${host}:${server.port}.`
+        )
+      }
+      // 저장된 비밀번호는 저장한 주소에만 쓴다(E15). 주소를 옮기면서 그대로 두면 다른 서버로 간다(E16).
+      if (old?.has_password === 1 && password.kind === 'keep') {
+        throw new ServerSaveError(
+          ErrorCode.SAVED_PASSWORD_ADDRESS_CHANGED,
+          'Enter the password again for the new address, or remove it.'
         )
       }
     }
@@ -250,6 +260,47 @@ export function getStoredPassword(
   return db
     .prepare('SELECT password_cipher AS cipher, password_enc AS plain FROM servers WHERE id = ?')
     .get(id) as { cipher: Buffer | null; plain: string | null } | undefined
+}
+
+const loginUser = (user: string | null): string =>
+  !user?.trim() || /^anonymous$/i.test(user.trim()) ? '' : user
+
+/**
+ * 이 로그인이 서버 `id`에 저장된 주소·계정과 같은지(E15). 저장된 비밀번호는 그때만 쓴다.
+ * 호스트는 앞뒤 공백·대소문자를 가리지 않고, 사용자 ''와 'anonymous'(대소문자 무관)는 같은 익명이다.
+ * FTPS 여부는 보지 않는다(사용자가 일부러 끌 수 있다). 없는 id면 false.
+ */
+export function isSavedLogin(
+  db: Database.Database,
+  id: number,
+  login: Pick<FtpConnectPayload, 'host' | 'port' | 'user'>
+): boolean {
+  const row = savedAddress(db, id, login)
+  return row !== undefined && loginUser(row.username) === loginUser(login.user)
+}
+
+/** 서버 `id`가 이 주소(호스트 대소문자·공백 무시, 포트)에 저장된 서버인지. 그 서버의 로그인만 갱신한다(E15). */
+export function isSavedAddress(
+  db: Database.Database,
+  id: number,
+  address: Pick<FtpConnectPayload, 'host' | 'port'>
+): boolean {
+  return savedAddress(db, id, address) !== undefined
+}
+
+function savedAddress(
+  db: Database.Database,
+  id: number,
+  address: Pick<FtpConnectPayload, 'host' | 'port'>
+): { username: string | null } | undefined {
+  const row = db.prepare('SELECT host, port, username FROM servers WHERE id = ?').get(id) as
+    | { host: string; port: number; username: string | null }
+    | undefined
+  return row &&
+    row.host.trim().toLowerCase() === address.host.trim().toLowerCase() &&
+    row.port === address.port
+    ? row
+    : undefined
 }
 
 /** 아직 암호화하지 않은 예전 평문 비밀번호(E4) */

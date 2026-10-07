@@ -90,6 +90,7 @@ export const en = {
   'servers.passwordProtectionBasic':
     'No system keyring: saved passwords are only obscured, not protected.',
   'servers.passwordProtectionNone': 'Saved passwords are stored as plain text on this computer.',
+  'servers.passwordAddressChanged': 'Enter the password again for the new address, or remove it.',
 
   'status.disconnected': 'Disconnected',
   'status.connecting': 'Connecting…',

@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import Database from 'better-sqlite3'
 import { createPasswordVault } from './passwordVault'
-import { recordConnection, saveServer } from './servers'
+import { deleteServer, recordConnection, saveServer } from './servers'
 import { FakeCipher, fakeCipherOf } from './__fixtures__/fakeCipher'
 
 vi.mock('electron', () => ({
@@ -374,5 +374,153 @@ describe('initDatabase cache.db', () => {
     expect(await vault.migrate()).toEqual({ migrated: 0, failed: 0 })
     expect(exec.mock.calls.some(([sql]) => /vacuum/i.test(sql))).toBe(false)
     expect(await vault.reveal(1)).toBe(KEPT)
+  })
+
+  /** 예전 앱이 평문으로 저장한 cache.db. `scrubbed`면 예전 실행이 이미 파일을 다시 썼다고 적어 둔다. */
+  function seedLegacy(passwords: string[], scrubbed: boolean): void {
+    const seed = new Database(path.join(userData, 'cache.db'))
+    seed.exec(`
+      CREATE TABLE servers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        host TEXT NOT NULL,
+        port INTEGER NOT NULL DEFAULT 21,
+        username TEXT,
+        password_enc TEXT,
+        secure INTEGER NOT NULL DEFAULT 0,
+        last_connected TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    `)
+    const insert = seed.prepare(
+      'INSERT INTO servers (name, host, port, username, password_enc) VALUES (?, ?, ?, ?, ?)'
+    )
+    passwords.forEach((password, i) =>
+      insert.run(`old${i}`, `legacy${i}.example`, 21, 'me', password)
+    )
+    if (scrubbed) {
+      seed.prepare("INSERT INTO settings (key, value) VALUES ('passwordsScrubbed', '1')").run()
+    }
+    seed.close()
+  }
+
+  /** `secrets` 중 cache.db·-wal·-shm 어딘가에 평문으로 있는 것. `only`면 그 파일만 본다. */
+  function residue(secrets: string[], only?: string): string[] {
+    const files = fs
+      .readdirSync(userData)
+      .filter((file) => (only ? file === only : file.startsWith('cache.db')))
+      .map((file) => fs.readFileSync(path.join(userData, file)))
+    return secrets.filter((secret) => files.some((bytes) => bytes.includes(secret)))
+  }
+
+  const scrubbedFlag = (): unknown =>
+    opened!.prepare("SELECT value FROM settings WHERE key = 'passwordsScrubbed'").get()
+  const vacuumed = (exec: { mock: { calls: unknown[][] } }): boolean =>
+    exec.mock.calls.some(([sql]) => /vacuum/i.test(String(sql)))
+
+  const LEGACY = [
+    'Legacy-Plain-Secret-73x-a',
+    'Legacy-Plain-Secret-73x-b',
+    'Legacy-Plain-Secret-73x-c'
+  ]
+
+  it('rewrites the file only once encryption works, so passwords deleted before that are scrubbed too', async () => {
+    // covers: Test-735
+    opened = (await loadInitDatabase())()
+    const cipher = new FakeCipher({ backend: 'basic_text' })
+    cipher.available = false
+    const vault = createPasswordVault(opened, cipher)
+    const exec = vi.spyOn(opened, 'exec')
+
+    // 암호화를 쓸 수 없으면 옮길 것이 없어도 파일을 다시 쓴 것으로 적지 않는다
+    expect(await vault.migrate()).toEqual({ migrated: 0, failed: 0 })
+    expect(vacuumed(exec)).toBe(false)
+    expect(scrubbedFlag()).toBeUndefined()
+
+    // 그동안 저장한 비밀번호는 평문이고, 지운 서버의 것은 빈 페이지(freelist)에 평문으로 남는다
+    const KEPT = 'Kept-Plain-Secret-735'
+    const deleted = Array.from({ length: 300 }, (_, i) => `Deleted-Plain-Secret-735-${i}`)
+    for (const [i, password] of deleted.entries()) {
+      const { id } = saveServer(
+        opened,
+        { name: '', host: `gone${i}.example`, port: 21, username: 'me', secure: false },
+        await vault.toWrite(password)
+      )
+      deleteServer(opened, id!)
+    }
+    const kept = saveServer(
+      opened,
+      { name: '', host: 'kept.example', port: 21, username: 'me', secure: false },
+      await vault.toWrite(KEPT)
+    )
+    expect(residue([KEPT, ...deleted]).length).toBeGreaterThan(1)
+
+    // 암호화를 쓸 수 있게 된 첫 실행이 옮기고 한 번 다시 쓴다
+    cipher.available = true
+    expect(await vault.migrate()).toEqual({ migrated: 1, failed: 0 })
+    expect(vacuumed(exec)).toBe(true)
+    expect(scrubbedFlag()).toEqual({ value: '1' })
+    expect(residue([KEPT, ...deleted])).toEqual([])
+    expect(await vault.reveal(kept.id!)).toBe(KEPT)
+  })
+
+  it('still empties the WAL after migrating when rewriting the file fails, and retries the rewrite next time', async () => {
+    // covers: Test-736
+    seedLegacy(LEGACY, false)
+    opened = (await loadInitDatabase())()
+    const vault = createPasswordVault(opened, new FakeCipher({ backend: 'basic_text' }))
+    const exec = opened.exec.bind(opened)
+    vi.spyOn(opened, 'exec').mockImplementation((sql: string) => {
+      if (/vacuum/i.test(sql)) throw new Error('database or disk is full')
+      return exec(sql)
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      expect(await vault.migrate()).toEqual({ migrated: LEGACY.length, failed: 0 })
+
+      expect(warn).toHaveBeenCalledWith(
+        '[passwordVault] Failed to rewrite the database file:',
+        expect.any(Error)
+      )
+      // 행마다 커밋한 WAL 프레임에는 아직 옮기지 않은 행의 평문이 있다. VACUUM이 실패해도 비운다.
+      expect(residue(LEGACY, 'cache.db-wal')).toEqual([])
+      expect(scrubbedFlag()).toBeUndefined()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('zeroes the plain text a migration replaces when the file is not rewritten again', async () => {
+    // covers: Test-737
+    // 예전 실행이 이미 파일을 다시 썼으면(passwordsScrubbed) VACUUM 없이 행만 바꾼다. 바뀐 행이 페이지에
+    // 남긴 옛 평문은 secure_delete가 지워야 한다.
+    seedLegacy(LEGACY, true)
+    opened = (await loadInitDatabase())()
+    const vault = createPasswordVault(opened, new FakeCipher({ backend: 'basic_text' }))
+    const exec = vi.spyOn(opened, 'exec')
+
+    expect(await vault.migrate()).toEqual({ migrated: LEGACY.length, failed: 0 })
+    expect(vacuumed(exec)).toBe(false)
+
+    // WAL의 새 페이지를 DB 파일에 옮긴 뒤 본다(이 테스트는 마이그레이션의 체크포인트에 기대지 않는다)
+    opened.pragma('wal_checkpoint(TRUNCATE)')
+    expect(residue(LEGACY)).toEqual([])
+    expect(fs.readFileSync(path.join(userData, 'cache.db')).includes(fakeCipherOf(LEGACY[0]))).toBe(
+      true
+    )
+  })
+
+  it('empties the WAL right after a migration that changed rows', async () => {
+    // covers: Test-738
+    seedLegacy(LEGACY, true)
+    opened = (await loadInitDatabase())()
+    const vault = createPasswordVault(opened, new FakeCipher({ backend: 'basic_text' }))
+
+    expect(await vault.migrate()).toEqual({ migrated: LEGACY.length, failed: 0 })
+
+    // 행마다 커밋하므로 WAL 프레임에는 아직 옮기지 않은 행의 평문이 담긴다
+    expect(fs.existsSync(path.join(userData, 'cache.db-wal'))).toBe(true)
+    expect(residue(LEGACY, 'cache.db-wal')).toEqual([])
   })
 })

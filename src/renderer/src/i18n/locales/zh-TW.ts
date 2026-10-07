@@ -81,6 +81,7 @@ export const zhTW = {
   'servers.tlsBadge': '使用 FTPS (TLS)',
   'servers.passwordProtectionBasic': '沒有系統金鑰圈：已儲存的密碼只是經過混淆，並未受到保護。',
   'servers.passwordProtectionNone': '已儲存的密碼以純文字形式存放在這台電腦上。',
+  'servers.passwordAddressChanged': '請為新位址重新輸入密碼，或將其移除。',
 
   'status.disconnected': '未連線',
   'status.connecting': '正在連線…',

@@ -88,6 +88,7 @@ export const ptBR = {
     'Sem chaveiro do sistema: as senhas salvas são apenas ofuscadas, não protegidas.',
   'servers.passwordProtectionNone':
     'As senhas salvas são armazenadas como texto simples neste computador.',
+  'servers.passwordAddressChanged': 'Digite a senha novamente para o novo endereço ou remova-a.',
 
   'status.disconnected': 'Desconectado',
   'status.connecting': 'Conectando…',

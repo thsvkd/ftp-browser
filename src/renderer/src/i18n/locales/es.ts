@@ -90,6 +90,8 @@ export const es = {
     'No hay llavero del sistema: las contraseñas guardadas solo están ocultas, no protegidas.',
   'servers.passwordProtectionNone':
     'Las contraseñas guardadas se almacenan como texto sin formato en este equipo.',
+  'servers.passwordAddressChanged':
+    'Vuelve a escribir la contraseña para la nueva dirección o quítala.',
 
   'status.disconnected': 'Desconectado',
   'status.connecting': 'Conectando…',

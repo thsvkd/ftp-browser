@@ -90,6 +90,8 @@ export const de = {
     'Kein Systemschlüsselbund: Gespeicherte Passwörter sind nur verschleiert, nicht geschützt.',
   'servers.passwordProtectionNone':
     'Gespeicherte Passwörter werden auf diesem Computer als Klartext gespeichert.',
+  'servers.passwordAddressChanged':
+    'Geben Sie das Passwort für die neue Adresse erneut ein oder entfernen Sie es.',
 
   'status.disconnected': 'Getrennt',
   'status.connecting': 'Verbindung wird hergestellt…',

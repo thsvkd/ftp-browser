@@ -9,6 +9,7 @@ import {
   formatLastConnected,
   isValidPort,
   matchServer,
+  movesSavedPassword,
   resolveDraft,
   sameFields,
   serverAddress,
@@ -106,6 +107,11 @@ export function ServerManagerDialog({
       : protection === 'none'
         ? t('servers.passwordProtectionNone')
         : undefined
+  // 저장된 비밀번호는 저장한 주소에만 쓴다. 주소를 바꾸면 다시 입력하거나 지우라고 알린다(E16).
+  const passwordHint =
+    selected && movesSavedPassword(draft, selected)
+      ? t('servers.passwordAddressChanged')
+      : undefined
 
   // 저장된 서버로 열리면 목록에 포커스를 둬 ↑/↓·Delete가 바로 먹게 한다.
   // 닫히면 연 쪽으로 포커스를 돌려준다(ConfirmDialog와 같은 방식).
@@ -157,6 +163,9 @@ export function ServerManagerDialog({
     if (result.code === ErrorCode.SERVER_NOT_FOUND) return t('servers.notFound')
     if (result.code === ErrorCode.INVALID_PORT) return t('servers.invalidPort')
     if (result.code === ErrorCode.INVALID_MAX_TRANSFERS) return t('servers.invalidMaxTransfers')
+    if (result.code === ErrorCode.SAVED_PASSWORD_ADDRESS_CHANGED) {
+      return t('servers.passwordAddressChanged')
+    }
     return result.error
   }
 
@@ -394,6 +403,7 @@ export function ServerManagerDialog({
                 disabled={connecting}
                 autoFocusHost={selId === 'new' && initial.id === undefined}
                 passwordWarning={passwordWarning}
+                passwordHint={passwordHint}
               />
             </div>
             {error && (

@@ -90,6 +90,8 @@ export const fr = {
     'Aucun trousseau système : les mots de passe enregistrés sont seulement masqués, pas protégés.',
   'servers.passwordProtectionNone':
     'Les mots de passe enregistrés sont stockés en texte brut sur cet ordinateur.',
+  'servers.passwordAddressChanged':
+    'Saisissez à nouveau le mot de passe pour la nouvelle adresse, ou supprimez-le.',
 
   'status.disconnected': 'Déconnecté',
   'status.connecting': 'Connexion…',

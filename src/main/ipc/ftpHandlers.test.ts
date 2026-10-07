@@ -221,3 +221,229 @@ describe('ftp:getPasswordProtection', () => {
     })
   })
 })
+
+describe('ftp:connect — a saved password stays with its server', () => {
+  const REFUSED = {
+    success: false,
+    error:
+      'The saved password can only be used for the server it was saved for. Enter the password.'
+  }
+  const rows = (): unknown[] => state.db.prepare('SELECT * FROM servers ORDER BY id').all()
+
+  it('refuses savedPasswordOf for another host, port or user without logging in or saving', async () => {
+    // covers: Test-730
+    const { id } = await save({ ...NAS, password: 'saved-Secret-730' })
+    const before = rows()
+    const decrypt = vi.spyOn(cipher, 'decryptStringAsync')
+
+    for (const other of [
+      // 실제 앱 E2E: 같은 호스트의 다른 포트(다른 서버)로 보내 새 행으로 저장했다
+      { host: 'nas.local', port: 2121, user: 'alice' },
+      { host: 'rogue.example', port: 21, user: 'alice' },
+      { host: 'nas.local', port: 21, user: 'mallory' },
+      { host: 'nas.local', port: 21, user: 'anonymous' }
+    ]) {
+      const result = await invoke('ftp:connect', { ...other, savedPasswordOf: id, secure: false })
+      expect(result, JSON.stringify(other)).toEqual(REFUSED)
+    }
+
+    expect(state.connect).not.toHaveBeenCalled()
+    expect(decrypt).not.toHaveBeenCalled()
+    expect(rows()).toEqual(before)
+  })
+
+  it('refuses another server id to update, and a server that is no longer saved', async () => {
+    // covers: Test-731
+    const a = await save({ ...NAS, password: 'a-Secret-731' })
+    const b = await save({ ...NAS, host: 'b.local', password: 'b-Secret-731' })
+    const gone = await save({ ...NAS, host: 'gone.local', password: 'gone-Secret-731' })
+    state.db.prepare('DELETE FROM servers WHERE id = ?').run(gone.id)
+    const before = rows()
+
+    // B의 주소·계정이지만 갱신할 서버는 A: 성공하면 A의 비밀번호를 B의 것으로 덮었다
+    expect(
+      await invoke('ftp:connect', {
+        id: a.id,
+        savedPasswordOf: b.id,
+        host: 'b.local',
+        port: 21,
+        user: 'alice',
+        secure: false
+      })
+    ).toEqual(REFUSED)
+    // 지운 서버: 'anonymous@'로 로그인해 새 행으로 저장하지 않는다
+    expect(
+      await invoke('ftp:connect', {
+        savedPasswordOf: gone.id,
+        host: 'gone.local',
+        port: 21,
+        user: 'alice',
+        secure: false
+      })
+    ).toEqual(REFUSED)
+
+    expect(state.connect).not.toHaveBeenCalled()
+    expect(rows()).toEqual(before)
+  })
+
+  it('accepts the saved address in any host case, anonymous in any spelling, and FTPS turned off', async () => {
+    // covers: Test-732
+    const { id } = await save({ ...NAS, host: 'NAS.local', secure: true, password: 'nas-Secret' })
+    const anon = await save({ ...NAS, host: 'anon.local', username: '', password: 'anon-Secret' })
+    const before = rows()
+
+    const logins = [
+      // FTPS는 사용자가 일부러 끌 수 있다(남은 위험, 명세 §8)
+      { id, savedPasswordOf: id, host: ' nas.LOCAL ', port: 21, user: 'alice', secure: false },
+      { savedPasswordOf: id, host: 'NAS.local', port: 21, user: 'alice', secure: true },
+      {
+        id: anon.id,
+        savedPasswordOf: anon.id,
+        host: 'anon.local',
+        port: 21,
+        user: 'ANONYMOUS',
+        secure: false
+      }
+    ]
+    for (const login of logins) {
+      expect(await invoke('ftp:connect', login), JSON.stringify(login)).toEqual({
+        success: true,
+        data: undefined
+      })
+    }
+
+    expect(state.connect.mock.calls.map(([config]) => config.password)).toEqual([
+      'nas-Secret',
+      'nas-Secret',
+      'anon-Secret'
+    ])
+    expect(state.connect.mock.calls[0][0]).toMatchObject({ secure: false })
+    const passwordsOf = (all: unknown[]): unknown[] =>
+      (all as Array<{ password_enc: unknown; password_cipher: unknown }>).map((r) => [
+        r.password_enc,
+        r.password_cipher
+      ])
+    expect(passwordsOf(rows())).toEqual(passwordsOf(before))
+  })
+})
+
+describe('ftp:saveServer — a saved password stays with its address', () => {
+  it('refuses to move a server that keeps its saved password to another host or port', async () => {
+    // covers: Test-734
+    // 주소를 옮기면 최근 경로도 따라 옮긴다(initDatabase가 만드는 표)
+    state.db.exec(`CREATE TABLE server_recent_paths (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_host TEXT NOT NULL,
+      server_port INTEGER NOT NULL,
+      path TEXT NOT NULL,
+      last_visited TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(server_host, server_port, path)
+    )`)
+    const { id } = await save({ ...NAS, host: 'NAS.local', password: 'saved-Secret-734' })
+    const rows = (): unknown[] => state.db.prepare('SELECT * FROM servers ORDER BY id').all()
+    const before = rows()
+
+    for (const moved of [{ host: 'other.local' }, { port: 2121 }]) {
+      const result = await invoke<FtpServer>('ftp:saveServer', {
+        ...NAS,
+        host: 'NAS.local',
+        id,
+        ...moved
+      })
+      expect(result, JSON.stringify(moved)).toMatchObject({
+        success: false,
+        code: ErrorCode.SAVED_PASSWORD_ADDRESS_CHANGED
+      })
+    }
+    expect(rows()).toEqual(before)
+
+    // 별칭·사용자·FTPS·동시 전송 수, 대소문자만 다른 호스트는 같은 주소라 비밀번호를 그대로 둔다
+    expect(
+      await save({
+        ...NAS,
+        id,
+        host: 'nas.LOCAL',
+        name: 'Renamed',
+        username: 'bob',
+        secure: true,
+        maxTransfers: 4
+      })
+    ).toMatchObject({ host: 'nas.LOCAL', username: 'bob', hasPassword: true })
+    expect(stored(id)).toEqual({
+      password_enc: null,
+      password_cipher: fakeCipherOf('saved-Secret-734')
+    })
+
+    // 새 비밀번호를 입력하거나 지우면 옮길 수 있다. 비밀번호가 없는 서버는 그대로 옮긴다.
+    expect(await save({ ...NAS, id, host: 'moved.local', password: 'new-pw' })).toMatchObject({
+      host: 'moved.local',
+      hasPassword: true
+    })
+    expect(stored(id).password_cipher).toEqual(fakeCipherOf('new-pw'))
+    expect(await save({ ...NAS, id, host: 'moved.local', port: 2121, password: '' })).toMatchObject(
+      { port: 2121, hasPassword: false }
+    )
+    expect(await save({ ...NAS, id, host: 'again.local', port: 2222 })).toMatchObject({
+      host: 'again.local',
+      port: 2222,
+      hasPassword: false
+    })
+  })
+})
+
+describe('ftp:connect — quick connect', () => {
+  it('encrypts and saves the typed password of a server it saves for the first time', async () => {
+    // covers: Test-740
+    const result = await invoke('ftp:connect', {
+      host: 'quick.example',
+      port: 21,
+      user: 'bob',
+      password: 'typed-Secret-740',
+      secure: false
+    })
+
+    expect(result).toEqual({ success: true, data: undefined })
+    expect(
+      state.db
+        .prepare(
+          "SELECT username, password_enc, password_cipher FROM servers WHERE host = 'quick.example'"
+        )
+        .get()
+    ).toEqual({
+      username: 'bob',
+      password_enc: null,
+      password_cipher: fakeCipherOf('typed-Secret-740')
+    })
+  })
+
+  it("never rewrites a saved server's login from a connect to another address", async () => {
+    // covers: Test-745
+    const nas = await save({ ...NAS, password: 'nas-Secret-745' })
+    const before = stored(nas.id)
+
+    const result = await invoke('ftp:connect', {
+      id: nas.id,
+      host: 'other.example',
+      port: 2121,
+      user: 'mallory',
+      password: 'typed-Secret-745',
+      secure: false
+    })
+
+    expect(result).toEqual({ success: true, data: undefined })
+    // NAS의 계정과 비밀번호는 그대로이고, 접속한 주소는 그 주소의 서버로 따로 기록된다
+    expect(stored(nas.id)).toEqual(before)
+    expect(
+      state.db.prepare('SELECT username FROM servers WHERE id = ?').get(nas.id) as {
+        username: string
+      }
+    ).toEqual({ username: 'alice' })
+    expect(
+      state.db
+        .prepare(
+          "SELECT username, password_cipher FROM servers WHERE host = 'other.example' AND port = 2121"
+        )
+        .get()
+    ).toEqual({ username: 'mallory', password_cipher: fakeCipherOf('typed-Secret-745') })
+  })
+})

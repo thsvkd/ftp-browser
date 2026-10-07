@@ -81,6 +81,7 @@ export const zhCN = {
   'servers.tlsBadge': '使用 FTPS (TLS)',
   'servers.passwordProtectionBasic': '没有系统密钥环：已保存的密码只是经过混淆，并未受到保护。',
   'servers.passwordProtectionNone': '已保存的密码以纯文本形式存储在此电脑上。',
+  'servers.passwordAddressChanged': '请为新地址重新输入密码，或将其删除。',
 
   'status.disconnected': '未连接',
   'status.connecting': '正在连接…',

@@ -7,6 +7,8 @@ import {
   deleteServer,
   getRecentPaths,
   HAS_PASSWORD_SQL,
+  isSavedAddress,
+  isSavedLogin,
   KEEP_PASSWORD,
   listServers,
   recordConnection,
@@ -57,6 +59,19 @@ export function registerFtpHandlers(
         // 입력한 비밀번호가 없으면 저장된 비밀번호를 main이 직접 읽는다. 렌더러는 그 값을 모른다(E8).
         // 풀 수 없으면 연결을 시도하지 않는다(E5).
         const { savedPasswordOf, ...login } = payload
+        // 저장된 비밀번호는 저장한 서버의 주소·계정에만 보내고, 갱신할 서버(id)도 그 서버여야 한다(E15).
+        // GUI는 이런 요청을 보내지 않는다. 연결도 저장도 하지 않는다.
+        if (
+          savedPasswordOf !== undefined &&
+          ((login.id !== undefined && login.id !== savedPasswordOf) ||
+            !isSavedLogin(getDatabase(), savedPasswordOf, login))
+        ) {
+          return {
+            success: false,
+            error:
+              'The saved password can only be used for the server it was saved for. Enter the password.'
+          }
+        }
         const usesSaved = login.password === undefined && savedPasswordOf !== undefined
         const password = usesSaved ? await passwords.reveal(savedPasswordOf) : login.password
         const config: FtpConnectPayload = { ...login, password: password || 'anonymous@' }
@@ -73,7 +88,11 @@ export function registerFtpHandlers(
               usesSaved && login.id === savedPasswordOf
                 ? KEEP_PASSWORD
                 : await passwords.toWrite(config.password)
-            recordConnection(getDatabase(), config, write)
+            // 다른 주소로 접속하면서 저장된 서버(id)를 가리켜도 그 서버의 로그인은 바꾸지 않는다.
+            // 그때는 접속한 주소로만 기록한다(E15).
+            const updates =
+              config.id !== undefined && isSavedAddress(getDatabase(), config.id, config)
+            recordConnection(getDatabase(), updates ? config : { ...config, id: undefined }, write)
           } catch (dbErr) {
             // Non-critical: don't fail the connection if DB save fails
             console.warn('[ftpHandlers] Failed to persist server info:', dbErr)

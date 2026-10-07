@@ -17,6 +17,7 @@ export function PasswordInput({
   id,
   disabled,
   placeholder,
+  label,
   className,
   inputClassName
 }: {
@@ -25,6 +26,8 @@ export function PasswordInput({
   id?: string
   disabled?: boolean
   placeholder?: string
+  /** Accessible name and tooltip when the field has no `<label>` (default: "Password"). */
+  label?: string
   className?: string
   inputClassName?: string
 }): React.JSX.Element {
@@ -39,7 +42,8 @@ export function PasswordInput({
         disabled={disabled}
         autoComplete="off"
         placeholder={placeholder}
-        aria-label={id ? undefined : t('connect.password')}
+        aria-label={id ? undefined : (label ?? t('connect.password'))}
+        title={label}
         className={cn(inputCls, 'pr-8', inputClassName)}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -184,7 +188,8 @@ export function ServerForm({
   recent = [],
   disabled,
   autoFocusHost,
-  passwordWarning
+  passwordWarning,
+  passwordHint
 }: {
   draft: ServerDraft
   onPatch: (fields: Partial<ServerDraft>) => void
@@ -193,6 +198,8 @@ export function ServerForm({
   autoFocusHost?: boolean
   /** One line under the login fields, e.g. that saved passwords are not really protected here. */
   passwordWarning?: string
+  /** Under the password field: what to do before this draft can be saved (E16). */
+  passwordHint?: string
 }): React.JSX.Element {
   const id = useId()
   const t = useT()
@@ -302,6 +309,7 @@ export function ServerForm({
                   {t('connect.removeSavedPassword')}
                 </button>
               )}
+              {passwordHint && <p className="text-[11.5px] text-amber-700">{passwordHint}</p>}
             </div>
           )}
         </div>

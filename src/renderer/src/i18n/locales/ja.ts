@@ -85,6 +85,8 @@ export const ja = {
     'システムのキーリングがありません。保存済みのパスワードは読みにくくされているだけで、保護されていません。',
   'servers.passwordProtectionNone':
     '保存済みのパスワードは、このコンピューターにプレーンテキストで保存されます。',
+  'servers.passwordAddressChanged':
+    '新しいアドレス用にパスワードをもう一度入力するか、削除してください。',
 
   'status.disconnected': '未接続',
   'status.connecting': '接続中…',

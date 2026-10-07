@@ -5,6 +5,7 @@ import {
   emptyDraft,
   findSaved,
   isValidPort,
+  movesSavedPassword,
   parseServerAddress,
   resolveDraft,
   serverAddress,
@@ -219,6 +220,15 @@ export const useServerStore = create<ServerStore>((set, get) => ({
         success: false,
         error: t('servers.invalidMaxTransfers'),
         code: ErrorCode.INVALID_MAX_TRANSFERS
+      }
+    }
+    // 저장된 비밀번호를 그대로 둔 채 다른 주소로 옮기지 않는다. main도 거절한다(E16).
+    const savedRow = get().servers.find((s) => s.id === draft.id)
+    if (savedRow && movesSavedPassword(draft, savedRow)) {
+      return {
+        success: false,
+        error: t('servers.passwordAddressChanged'),
+        code: ErrorCode.SAVED_PASSWORD_ADDRESS_CHANGED
       }
     }
     // 비밀번호: 입력했으면 그 값으로 바꾸고, 저장된 것을 쓰는 중이면 빼서 그대로 두며,

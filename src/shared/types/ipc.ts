@@ -39,6 +39,11 @@ export const ErrorCode = {
   INVALID_MAX_TRANSFERS: 'INVALID_MAX_TRANSFERS',
   /** The saved password exists but cannot be decrypted on this computer; the user must re-enter it. */
   SAVED_PASSWORD_UNREADABLE: 'SAVED_PASSWORD_UNREADABLE',
+  /**
+   * A saved server keeps its saved password only at the address it was saved for: moving it to
+   * another host or port needs the password typed again (or removed).
+   */
+  SAVED_PASSWORD_ADDRESS_CHANGED: 'SAVED_PASSWORD_ADDRESS_CHANGED',
 
   // General
   UNKNOWN: 'UNKNOWN'

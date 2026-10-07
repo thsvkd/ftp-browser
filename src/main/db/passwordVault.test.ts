@@ -4,7 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import { ErrorCode } from '@shared/types/ipc'
 import { createPasswordVault, type PasswordVault } from './passwordVault'
-import { saveServer } from './servers'
+import { saveServer, type PasswordWrite } from './servers'
 import { FakeCipher, fakeCipherOf } from './__fixtures__/fakeCipher'
 
 let db: Database.Database
@@ -233,5 +233,50 @@ describe('protection', () => {
       kind: 'cipher',
       cipher: fakeCipherOf('typed-pw')
     })
+  })
+})
+
+describe('review follow-ups', () => {
+  it('does not let a re-encryption overwrite a password the user saved or removed meanwhile', async () => {
+    // covers: Test-739
+    const changed = addCipher('a.example', 'old-pw')
+    const removed = addCipher('b.example', 'old-pw')
+    // 예전 키로 만든 암호문: 다시 암호화하는 사이 사용자가 새 비밀번호를 저장하거나 지운다
+    vi.spyOn(cipher, 'decryptStringAsync').mockResolvedValue({
+      shouldReEncrypt: true,
+      result: 'old-pw'
+    })
+    const edit = (id: number, host: string, password: PasswordWrite): void => {
+      saveServer(db, { name: '', host, port: 21, username: 'me', secure: false, id }, password)
+    }
+    cipher.onEncrypt = () =>
+      edit(changed, 'a.example', { kind: 'cipher', cipher: fakeCipherOf('new-pw') })
+    expect(await vault.reveal(changed)).toBe('old-pw')
+    cipher.onEncrypt = () => edit(removed, 'b.example', { kind: 'clear' })
+    expect(await vault.reveal(removed)).toBe('old-pw')
+
+    expect(stored(changed)).toEqual({ password_enc: null, password_cipher: fakeCipherOf('new-pw') })
+    expect(stored(removed)).toEqual({ password_enc: null, password_cipher: null })
+  })
+
+  it('reports basic for a basic_text or unknown Linux backend and keyring for any named store', async () => {
+    // covers: Test-741
+    const level = async (c: FakeCipher): Promise<string> =>
+      (await createPasswordVault(db, c).protection()).level
+
+    for (const backend of ['basic_text', 'unknown']) {
+      expect(await level(new FakeCipher({ backend })), backend).toBe('basic')
+    }
+    for (const backend of ['gnome_libsecret', 'kwallet', 'kwallet5', 'kwallet6', 'future_store']) {
+      expect(await level(new FakeCipher({ backend })), backend).toBe('keyring')
+    }
+    // macOS·Windows(getSelectedStorageBackend 없음)는 비동기 암호화를 쓸 수 있을 때만 keyring
+    const macOrWindows = new FakeCipher()
+    expect(await level(macOrWindows)).toBe('keyring')
+    macOrWindows.available = false
+    expect(await level(macOrWindows)).toBe('none')
+    const linux = new FakeCipher({ backend: 'gnome_libsecret' })
+    linux.available = false
+    expect(await level(linux)).toBe('none')
   })
 })

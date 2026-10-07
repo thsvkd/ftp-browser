@@ -22,6 +22,9 @@ import { STROKE, btn, onEnterEsc } from './styles'
 /** 주소창 안에 들어가는 입력칸: 테두리·링 없이 */
 const BARE = 'h-full rounded-none border-0 focus:border-transparent focus:ring-0'
 
+/** 툴바의 좁은 비밀번호 칸에 맞는, 언어와 상관없는 "저장된 비밀번호" 자리표시 */
+const SAVED_PASSWORD_DOTS = '••••••••'
+
 /**
  * Toolbar connect UI. Disconnected: saved-servers button, address, password, FTPS lock,
  * server manager and Connect. Connected: the current server, which switches servers.
@@ -248,8 +251,10 @@ export function ConnectBar(): React.JSX.Element {
             <PasswordInput
               value={draft.password}
               disabled={connecting}
-              // 저장된 비밀번호는 렌더러에 없다. 칸은 비워 두고 자리표시로만 알린다(E10).
-              placeholder={draft.savedPassword ? t('connect.savedPassword') : t('connect.password')}
+              // 저장된 비밀번호는 렌더러에 없다. 칸은 비워 둔다(E10). 칸이 좁아 자리표시는 언어와
+              // 상관없는 점으로 두고, "저장된 비밀번호"는 이름·툴팁으로 알린다(E20).
+              placeholder={draft.savedPassword ? SAVED_PASSWORD_DOTS : t('connect.password')}
+              label={draft.savedPassword ? t('connect.savedPassword') : undefined}
               onChange={(password) => patch({ password })}
               className="w-[118px] border-l border-gray-200"
               inputClassName={cn(BARE, 'bg-transparent text-[12.5px]')}

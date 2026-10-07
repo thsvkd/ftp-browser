@@ -3,6 +3,7 @@ import { createAgentServices } from './index'
 import { createHarness, type Harness } from './__fixtures__/fakes'
 import { AgentError, type AgentServices } from '../types'
 import { fakeCipherOf } from '../../db/__fixtures__/fakeCipher'
+import type { FtpConnectPayload } from '@shared/types/ftp'
 
 let h: Harness
 let services: AgentServices
@@ -172,6 +173,44 @@ describe('saved passwords', () => {
     expect(json).not.toMatch(/password/i)
     expect(json).not.toContain('agent-Secret-718')
     expect(json).not.toContain('Buffer')
+  })
+
+  it('connect sends a saved password only to the address and account it was saved for', async () => {
+    // covers: Test-733
+    // 저장된 비밀번호는 그 행의 호스트·포트·사용자에만 보낸다(E15). 에이전트는 주소를 받지 않고
+    // 저장된 행 그대로 연결한다: 같은 호스트의 다른 포트·대소문자만 다른 호스트도 각자의 것을 쓴다.
+    const add = (name: string, host: string, port: number, user: string, secret: string): number =>
+      Number(
+        h.db
+          .prepare(
+            'INSERT INTO servers (name, host, port, username, password_cipher, secure) VALUES (?, ?, ?, ?, ?, 0)'
+          )
+          .run(name, host, port, user, fakeCipherOf(secret)).lastInsertRowid
+      )
+    const rows = [
+      { id: add('NAS', 'nas.local', 21, 'me', 'nas-Secret-733'), secret: 'nas-Secret-733' },
+      { id: add('Alt', 'NAS.local', 2121, 'other', 'alt-Secret-733'), secret: 'alt-Secret-733' }
+    ]
+
+    for (const ref of ['NAS', 'nas.local:2121', rows[0].id, 'Alt'])
+      await services.session.connect(ref)
+
+    const sent = h.remote.connect.mock.calls.map(([payload]) => payload as FtpConnectPayload)
+    expect(sent).toHaveLength(4)
+    for (const payload of sent) {
+      const row = h.db
+        .prepare('SELECT id, host, port, username FROM servers WHERE id = ?')
+        .get(payload.id) as { id: number; host: string; port: number; username: string }
+      expect(payload).toMatchObject({ host: row.host, port: row.port, user: row.username })
+      expect(payload.password).toBe(rows.find((r) => r.id === row.id)!.secret)
+      expect(payload).not.toHaveProperty('savedPasswordOf')
+    }
+    expect(sent.map((p) => `${p.host}:${p.port}`)).toEqual([
+      'nas.local:21',
+      'NAS.local:2121',
+      'nas.local:21',
+      'NAS.local:2121'
+    ])
   })
 })
 

@@ -59,7 +59,10 @@ export function createPasswordVault(db: Database.Database, cipher: PasswordCiphe
   return {
     async protection() {
       if (!(await cipher.isAsyncEncryptionAvailable())) return { level: 'none' }
-      return { level: cipher.getSelectedStorageBackend?.() === 'basic_text' ? 'basic' : 'keyring' }
+      // 보수적으로 본다(E19): Linux에서 고정 키(basic_text)이거나 무엇인지 모르면(unknown) basic.
+      // 이름 있는 키 저장소와 macOS·Windows(백엔드 없음)는 keyring.
+      const backend = cipher.getSelectedStorageBackend?.()
+      return { level: backend === 'basic_text' || backend === 'unknown' ? 'basic' : 'keyring' }
     },
 
     async toWrite(password) {
@@ -97,7 +100,8 @@ export function createPasswordVault(db: Database.Database, cipher: PasswordCiphe
       let migrated = 0
       let failed = 0
       const rows = listPlainPasswords(db)
-      // 옮길 행이 없으면 OS 키 저장소를 건드리지 않는다(새로 설치한 앱, CI 스모크 테스트)
+      // 옮길 행이 없으면 여기서는 OS 키 저장소를 건드리지 않는다. 파일을 다시 쓰기 전에는 아래에서 한 번
+      // 묻는다(E17): 새로 설치한 앱은 첫 실행에서만, 다시 쓴 뒤에는 묻지 않는다.
       if (rows.length > 0) {
         // 암호화를 쓸 수 없으면 평문이 그대로 남으므로 파일을 다시 쓸 이유도 없다
         if (!(await cipher.isAsyncEncryptionAvailable())) return { migrated, failed }
@@ -115,21 +119,23 @@ export function createPasswordVault(db: Database.Database, cipher: PasswordCiphe
           }
         }
       }
-      if (failed === 0 && !isScrubbed(db)) {
-        // secure_delete 이전에 지우거나 바꾼 비밀번호는 빈 페이지(freelist)에 평문으로 남는다. 모든 행을
-        // 옮긴 뒤 한 번만 파일을 다시 써서 없앤다. 실패한 행이 있으면 다음 시작에서 다시 시도한다.
-        try {
+      try {
+        // secure_delete 이전에 지우거나 바꾼 비밀번호와, secure_delete(FAST)로도 지워지지 않는 빈 페이지
+        // (freelist)의 비밀번호는 평문으로 남는다. 모든 행을 옮긴 뒤 한 번만 파일을 다시 써서 없앤다.
+        // 실패한 행이 있으면 다음 시작에서 다시 시도한다. 암호화를 쓸 수 없는 동안에는 그 뒤에 저장·삭제할
+        // 평문이 또 남으므로 다시 쓴 것으로 적지 않는다(E17).
+        if (failed === 0 && !isScrubbed(db) && (await cipher.isAsyncEncryptionAvailable())) {
           db.exec('VACUUM')
           db.pragma('wal_checkpoint(TRUNCATE)')
           db.prepare(
             "INSERT INTO settings (key, value) VALUES ('passwordsScrubbed', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value"
           ).run()
-        } catch (err) {
-          console.warn('[passwordVault] Failed to rewrite the database file:', err)
         }
-      } else if (migrated > 0) {
-        // 평문이 든 옛 페이지가 DB 파일·WAL에 남지 않게 바로 체크포인트하고 WAL을 비운다
-        db.pragma('wal_checkpoint(TRUNCATE)')
+      } catch (err) {
+        console.warn('[passwordVault] Failed to rewrite the database file:', err)
+      } finally {
+        // 평문이 든 옛 페이지가 DB 파일·WAL에 남지 않게 체크포인트하고 WAL을 비운다. VACUUM이 실패해도(E17).
+        if (migrated > 0) db.pragma('wal_checkpoint(TRUNCATE)')
       }
       return { migrated, failed }
     }

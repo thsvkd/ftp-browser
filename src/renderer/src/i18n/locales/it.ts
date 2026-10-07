@@ -89,6 +89,8 @@ export const it = {
     'Nessun portachiavi di sistema: le password salvate sono solo offuscate, non protette.',
   'servers.passwordProtectionNone':
     'Le password salvate sono memorizzate come testo normale su questo computer.',
+  'servers.passwordAddressChanged':
+    'Inserisci di nuovo la password per il nuovo indirizzo oppure rimuovila.',
 
   'status.disconnected': 'Disconnesso',
   'status.connecting': 'Connessione in corso…',
