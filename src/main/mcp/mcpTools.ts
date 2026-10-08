@@ -210,7 +210,8 @@ const TOOLS = [
     description:
       'Show whether FTP Browser is connected, and to which saved server (serverId, host, port, ' +
       'user), and how many transfers and file operations are pending, active, completed, ' +
-      'failed or cancelled. Call it first to learn whether you need to connect.',
+      'failed or cancelled (finished file operations drop out after a few seconds). Call it ' +
+      'first to learn whether you need to connect.',
     input: z.object({}),
     async run(_input, { ftp, db, queue, operations }) {
       let connection: Record<string, unknown> = { status: ftp.getStatus() }
@@ -403,8 +404,8 @@ const TOOLS = [
     risk: 'write',
     description:
       'Create a folder, and any missing parent folders, on the connected FTP server. An ' +
-      'existing folder is fine; a file with that name gives TARGET_EXISTS. Uploads create the ' +
-      'subfolders they need by themselves.',
+      'existing folder is fine; a file with that name gives TARGET_EXISTS. upload creates the ' +
+      'subfolders of the local folders it uploads by itself.',
     input: z.object({ path: remotePath.describe('Absolute path of the new folder') }),
     async run({ path }, deps) {
       await ops.createDirectory(deps, path)
@@ -451,7 +452,9 @@ const TOOLS = [
     risk: 'upload',
     description:
       'Upload local files and folders (folders recursively) into an existing folder on the ' +
-      'connected FTP server. Files that already exist on the server are skipped unless ' +
+      'connected FTP server. A local folder arrives as a subfolder of remoteDir with the same ' +
+      'name (like drag and drop); to upload only its contents, list its files in localPaths. ' +
+      'Files that already exist on the server are skipped unless ' +
       '`overwrite` is true. Only upload what the user asked to send. Returns a jobId at once; ' +
       'follow it with wait_for_jobs.',
     input: z.object({
