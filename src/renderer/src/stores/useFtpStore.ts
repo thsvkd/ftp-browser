@@ -33,7 +33,7 @@ interface FtpStore {
   connect: (config: FtpConnectPayload, initialPath?: string) => Promise<boolean>
   disconnect: () => Promise<void>
   /**
-   * Main changed the connection by itself (an agent, handoff agent-operations G3): reset the
+   * Main changed the connection by itself (an agent, handoff agent-access K5): reset the
    * session state like `disconnect()` without asking main to disconnect, then take `session`.
    */
   adoptSession: (session: { status: ConnectionStatus; host?: string; port?: number }) => void

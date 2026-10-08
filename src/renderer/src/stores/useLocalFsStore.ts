@@ -120,8 +120,6 @@ export const useLocalFsStore = create<LocalFsStore>((set, get) => ({
     const path = get().currentPath
     set({ error: null })
     const outcome = await fetchListing(path)
-    // 기다리는 사이 다른 폴더로 옮겼으면 이전 폴더의 목록으로 덮어쓰지 않는다.
-    if (get().currentPath !== path) return
     if (!outcome.ok) {
       set({ error: outcome.error })
       return

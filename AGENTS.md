@@ -136,30 +136,27 @@ through the preload bridge `window.api`.
 
 ## Agent access (MCP and `ftpb`)
 
-Specs: `docs/handoff/agent-friendly.md` (phase 1), `agent-operations.md` (phase 2). Off by default.
+Spec: `docs/handoff/agent-access.md`. Off by default. The app shows each tool's risk but never asks
+before running it; approval is left to the agent tool (Claude Code, Codex…).
 
-- `src/main/agent/services/*` implement `AgentServices` (`src/main/agent/types.ts`): app logic only,
-  no MCP, tiers or confirmation. `src/main/agent/events.ts` sends the GUI-sync events.
-- `src/main/mcp/`: `McpService.ts` (Streamable HTTP on 127.0.0.1:47821, Bearer token, writes the
-  discovery files), `toolRegistry.ts` (annotations, `[RISK …]` first line, `_meta`
-  `ftp-browser/risk|policy`; policy → dryRun → confirmation → run), `tools/*.ts` (definitions),
-  `agentPolicy.ts` (`settings.agentPolicy`), `confirmationBroker.ts`. The app is the only gate.
-- Tiers, one per tool: R read · W reversible write · D destructive · X upload · C credentials.
-  New tool: `readTool`/`actionTool` in `src/main/mcp/tools/` (`actionTool` needs `plan()` for dryRun
-  and the dialog), add it to `TOOL_DEFINITIONS` (`mcpTools.ts`), the §2.2 table and its tests
-  (Test-450 table, `TOOL_COUNT` in `McpService.test.ts`, Test-518 list; 22 tools now), and
-  `agent.tool.<name>` in all 11 locales.
+- `src/main/mcp/McpService.ts`: Streamable HTTP on 127.0.0.1:47821, Bearer token, Host/Origin
+  checks; writes the discovery files `<userData>/agent/{endpoint.json,token}` (0600, `discovery.ts`).
+- `mcpTools.ts`: the 12 tools in one `TOOLS` list. `risk` (read · write · upload · delete) builds both
+  the `[RISK: …]` first description line and the annotations. Tools call the app services
+  (`AgentDeps`) through `agentOps.ts` (connect, rename, delete, download/upload planning);
+  `jobTracker.ts` remembers finished jobs for `wait_for_jobs`; `thumbnailPreviews.ts` is the single
+  preview queue. Errors are `CODE: message next-step` isError results. A new tool goes into `TOOLS`,
+  the §2 table of the spec and Test-450 (`TOOL_COUNT` in `McpService.test.ts`).
+- GUI sync: `ftp:remoteChanged` (every FTP mutation, `ftpHandlers.ts`) and `agent:session`
+  (connect/disconnect) feed `useAgentSync`.
 - `ftpb` (`src/main/cli/`): a dependency-free MCP client of the same endpoint (one POST per request
-  with the 2026-07-28 `_meta` envelope; `mcp-stdio` relays stdio clients). `script/build-cli.mjs`,
-  run by a plugin in `electron.vite.config.ts`, bundles it into `out/cli/ftpb.cjs` (Node built-ins
-  only), unpacked from asar. Exit codes 0 ok, 1 tool error, 2 usage, 3 refused, 4 app unavailable.
-- Discovery: `src/main/agent/discovery.ts`, `<userData>/agent/{endpoint.json,token}` (0600);
-  userData is `<appData>/ftp-browser` on every OS (packaged package.json has no productName).
-- `src/shared/agentClients.ts` (pure): per-client snippets and `SKILL.md`, shared by Settings and
-  `ftpb setup`. `src/main/agent/cliInstall.ts`: shim, Windows user PATH, skill install.
-- Tests: `releaseArtifacts.test.ts` pins `asarUnpack: out/cli/**` (Test-562); `script/build-cli.test.mjs`
-  builds the CLI and runs `--help` from a temp copy (Test-557); CLI tests use the real `McpService`
-  with fake tools (`src/main/cli/__fixtures__/`).
+  with the 2026-07-28 `_meta` envelope); always JSON; exit codes 0 ok, 1 tool error, 2 usage, 4 app
+  unavailable. `script/build-cli.mjs`, run by a plugin in `electron.vite.config.ts`, bundles it into
+  `out/cli/ftpb.cjs` (Node built-ins only), unpacked from asar (Test-562). Settings › Agent access
+  copies the command that runs it with the app executable (`buildCliCommand`, `mcpHandlers.ts`).
+- Tests: tool tests use fakes from `src/main/mcp/__fixtures__/agentHarness.ts`; CLI tests use the
+  real `McpService` with fake tools (`src/main/cli/__fixtures__/`); `script/build-cli.test.mjs`
+  builds the CLI and runs `--help` from a temp copy (Test-557).
 
 ---
 

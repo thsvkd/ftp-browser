@@ -12,19 +12,11 @@ import { registerPreviewHandlers } from './ipc/previewHandlers'
 import { registerDragHandlers } from './ipc/dragHandlers'
 import { registerGalleryHandlers } from './ipc/galleryHandlers'
 import { registerUpdateHandlers } from './ipc/updateHandlers'
-import { registerMcpHandlers } from './ipc/mcpHandlers'
-import { registerAgentHandlers } from './ipc/agentHandlers'
-import { registerAgentCliHandlers } from './ipc/agentCliHandlers'
+import { buildCliCommand, bundledCliPath, registerMcpHandlers } from './ipc/mcpHandlers'
 import { McpService } from './mcp/McpService'
-import { createMcpToolServer } from './mcp/mcpTools'
+import { createMcpToolServer, type McpToolDeps } from './mcp/mcpTools'
+import { createJobTracker } from './mcp/jobTracker'
 import { createThumbnailPreviewer } from './mcp/thumbnailPreviews'
-import { AgentPolicyStore } from './mcp/agentPolicy'
-import { ConfirmationBroker, createAgentNotifier } from './mcp/confirmationBroker'
-import { JobHandles } from './mcp/jobHandles'
-import { ActionLock } from './mcp/toolRegistry'
-import { attachRemoteChangeForwarding, createAgentEventSink } from './agent/events'
-import { createAgentServices } from './agent/services'
-import { agentFolderPath } from './agent/services/paths'
 import { registerDevtools } from './debug/devtools'
 import { applyApplicationMenu } from './menu/appMenu'
 import { UpdateManager, isAutomaticUpdateSupported } from './update/UpdateManager'
@@ -68,12 +60,6 @@ function createWindow(): BrowserWindow {
 
   mainWindow.on('ready-to-show', () => {
     if (!smokeTestEnabled) mainWindow?.show()
-  })
-
-  // macOS는 창을 닫아도 앱이 남는다. 에이전트 알림·확인 대화상자가 파괴된 창을 쓰지 않게 참조를 비운다(R9).
-  const created = mainWindow
-  created.on('closed', () => {
-    if (mainWindow === created) mainWindow = null
   })
 
   if (smokeTestEnabled) {
@@ -151,51 +137,29 @@ app.whenReady().then(() => {
   registerGalleryHandlers(win, db, manager)
 
   // 에이전트(내장 MCP 서버, ftpb)는 GUI와 같은 연결·전송 큐·파일 작업·썸네일 캐시를 쓴다(기본 꺼짐).
-  // macOS activate가 창을 새로 만들 수 있으므로 창은 매번 getter로 얻는다.
-  const getWindow = (): BrowserWindow | null => mainWindow
-  const agentEvents = createAgentEventSink(getWindow)
-  attachRemoteChangeForwarding(manager, agentEvents)
-  // 전송·작업 알림을 구독하므로 한 번만 만든다.
-  const agentServices = createAgentServices({
+  const agentDeps: McpToolDeps = {
+    version: app.getVersion(),
     db,
     ftp: manager,
     fileOps,
     queue: transferQueue,
     operations: operationManager,
     localFs,
-    events: agentEvents,
-    passwords
+    passwords,
+    previews: createThumbnailPreviewer(manager, generator, cacheManager),
+    jobs: createJobTracker(transferQueue, operationManager),
+    onSession: (event) => {
+      if (!win.isDestroyed()) win.webContents.send('agent:session', event)
+    }
+  }
+  const mcp = new McpService(db, () => createMcpToolServer(agentDeps), undefined, {
+    userDataDir: app.getPath('userData'),
+    version: app.getVersion()
   })
-  const agentPolicy = new AgentPolicyStore(db)
-  const confirmations = new ConfirmationBroker(getWindow)
-  const agentNotifier = createAgentNotifier(getWindow)
-  const jobHandles = new JobHandles()
-  const actionLock = new ActionLock()
-  // 에이전트 폴더(§9 R2): 로컬에 쓰는 W 도구는 이 안에서만 W 정책을 따르고 밖이면 사용자에게 묻는다.
-  // 다운로드 폴더가 홈·그 상위·루트면(user-dirs.dirs 없는 Linux) <home>/Downloads로 대신한다.
-  const agentLocalRoot = agentFolderPath(app.getPath('downloads'), app.getPath('home'))
-  const previews = createThumbnailPreviewer(manager, generator, cacheManager)
-  const mcp = new McpService(
-    db,
-    () =>
-      createMcpToolServer({
-        version: app.getVersion(),
-        services: agentServices,
-        operations: operationManager,
-        policy: agentPolicy,
-        confirm: (request, signal) => confirmations.request(request, signal),
-        notify: agentNotifier,
-        previews,
-        jobHandles,
-        actionLock,
-        localRoot: agentLocalRoot
-      }),
-    undefined,
-    { userDataDir: app.getPath('userData'), version: app.getVersion() }
+  registerMcpHandlers(
+    mcp,
+    buildCliCommand(process.platform, process.execPath, bundledCliPath(__dirname))
   )
-  registerMcpHandlers(mcp)
-  registerAgentHandlers(agentPolicy, confirmations)
-  registerAgentCliHandlers()
   void mcp.init()
   app.on('will-quit', () => void mcp.stop())
 

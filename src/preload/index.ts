@@ -62,15 +62,7 @@ const INVOKE_CHANNELS = [
   // Built-in MCP server
   'mcp:getState',
   'mcp:setEnabled',
-  'mcp:regenerateToken',
-  // Agent operations (docs/handoff/agent-operations.md §2.7)
-  'agent:confirmRespond',
-  'agent:getPolicy',
-  'agent:setPolicy',
-  'agent:getClientSetups',
-  'agent:getCliStatus',
-  'agent:installCli',
-  'agent:installSkill'
+  'mcp:regenerateToken'
 ] as const
 
 const EVENT_CHANNELS = [
@@ -83,14 +75,9 @@ const EVENT_CHANNELS = [
   'localThumbnail:ready',
   'localThumbnail:error',
   'update:stateChanged',
-  // Agent operations: GUI sync and confirmation
+  // Agent access: the GUI follows what agents change
   'ftp:remoteChanged',
-  'local:changed',
-  'agent:session',
-  'agent:confirmRequest',
-  'agent:confirmCancelled',
-  'agent:activity',
-  'agent:openServerEditor'
+  'agent:session'
 ] as const
 
 type InvokeChannel = (typeof INVOKE_CHANNELS)[number]

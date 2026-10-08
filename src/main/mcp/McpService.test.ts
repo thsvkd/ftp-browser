@@ -8,7 +8,7 @@ import Database from 'better-sqlite3'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { McpService, buildClaudeCodeCommand } from './McpService'
 import { createMcpToolServer } from './mcpTools'
-import { makeDeps } from './__fixtures__/agentToolHarness'
+import { createHarness } from './__fixtures__/agentHarness'
 
 function memoryDb(): Database.Database {
   const db = new Database(':memory:')
@@ -23,10 +23,11 @@ function tokenIn(db: Database.Database): string | undefined {
   return row?.value
 }
 
-const toolServer = vi.fn(() => createMcpToolServer(makeDeps()))
+const { deps } = createHarness()
+const toolServer = vi.fn(() => createMcpToolServer(deps))
 
-/** 기본 정책(D·X·C는 ask, deny 없음)에서 tools/list에 나오는 도구 수 */
-const TOOL_COUNT = 22
+/** tools/list에 나오는 도구 수(docs/handoff/agent-access.md §2) */
+const TOOL_COUNT = 12
 
 /** SDK가 보내는 것과 같은 tools/call POST. Host·Origin을 직접 정할 수 있게 node:http로 보낸다. */
 function postToolCall(port: number, headers: Record<string, string>): Promise<number> {
@@ -136,9 +137,14 @@ describe('McpService HTTP boundary', () => {
 
     expect(tools).toHaveLength(TOOL_COUNT)
     expect(tools.map((t) => t.name)).toEqual(
-      expect.arrayContaining(['get_image_previews', 'get_status', 'list_directory', 'list_jobs'])
+      expect.arrayContaining([
+        'get_image_previews',
+        'get_status',
+        'list_directory',
+        'wait_for_jobs'
+      ])
     )
-    for (const tool of tools.filter((t) => t.description?.startsWith('[RISK R:'))) {
+    for (const tool of tools.filter((t) => t.description?.startsWith('[RISK: read-only]'))) {
       expect(tool.annotations, tool.name).toMatchObject({
         readOnlyHint: true,
         destructiveHint: false

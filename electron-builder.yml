@@ -20,7 +20,7 @@ files:
   - package.json
 asarUnpack:
   - resources/**
-  # ftpb CLI(§2.6 L1). 셔임·Claude Desktop 설정이 `ELECTRON_RUN_AS_NODE=1 <앱> <이 파일>`로 실행하므로 실제 파일이어야 한다.
+  # ftpb CLI(agent-access K6). 설정의 CLI 명령이 `ELECTRON_RUN_AS_NODE=1 <앱> <이 파일>`로 실행하므로 실제 파일이어야 한다.
   - out/cli/**
   - '**/node_modules/sharp/**/*'
   - '**/node_modules/@img/**/*'

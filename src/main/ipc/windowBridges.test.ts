@@ -45,4 +45,24 @@ describe('event bridges after the window is closed', () => {
     expect(emitAll).not.toThrow()
     expect(send).not.toHaveBeenCalled()
   })
+
+  it('forwards every FTP mutation as ftp:remoteChanged until the window is closed', () => {
+    // covers: Test-412
+    let destroyed = false
+    const send = vi.fn()
+    const win = { isDestroyed: () => destroyed, webContents: { send } } as unknown as BrowserWindow
+    const { manager } = registerFtpHandlers(
+      win,
+      registerOperationHandlers(win),
+      {} as PasswordVault
+    )
+
+    manager.emit('mutation', { kind: 'upload', remotePath: '/a.jpg' })
+    destroyed = true
+    manager.emit('mutation', { kind: 'delete', remotePath: '/b' })
+
+    expect(send.mock.calls).toEqual([
+      ['ftp:remoteChanged', { kind: 'upload', remotePath: '/a.jpg' }]
+    ])
+  })
 })

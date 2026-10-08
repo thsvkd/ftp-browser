@@ -1,13 +1,12 @@
 import net, { type AddressInfo } from 'net'
 import Database from 'better-sqlite3'
-import { McpServer, type CallToolResult, type ListToolsResult } from '@modelcontextprotocol/server'
+import { McpServer, type CallToolResult } from '@modelcontextprotocol/server'
 import * as z from 'zod/v4'
 import { McpService } from '../../mcp/McpService'
-import { serverRef } from '../../mcp/tools/shared'
 
 /**
- * CLI 테스트용 MCP 엔드포인트. 앱과 같은 McpService(HTTP 경계·Bearer 인증)에 등급 `_meta`를 단
- * 가짜 도구를 올린다. 실제 도구 레지스트리(Tools 갈래)와 무관하게 CLI의 변환·출력·exit code를 고정한다.
+ * CLI 테스트용 MCP 엔드포인트. 앱과 같은 McpService(HTTP 경계·Bearer 인증)에 가짜 도구를 올린다.
+ * 실제 도구와 무관하게 CLI의 변환·출력·exit code를 고정한다.
  */
 export interface FakeAgentServer {
   url: string
@@ -29,25 +28,9 @@ function text(value: string, isError = false): CallToolResult {
   return { content: [{ type: 'text', text: value }], ...(isError ? { isError: true } : {}) }
 }
 
-function risk(tier: string, policy: string): Record<string, unknown> {
-  return { 'ftp-browser/risk': tier, 'ftp-browser/policy': policy }
-}
-
 /** 가짜 `get_image_previews`가 `path`의 미리보기로 돌려주는 바이트(테스트가 저장된 파일과 비교한다) */
 export function previewBytes(path: string): Buffer {
   return Buffer.from(`JPEG preview of ${path}`)
-}
-
-/** tools/list에서 `name`을 뺀다. SDK의 원래 목록 핸들러에 답을 맡긴 뒤 거른다. */
-function hideFromList(server: McpServer, name: string): void {
-  const protocol = server.server as unknown as {
-    _getRequestHandler(method: string): (request: unknown, ctx: unknown) => Promise<ListToolsResult>
-  }
-  const original = protocol._getRequestHandler('tools/list')
-  server.server.setRequestHandler('tools/list', async (request, ctx) => {
-    const result = await original(request, ctx)
-    return { ...result, tools: result.tools.filter((tool) => tool.name !== name) }
-  })
 }
 
 export async function startFakeAgentServer(): Promise<FakeAgentServer> {
@@ -59,26 +42,12 @@ export async function startFakeAgentServer(): Promise<FakeAgentServer> {
 
   const createToolServer = (): McpServer => {
     const server = new McpServer({ name: 'ftp-browser', version: '9.9.9' })
-    // 정책 deny 도구처럼 등록은 하되 tools/list에서는 뺀다(Tools 갈래의 toolRegistry와 같은 방식)
-    server.registerTool(
-      'delete_local',
-      {
-        description: 'hidden by policy',
-        inputSchema: z.object({ paths: z.array(z.string()) }),
-        _meta: risk('D', 'deny')
-      },
-      async (args) => {
-        record('delete_local', args)
-        return text('DENIED_BY_POLICY: delete_local is turned off in FTP Browser.', true)
-      }
-    )
     server.registerTool(
       'get_status',
       {
         title: 'Get status',
-        description: '[RISK R: reads only. Policy: allow — always runs.]\nShow the connection.',
-        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
-        _meta: risk('R', 'allow')
+        description: '[RISK: read-only]\nShow the connection.',
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true }
       },
       async () => {
         const data = { connection: { status: 'connected', host: 'nas.local' } }
@@ -89,7 +58,7 @@ export async function startFakeAgentServer(): Promise<FakeAgentServer> {
       'list_directory',
       {
         title: 'List remote directory',
-        description: '[RISK R: reads only. Policy: allow — always runs.]\nList a directory.',
+        description: '[RISK: read-only]\nList a directory.',
         inputSchema: z.object({
           path: z.string().describe('Absolute remote path'),
           limit: z.number().int().optional(),
@@ -99,8 +68,7 @@ export async function startFakeAgentServer(): Promise<FakeAgentServer> {
           sizes: z.array(z.number()).optional(),
           filter: z.object({ minSize: z.number() }).optional()
         }),
-        annotations: { readOnlyHint: true },
-        _meta: risk('R', 'allow')
+        annotations: { readOnlyHint: true }
       },
       async (args) => {
         const data = record('list_directory', args)
@@ -111,33 +79,20 @@ export async function startFakeAgentServer(): Promise<FakeAgentServer> {
       'delete',
       {
         title: 'Delete remote files',
-        description:
-          '[RISK D: permanently deletes remote files. Policy: ask — the user confirms.]\nDelete.',
-        inputSchema: z.object({ paths: z.array(z.string()), dryRun: z.boolean().optional() }),
-        annotations: { readOnlyHint: false, destructiveHint: true },
-        _meta: risk('D', 'ask')
+        description: '[RISK: DESTRUCTIVE — permanently deletes; FTP has no trash]\nDelete.',
+        inputSchema: z.object({ paths: z.array(z.string()), recursive: z.boolean().optional() }),
+        annotations: { readOnlyHint: false, destructiveHint: true }
       },
       async (args) => {
         record('delete', args)
-        if (args.paths.includes('/denied'))
-          return text('DENIED_BY_USER: The user declined in FTP Browser. Do not retry.', true)
-        if (args.paths.includes('/timeout'))
-          return text('CONFIRMATION_TIMEOUT: Nobody answered within 120 s.', true)
         if (args.paths.includes('/fail'))
           return text('FTP_PERMISSION_DENIED: 550 Permission denied.', true)
-        // §9 R1·R10: 취소는 거부(exit 3), 나머지는 다시 시도할 수 있는 도구 오류(exit 1)
-        if (args.paths.includes('/cancelled'))
-          return text(
-            'CONFIRMATION_CANCELLED: The call was cancelled before the user answered.',
-            true
-          )
         if (args.paths.includes('/busy'))
-          return text('BUSY: FTP Browser is waiting for the user to answer a confirmation.', true)
-        if (args.paths.includes('/session-changed'))
-          return text('SESSION_CHANGED: The connection changed while the user was deciding.', true)
-        if (args.paths.includes('/plan-changed'))
-          return text('PLAN_CHANGED: The files changed after the plan was shown.', true)
-        const data = { deleted: args.paths, dryRun: args.dryRun ?? false }
+          return text('BUSY: Transfers are still running. Wait for them with wait_for_jobs.', true)
+        const data = {
+          deleted: args.paths,
+          ...(args.recursive !== undefined ? { recursive: args.recursive } : {})
+        }
         return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data }
       }
     )
@@ -145,49 +100,41 @@ export async function startFakeAgentServer(): Promise<FakeAgentServer> {
       'wait_for_jobs',
       {
         title: 'Wait for jobs',
-        description: '[RISK R: reads only. Policy: allow — always runs.]\nWait.',
+        description: '[RISK: read-only]\nWait.',
         inputSchema: z.object({ ids: z.array(z.string()), timeoutSec: z.number().max(45) }),
-        annotations: { readOnlyHint: true },
-        _meta: risk('R', 'allow')
+        annotations: { readOnlyHint: true }
       },
-      async (args, ctx) => {
+      async (args) => {
         record('wait_for_jobs', args)
-        const progressToken = ctx.mcpReq._meta?.progressToken
-        if (progressToken !== undefined) {
-          for (let progress = 1; progress <= 2; progress++)
-            await ctx.mcpReq.notify({
-              method: 'notifications/progress',
-              params: { progressToken, progress, total: 2 }
-            })
-        }
         return text('{"done":true}')
       }
     )
-    // §10 U1: 실제 connect와 같은 server 스키마(정수∣문자열 유니언)
+    // 실제 connect와 같은 server 스키마(정수∣문자열 유니언)
     server.registerTool(
       'connect',
       {
         title: 'Connect to a saved server',
-        description: '[RISK W: switches the server. Policy: allow — runs at once.]\nConnect.',
-        inputSchema: z.object({ server: serverRef, dryRun: z.boolean().optional() }),
-        annotations: { readOnlyHint: false, destructiveHint: false },
-        _meta: risk('W', 'allow')
+        description: '[RISK: changes state, no data loss]\nConnect.',
+        inputSchema: z.object({
+          server: z.union([z.number().int().positive(), z.string().min(1).max(255)]),
+          path: z.string().optional()
+        }),
+        annotations: { readOnlyHint: false, destructiveHint: false }
       },
       async (args) => {
         const data = record('connect', args)
         return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data }
       }
     )
-    // §10 U2: 실제 get_image_previews처럼 previews(path·ok)와 같은 내용의 텍스트, ok 항목마다 이미지 블록.
+    // 실제 get_image_previews처럼 previews(path·ok)와 같은 내용의 텍스트, ok 항목마다 이미지 블록.
     // mapped: false면 structuredContent 없이 이미지 블록만 준다(경로 대응이 없는 결과).
     server.registerTool(
       'get_image_previews',
       {
         title: 'Get image previews',
-        description: '[RISK R: reads only. Policy: allow — always runs.]\nPreviews.',
+        description: '[RISK: read-only]\nPreviews.',
         inputSchema: z.object({ paths: z.array(z.string()), mapped: z.boolean().optional() }),
-        annotations: { readOnlyHint: true },
-        _meta: risk('R', 'allow')
+        annotations: { readOnlyHint: true }
       },
       async (args) => {
         record('get_image_previews', args)
@@ -211,7 +158,6 @@ export async function startFakeAgentServer(): Promise<FakeAgentServer> {
         }
       }
     )
-    hideFromList(server, 'delete_local')
     return server
   }
 

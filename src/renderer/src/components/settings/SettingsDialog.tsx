@@ -13,7 +13,6 @@ import { LOCALES, useLocale, useT, type LanguageSetting } from '@renderer/i18n'
 import type { IpcResult } from '@shared/types/ipc'
 import type { UpdateState } from '@shared/types/update'
 import type { McpState } from '@shared/types/mcp'
-import { AgentSettings } from './AgentSettings'
 
 interface SettingsDialogProps {
   open: boolean
@@ -105,18 +104,18 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
     }
   }
 
-  // 명령에 토큰이 들어 있으므로 화면에 보여 주지 않고 클립보드로만 꺼낸다.
-  const copyMcpCommand = async (): Promise<void> => {
-    if (!mcpState?.command) return
+  // 등록 명령에는 토큰이 들어 있으므로 명령은 화면에 보여 주지 않고 클립보드로만 꺼낸다.
+  const copyCommand = async (command: string | undefined, copied: string): Promise<void> => {
+    if (!command) return
     try {
-      await navigator.clipboard.writeText(mcpState.command)
+      await navigator.clipboard.writeText(command)
     } catch (err) {
       toast.error(t('settings.mcpCopyFailed'), {
         description: err instanceof Error ? err.message : String(err)
       })
       return
     }
-    toast.success(t('settings.mcpCommandCopied'))
+    toast.success(copied)
   }
 
   const regenerateMcpToken = async (): Promise<void> => {
@@ -367,11 +366,22 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 </p>
                 <div className="mt-2 flex gap-2">
                   <button
-                    onClick={() => void copyMcpCommand()}
+                    onClick={() =>
+                      void copyCommand(mcpState.command, t('settings.mcpCommandCopied'))
+                    }
                     disabled={!mcpState.command}
                     className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('settings.mcpCopyCommand')}
+                  </button>
+                  <button
+                    onClick={() =>
+                      void copyCommand(mcpState.cliCommand, t('settings.mcpCliCommandCopied'))
+                    }
+                    disabled={!mcpState.cliCommand}
+                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {t('settings.mcpCopyCliCommand')}
                   </button>
                   <button
                     onClick={() => void regenerateMcpToken()}
@@ -382,7 +392,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 </div>
               </>
             )}
-            {mcpState && <AgentSettings enabled={mcpState.enabled} command={mcpState.command} />}
           </section>
         </div>
 

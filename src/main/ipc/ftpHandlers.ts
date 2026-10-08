@@ -21,6 +21,7 @@ import type {
   FtpConnectPayload,
   FtpConnectionState,
   FtpListResult,
+  FtpMutationEvent,
   FtpServer,
   FtpServerInput,
   PasswordProtection,
@@ -50,6 +51,10 @@ export function registerFtpHandlers(
 
   manager.on('connectionStatus', (state: FtpConnectionState) => {
     if (!win.isDestroyed()) win.webContents.send('ftp:connectionStatus', state)
+  })
+  // GUI가 시작한 것도 포함해 원격 변경을 알린다. 에이전트가 바꾼 폴더를 GUI가 새로 고친다(K5).
+  manager.on('mutation', (event: FtpMutationEvent) => {
+    if (!win.isDestroyed()) win.webContents.send('ftp:remoteChanged', event)
   })
 
   ipcMain.handle(

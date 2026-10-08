@@ -8,7 +8,6 @@ process.stdout.on('error', (err: NodeJS.ErrnoException) => {
   throw err
 })
 
-const script = process.argv[1]
 void runFtpb(process.argv.slice(2), {
   env: process.env,
   platform: process.platform,
@@ -17,12 +16,7 @@ void runFtpb(process.argv.slice(2), {
   stdin: process.stdin,
   stdout: process.stdout,
   stderr: process.stderr,
-  fetch: globalThis.fetch,
-  self: {
-    command: process.execPath,
-    args: script ? [script] : [],
-    ...(process.versions.electron ? { env: { ELECTRON_RUN_AS_NODE: '1' } } : {})
-  }
+  fetch: globalThis.fetch
 }).then((code) => {
   process.exitCode = code
 })

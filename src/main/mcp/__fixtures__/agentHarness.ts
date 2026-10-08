@@ -1,16 +1,12 @@
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import fs from 'fs'
-import path from 'path'
-import { posix } from 'path'
-import { Readable, type Writable } from 'stream'
-import { pipeline } from 'stream/promises'
+import path, { posix } from 'path'
 import Database from 'better-sqlite3'
-import type { Client } from 'basic-ftp'
 import { vi } from 'vitest'
-import { OperationManager } from '../../../operation/OperationManager'
-import { createPasswordVault } from '../../../db/passwordVault'
-import { FakeCipher } from '../../../db/__fixtures__/fakeCipher'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { createMcpHandler } from '@modelcontextprotocol/server'
+import { isImageFile } from '@shared/constants'
 import type {
   ConnectionStatus,
   FtpConnectPayload,
@@ -24,16 +20,20 @@ import type {
   TransferStatus,
   TransferUpdate
 } from '@shared/types/transfer'
-import type { DeleteProgressCallback } from '../../../ftp/FtpFileOperations'
-import type { AgentServiceDeps } from '../index'
+import { OperationManager } from '../../operation/OperationManager'
+import { createPasswordVault } from '../../db/passwordVault'
+import { FakeCipher } from '../../db/__fixtures__/fakeCipher'
+import type { DeleteProgressCallback } from '../../ftp/FtpFileOperations'
+import { createJobTracker } from '../jobTracker'
+import { createMcpToolServer, type McpToolDeps } from '../mcpTools'
 
 /** servers.test.ts와 같은 실제 스키마(마이그레이션 + initDatabase가 덧붙이는 테이블). */
 export function createTestDb(): Database.Database {
   const db = new Database(':memory:')
-  const migrations = path.join(__dirname, '../../../db/migrations')
-  db.exec(fs.readFileSync(path.join(migrations, '001_initial.sql'), 'utf-8'))
-  db.exec(fs.readFileSync(path.join(migrations, '002_server_max_transfers.sql'), 'utf-8'))
-  db.exec(fs.readFileSync(path.join(migrations, '003_server_password_cipher.sql'), 'utf-8'))
+  const migrations = path.join(__dirname, '../../db/migrations')
+  for (const file of fs.readdirSync(migrations).sort()) {
+    db.exec(fs.readFileSync(path.join(migrations, file), 'utf-8'))
+  }
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_servers_host_port ON servers(host, port)')
   db.exec(`CREATE TABLE IF NOT EXISTS server_recent_paths (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,40 +46,16 @@ export function createTestDb(): Database.Database {
   return db
 }
 
-type Node = { type: FtpFileEntry['type']; size: number }
+type Node = { type: FtpFileEntry['type']; size: number; modifiedAt?: string }
 
 /** 550을 흉내 낸 FTP 에러 (basic-ftp FTPError처럼 숫자 code) */
 function ftpError(message: string): Error {
   return Object.assign(new Error(message), { code: 550 })
 }
 
-/** basic-ftp Client 중 remote.readFile이 쓰는 것. 내용을 16 KiB씩 파이프한다(basic-ftp처럼 pipeline). */
-export class FakeFtpClient {
-  /** 받는 쪽으로 넘긴 바이트. 받는 쪽이 멈추면 더 늘지 않는다. */
-  bytesSent = 0
-
-  constructor(private readonly remote: FakeRemote) {}
-
-  downloadTo = vi.fn(async (destination: Writable, remotePath: string) => {
-    const content = this.remote.contents.get(remotePath)
-    if (!content) throw ftpError(`550 ${remotePath}`)
-    await pipeline(Readable.from(this.chunks(content)), destination)
-    return { code: 226, message: '226 Transfer complete' }
-  })
-  close = vi.fn()
-
-  private *chunks(content: Buffer): Generator<Buffer> {
-    for (let i = 0; i < content.length; i += 16 * 1024) {
-      const chunk = content.subarray(i, i + 16 * 1024)
-      this.bytesSent += chunk.length
-      yield chunk
-    }
-  }
-}
-
 /**
  * 메모리 위 원격 트리. FtpConnectionManager(list/connect…)와 FtpFileOperations(mkdir/rename/delete…)
- * 자리에 들어간다. 목 FTP 서버에는 LIST·MKD·DELE·RNFR이 없어 서비스 테스트는 이것을 쓴다.
+ * 자리에 들어간다. 목 FTP 서버에는 LIST·MKD·DELE·RNFR이 없어 도구 테스트는 이것을 쓴다.
  */
 export class FakeRemote extends EventEmitter {
   nodes = new Map<string, Node>([['/', { type: 'directory', size: 0 }]])
@@ -88,23 +64,11 @@ export class FakeRemote extends EventEmitter {
   host = 'nas.local'
   port = 21
   user = 'me'
-  /** list가 실패할 경로 */
-  failList = new Set<string>()
   /** MKD를 조용히 무시하는 서버(ensureRemoteDir가 음수 응답을 삼킨다) */
   ignoreMkd = false
   connectResult: { success: boolean; error?: string; cancelled?: boolean } = { success: true }
-  /** FtpConnectionManager처럼 connect·disconnect마다 늘어난다 */
-  generation = 0
-  /** RETR가 돌려주는 파일 내용(addText) */
-  contents = new Map<string, Buffer>()
-  /** 서버가 보조 연결을 거부한다(연결 수 제한) */
-  refuseSecondary = false
-  /** createSecondaryClient가 만든 클라이언트, 만든 순서대로 */
-  secondaryClients: FakeFtpClient[] = []
-  mainClient = new FakeFtpClient(this)
 
   connect = vi.fn(async (config: FtpConnectPayload) => {
-    this.generation++
     if (!this.connectResult.success) return this.connectResult
     this.connected = true
     this.status = 'connected'
@@ -114,26 +78,23 @@ export class FakeRemote extends EventEmitter {
     return this.connectResult
   })
   disconnect = vi.fn(async () => {
-    this.generation++
     this.connected = false
     this.status = 'disconnected'
   })
   list = vi.fn(async (dir: string): Promise<FtpListResult> => {
     if (!this.connected) throw new Error('Not connected')
-    const key = dir.length > 1 ? dir.replace(/\/+$/, '') : dir
-    if (this.failList.has(key) || this.nodes.get(key)?.type !== 'directory') {
-      throw ftpError(`550 ${key}: No such directory`)
-    }
+    if (this.nodes.get(dir)?.type !== 'directory') throw ftpError(`550 ${dir}: No such directory`)
     const entries: FtpFileEntry[] = []
     for (const [p, node] of this.nodes) {
-      if (p !== '/' && posix.dirname(p) === key) {
+      if (p !== '/' && posix.dirname(p) === dir) {
+        const name = posix.basename(p)
         entries.push({
-          name: posix.basename(p),
+          name,
           type: node.type,
           size: node.size,
-          modifiedAt: '',
+          modifiedAt: node.modifiedAt ?? '',
           rawModifiedAt: '',
-          isImage: false
+          isImage: node.type === 'file' && isImageFile(name)
         })
       }
     }
@@ -144,18 +105,6 @@ export class FakeRemote extends EventEmitter {
   getHost = (): string => this.host
   getPort = (): number => this.port
   getUser = (): string => this.user
-  getConnectGeneration = (): number => this.generation
-  createSecondaryClient = vi.fn(async (): Promise<Client> => {
-    if (this.refuseSecondary) {
-      throw Object.assign(new Error('530 Too many connections'), { code: 530 })
-    }
-    const client = new FakeFtpClient(this)
-    this.secondaryClients.push(client)
-    return client as unknown as Client
-  })
-  runOnMainClient<T>(task: (client: Client) => Promise<T>): Promise<T> {
-    return task(this.mainClient as unknown as Client)
-  }
 
   mkdir = vi.fn(async (dir: string) => {
     if (!this.ignoreMkd) {
@@ -195,14 +144,8 @@ export class FakeRemote extends EventEmitter {
     this.nodes.set(p, { type: 'directory', size: 0 })
     return this
   }
-  addFile(p: string, size = 1): this {
-    this.nodes.set(p, { type: 'file', size })
-    return this
-  }
-  addText(p: string, content: string | Buffer): this {
-    const data = Buffer.from(content)
-    this.nodes.set(p, { type: 'file', size: data.length })
-    this.contents.set(p, data)
+  addFile(p: string, size = 1, modifiedAt?: string): this {
+    this.nodes.set(p, { type: 'file', size, modifiedAt })
     return this
   }
   addLink(p: string): this {
@@ -214,27 +157,22 @@ export class FakeRemote extends EventEmitter {
 /** TransferQueue의 공개 API만 흉내 낸다. 상태는 finish로 바꾸고 queue:updated를 낸다. */
 export class FakeQueue extends EventEmitter {
   jobs: TransferJob[] = []
-  // forceBatch·remoteDirs 인자는 mock.calls로 확인한다
-  enqueueBatch = vi.fn((direction: TransferDirection, items: TransferEnqueueItem[]): string[] => {
-    const added = items.map((item) => ({
-      id: randomUUID(),
-      direction,
-      ...item,
-      transferredBytes: 0,
-      status: 'pending' as TransferStatus
-    }))
-    this.jobs.push(...added)
-    return added.map((job) => job.id)
-  })
-  cancel = vi.fn((id: string): void => {
-    const job = this.jobs.find((j) => j.id === id)
-    if (job && (job.status === 'pending' || job.status === 'active')) job.status = 'cancelled'
-  })
-  clearCompleted = vi.fn((): void => {
-    const removed = this.jobs.filter((j) => j.status !== 'pending' && j.status !== 'active')
-    this.jobs = this.jobs.filter((j) => j.status === 'pending' || j.status === 'active')
-    this.emitUpdate([], removed)
-  })
+  // 실제 큐처럼 여러 항목이거나 forceBatch면 묶음 id를 붙인다. remoteDirs·options는 mock.calls로 본다.
+  enqueueBatch = vi.fn(
+    (direction: TransferDirection, items: TransferEnqueueItem[], forceBatch = false): string[] => {
+      const batchId = items.length > 1 || forceBatch ? randomUUID() : undefined
+      const added = items.map((item) => ({
+        id: randomUUID(),
+        batchId,
+        direction,
+        ...item,
+        transferredBytes: 0,
+        status: 'pending' as TransferStatus
+      }))
+      this.jobs.push(...added)
+      return added.map((job) => job.id)
+    }
+  )
   getAll = (): TransferJob[] => [...this.jobs]
 
   add(fields: Partial<TransferJob> = {}): TransferJob {
@@ -252,53 +190,101 @@ export class FakeQueue extends EventEmitter {
     this.jobs.push(job)
     return job
   }
-  finish(id: string, status: TransferStatus): void {
+  finish(id: string, status: TransferStatus, error?: string): void {
     const job = this.jobs.find((j) => j.id === id)!
     job.status = status
-    this.emitUpdate([job], [])
+    if (error !== undefined) job.error = error
+    this.emit('queue:updated', { upserts: [{ ...job }], removedIds: [] } satisfies TransferUpdate)
   }
-  private emitUpdate(upserts: TransferJob[], removed: TransferJob[]): void {
-    const update: TransferUpdate = {
-      upserts: upserts.map((j) => ({ ...j })),
-      removedIds: removed.map((j) => j.id)
-    }
-    this.emit('queue:updated', update)
+  /** 사용자가 끝난 전송을 목록에서 지운다 */
+  clearCompleted(): void {
+    const removed = this.jobs.filter((j) => j.status !== 'pending' && j.status !== 'active')
+    this.jobs = this.jobs.filter((j) => j.status === 'pending' || j.status === 'active')
+    this.emit('queue:updated', { upserts: [], removedIds: removed.map((j) => j.id) })
   }
 }
 
 export interface Harness {
-  deps: AgentServiceDeps
+  deps: McpToolDeps
   db: Database.Database
   remote: FakeRemote
   queue: FakeQueue
   operations: OperationManager
-  events: { localChanged: ReturnType<typeof vi.fn>; session: ReturnType<typeof vi.fn> }
+  sessions: ReturnType<typeof vi.fn>
 }
 
-/** 서비스 deps를 가짜로 채운다. localFs는 테스트가 실제 LocalFileSystem을 넣는다. */
-export function createHarness(overrides: Partial<AgentServiceDeps> = {}): Harness {
+/** 도구 deps를 가짜 FTP·큐와 실제 OperationManager·DB·비밀번호 금고로 채운다. */
+export function createHarness(overrides: Partial<McpToolDeps> = {}): Harness {
   const db = createTestDb()
   const remote = new FakeRemote()
   const queue = new FakeQueue()
   const operations = new OperationManager()
-  const events = { localChanged: vi.fn(), session: vi.fn() }
-  const deps: AgentServiceDeps = {
+  const sessions = vi.fn()
+  const deps: McpToolDeps = {
+    version: '0.0.0-test',
     db,
     ftp: remote,
     fileOps: remote,
     queue,
     operations,
-    localFs: {
-      list: vi.fn(),
-      mkdir: vi.fn(),
-      rename: vi.fn(),
-      delete: vi.fn(),
-      collectFiles: vi.fn()
-    },
-    events,
+    localFs: { collectFiles: vi.fn(async () => []) },
     passwords: createPasswordVault(db, new FakeCipher()),
+    onSession: sessions,
+    previews: vi.fn(async (requests) =>
+      requests.map(() => ({ ok: true as const, data: 'AAAA', width: 40, height: 30 }))
+    ),
+    jobs: createJobTracker(queue, operations),
     platform: 'linux',
     ...overrides
   }
-  return { deps, db, remote, queue, operations, events }
+  return { deps, db, remote, queue, operations, sessions }
+}
+
+/** 저장된 서버 하나를 넣고 id를 돌려준다. 비밀번호는 평문 열에 둔다(금고가 그대로 읽는다). */
+export function addServer(
+  db: Database.Database,
+  fields: Partial<{ name: string; host: string; port: number; user: string; password: string }> = {}
+): number {
+  const s = { name: '', host: 'nas.local', port: 21, user: 'me', password: 'pw', ...fields }
+  return Number(
+    db
+      .prepare(
+        'INSERT INTO servers (name, host, port, username, password_enc, secure) VALUES (?, ?, ?, ?, ?, 0)'
+      )
+      .run(s.name, s.host, s.port, s.user, s.password).lastInsertRowid
+  )
+}
+
+/** 포트 없이 같은 프로세스에서 SDK 클라이언트로 도구를 부른다. */
+export async function connectClient(deps: McpToolDeps): Promise<Client> {
+  const handler = createMcpHandler(() => createMcpToolServer(deps))
+  const client = new Client({ name: 'test-client', version: '1.0.0' })
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {
+      fetch: (url, init) => handler.fetch(new Request(url, init))
+    })
+  )
+  return client
+}
+
+export type CallResult = Awaited<ReturnType<Client['callTool']>>
+
+export function textOf(result: CallResult): string {
+  const first = result.content[0]
+  return first?.type === 'text' ? first.text : ''
+}
+
+/** 도구 하나를 부르고 결과를 돌려준다. */
+export async function call(
+  client: Client,
+  name: string,
+  args: Record<string, unknown> = {}
+): Promise<CallResult> {
+  return client.callTool({ name, arguments: args })
+}
+
+/** 성공한 결과의 structuredContent */
+export function dataOf<T = Record<string, unknown>>(result: CallResult): T {
+  if (result.isError) throw new Error(`tool failed: ${textOf(result)}`)
+  return result.structuredContent as T
 }

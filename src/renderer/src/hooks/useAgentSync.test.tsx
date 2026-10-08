@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
-import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { emptyDraft } from '@renderer/lib/serverAddress'
 import type { FtpServer } from '@shared/types/ftp'
@@ -33,7 +32,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   listeners.clear()
   mockInvoke.mockImplementation((channel: string, ...args: unknown[]) => {
-    if (channel === 'ftp:list' || channel === 'local:list') {
+    if (channel === 'ftp:list') {
       return Promise.resolve({ success: true, data: { path: args[0], entries: [] } })
     }
     if (channel === 'ftp:getRecentServers')
@@ -56,14 +55,6 @@ beforeEach(() => {
     loading: false,
     history: ['/', '/photos'],
     historyIndex: 1
-  })
-  useLocalFsStore.setState({
-    currentPath: 'C:\\work',
-    entries: [],
-    loading: false,
-    error: null,
-    history: ['C:\\work'],
-    historyIndex: 0
   })
   useServerStore.setState({
     servers: [],
@@ -136,17 +127,6 @@ describe('useAgentSync — remote changes', () => {
     await vi.advanceTimersByTimeAsync(300)
     expect(useFtpStore.getState().currentPath).toBe('/a')
     expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([['/photos'], ['/photos'], ['/a']])
-
-    // 로컬 패널도 같다. Windows 경로는 대소문자와 구분자를 가리지 않고, 이동할 곳은 패널이 쓰던 표기를 따른다.
-    useLocalFsStore.setState({ currentPath: 'C:\\work\\old\\sub' })
-    emit('local:changed', { paths: ['c:/WORK/old/'] })
-    await vi.advanceTimersByTimeAsync(300)
-    expect(useLocalFsStore.getState().currentPath).toBe('C:\\work')
-
-    useLocalFsStore.setState({ currentPath: 'C:\\work' })
-    emit('local:changed', { paths: ['C:\\work'] })
-    await vi.advanceTimersByTimeAsync(300)
-    expect(useLocalFsStore.getState().currentPath).toBe('C:\\')
   })
 
   it('drops a refresh that returns after the user already moved to another folder', async () => {
@@ -160,7 +140,7 @@ describe('useAgentSync — remote changes', () => {
     mockInvoke.mockImplementation(
       (channel: string) =>
         new Promise((resolve) => {
-          if (channel === 'ftp:list' || channel === 'local:list') pending.push(resolve)
+          if (channel === 'ftp:list') pending.push(resolve)
           else resolve({ success: true, data: undefined })
         })
     )
@@ -177,18 +157,6 @@ describe('useAgentSync — remote changes', () => {
       currentPath: '/photos/2024',
       entries: [{ name: 'inside-2024.jpg' }]
     })
-
-    emit('local:changed', { paths: ['C:\\work\\b.txt'] })
-    await vi.advanceTimersByTimeAsync(300)
-    const moving = useLocalFsStore.getState().navigateTo('C:\\other')
-    pending[3](listing('C:\\other', 'other.txt'))
-    await moving
-    pending[2](listing('C:\\work', 'b.txt'))
-    await vi.advanceTimersByTimeAsync(0)
-    expect(useLocalFsStore.getState()).toMatchObject({
-      currentPath: 'C:\\other',
-      entries: [{ name: 'other.txt' }]
-    })
   })
 
   it('ignores remote changes while not connected', async () => {
@@ -199,32 +167,6 @@ describe('useAgentSync — remote changes', () => {
     await vi.advanceTimersByTimeAsync(300)
 
     expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([])
-  })
-})
-
-describe('useAgentSync — local changes', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
-
-  it('refreshes the local pane when it shows the parent of a changed path', async () => {
-    // covers: Test-502
-    renderHook(() => useAgentSync())
-
-    emit('local:changed', { paths: ['C:\\work\\new folder', 'C:\\work\\b.txt'] })
-    await vi.advanceTimersByTimeAsync(299)
-    expect(invokeCalls(mockInvoke, 'local:list')).toEqual([])
-    await vi.advanceTimersByTimeAsync(1)
-    expect(invokeCalls(mockInvoke, 'local:list')).toEqual([['C:\\work']])
-
-    emit('local:changed', { paths: ['D:\\other\\x.txt', 'C:\\work\\sub\\deep.txt'] })
-    await vi.advanceTimersByTimeAsync(1000)
-    expect(invokeCalls(mockInvoke, 'local:list')).toHaveLength(1)
-
-    useLocalFsStore.setState({ currentPath: '/home/kim/Downloads' })
-    emit('local:changed', { paths: ['/home/kim/Downloads/a.jpg'] })
-    await vi.advanceTimersByTimeAsync(300)
-    expect(invokeCalls(mockInvoke, 'local:list')).toEqual([['C:\\work'], ['/home/kim/Downloads']])
   })
 })
 

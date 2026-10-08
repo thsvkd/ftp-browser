@@ -13,7 +13,7 @@ const CONNECTION_CHANGED: PreviewOutcome = {
 }
 
 /**
- * 앱 썸네일 파이프라인(같은 CacheManager·ThumbnailGenerator)으로 미리보기를 만든다(T12).
+ * 앱 썸네일 파이프라인(같은 CacheManager·ThumbnailGenerator)으로 미리보기를 만든다.
  * MCP 전용 ThumbnailQueue는 앱에 하나이고, 파일을 한 번에 하나씩 넣어 보조 FTP 연결을 최대 1개만 쓴다.
  * 동시에 온 호출은 도착 순서대로 기다린다. 할 일이 없어지면 보조 연결을 닫고, 연결 상태가 바뀌면
  * (다른 서버로 연결·해제·끊김) 기다리던 미리보기를 실패로 끝내고 큐를 비운다. 이전 서버에 붙은

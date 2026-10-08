@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync }
 import path from 'path'
 
 /**
- * 에이전트 엔드포인트 발견 파일(docs/handoff/agent-operations.md §2.6 L4). MCP가 listen 중일 때
+ * 에이전트 엔드포인트 발견 파일(docs/handoff/agent-access.md K6). MCP가 listen 중일 때
  * `<userData>/agent/endpoint.json`({ url, pid, version })과 `<userData>/agent/token`(토큰 원문)을 둔다.
  * main(McpService)이 쓰고 지우며, `ftpb` CLI가 읽는다. 그래서 electron을 import하지 않는다.
  */
@@ -32,11 +32,6 @@ const APP_NAME = 'ftp-browser'
 const AGENT_DIR = 'agent'
 const ENDPOINT_FILE = 'endpoint.json'
 const TOKEN_FILE = 'token'
-
-/** `<userData>/agent/token`. Grok Build `bearer_token_file`과 opencode `{file:}`가 직접 가리킨다. */
-export function tokenFilePath(userDataDir: string): string {
-  return path.join(userDataDir, AGENT_DIR, TOKEN_FILE)
-}
 
 /** 임시 파일에 0600으로 쓴 뒤 rename으로 바꿔 넣는다. 읽는 쪽은 반쯤 쓴 파일을 보지 않는다. */
 function writeAtomic(file: string, data: string): void {

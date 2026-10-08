@@ -8,9 +8,9 @@ import { build } from 'vite'
 /**
  * Bundles the `ftpb` CLI (src/main/cli/main.ts) into one self-contained CommonJS file,
  * out/cli/ftpb.cjs: every import inlined, only Node built-ins required, so it runs from any folder
- * under system Node ≥ 18 or the app executable with ELECTRON_RUN_AS_NODE=1 (§2.6 L1). A separate
- * build because electron-vite's main entry externalizes `dependencies` and would split modules
- * shared with the main process into chunks.
+ * under system Node ≥ 18 or the app executable with ELECTRON_RUN_AS_NODE=1 (agent-access K6). A
+ * separate build because electron-vite's main entry externalizes `dependencies` and would split
+ * modules shared with the main process into chunks.
  */
 export async function buildCli({
   root = process.cwd(),

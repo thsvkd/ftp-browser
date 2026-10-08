@@ -110,7 +110,7 @@ type SegmentItem = WorkItem & Required<Pick<WorkItem, 'segment'>>
 /** enqueueBatch 옵션 */
 export interface EnqueueOptions {
   /**
-   * 다운로드를 배타적으로 받는다(에이전트가 넣은 작업, R3). 로컬 파일을 'wx'로 만들어 큐에 있는 사이 그 경로에
+   * 다운로드를 배타적으로 받는다(에이전트가 넣은 작업, agent-access K4). 로컬 파일을 'wx'로 만들어 큐에 있는 사이 그 경로에
    * 생긴 파일이면 덮지 않고 그 작업만 실패하며, 취소·실패 때는 자기가 만든 파일만 지운다. GUI는 쓰지 않는다.
    */
   exclusive?: boolean

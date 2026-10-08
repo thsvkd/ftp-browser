@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 /**
- * GUI 접근성(handoff agent-friendly §2.3 A1–A4). Playwright MCP·OS 접근성 API처럼 화면을
+ * GUI 접근성(handoff agent-access K8). Playwright MCP·OS 접근성 API처럼 화면을
  * 조작하는 에이전트는 접근성 트리의 role과 이름으로 컨트롤을 찾으므로, 둘을 role 쿼리로 고정한다.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

@@ -297,6 +297,27 @@ describe('SettingsDialog agent access (MCP)', () => {
     expect(document.body.textContent).not.toContain(token)
   })
 
+  it('copies the command that runs the bundled ftpb CLI', async () => {
+    // covers: Test-752
+    const token = 'tok_SECRET-value_752'
+    const cliCommand = "ELECTRON_RUN_AS_NODE=1 '/opt/FTP Browser/ftp-browser' '/opt/cli/ftpb.cjs'"
+    serveMcpState(() => ({
+      enabled: true,
+      running: true,
+      url,
+      command: `claude mcp add … Bearer ${token}`,
+      cliCommand
+    }))
+    const user = userEvent.setup()
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Copy CLI command' }))
+
+    await waitFor(async () => expect(await navigator.clipboard.readText()).toBe(cliCommand))
+    expect(toast.success).toHaveBeenCalledWith('CLI command copied')
+    expect(document.body.textContent).not.toContain(token)
+  })
+
   it('shows an error toast when toggling or copying fails instead of failing silently', async () => {
     // covers: Test-294
     const command = 'claude mcp add …'

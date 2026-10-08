@@ -8,7 +8,7 @@ export default defineConfig({
     plugins: [
       externalizeDepsPlugin(),
       // `ftpb` CLI는 main과 따로 out/cli/ftpb.cjs 한 파일로 묶는다(Node 내장 모듈만 require).
-      // main 번들 뒤에 돌아 build·dev·preview 모두 CLI를 만든다(docs/handoff/agent-operations.md L1).
+      // main 번들 뒤에 돌아 build·dev·preview 모두 CLI를 만든다(docs/handoff/agent-access.md K6).
       { name: 'ftpb-cli', apply: 'build', closeBundle: () => buildCli() }
     ],
     resolve: {

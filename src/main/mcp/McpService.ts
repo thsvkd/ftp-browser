@@ -10,7 +10,7 @@ import {
 } from '@modelcontextprotocol/node'
 import { MCP_PORT } from '@shared/constants'
 import type { McpState } from '@shared/types/mcp'
-import { removeDiscovery, writeDiscovery } from '../agent/discovery'
+import { removeDiscovery, writeDiscovery } from './discovery'
 
 /** Claude Code에 이 앱을 user 스코프 HTTP MCP 서버로 등록하는 명령 */
 export function buildClaudeCodeCommand(url: string, token: string): string {
@@ -20,7 +20,7 @@ export function buildClaudeCodeCommand(url: string, token: string): string {
 const validateHost = localhostHostValidation()
 const validateOrigin = localhostOriginValidation()
 
-/** 발견 파일(L4)을 쓸 userData 폴더와 앱 버전. 없으면 쓰지 않는다(테스트). */
+/** 발견 파일(K6)을 쓸 userData 폴더와 앱 버전. 없으면 쓰지 않는다(테스트). */
 export interface DiscoveryOptions {
   userDataDir: string
   version: string

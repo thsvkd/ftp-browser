@@ -26,22 +26,17 @@ Windows 설치판은 앱을 시작할 때 새 버전을 확인합니다. 설정�
 
 ## 에이전트 연동
 
-Claude Code, Codex, Gemini CLI 같은 AI 에이전트가 이 앱을 대신 조작할 수 있습니다. 저장된 서버 연결, 폴더 탐색, 다운로드·업로드, 이름 변경, 삭제를 도구로 열고, 에이전트가 한 일은 앱 창에 그대로 보입니다. 기본으로 꺼져 있습니다.
+Claude Code, Codex 같은 AI 에이전트가 이 앱을 도구로 쓸 수 있습니다. 저장된 서버 연결, 폴더 탐색, 이미지 미리보기, 다운로드·업로드, 이름 변경, 삭제를 할 수 있고, 에이전트가 한 일은 앱 창에 그대로 보입니다. 기본으로 꺼져 있습니다.
 
 1. 설정의 **Agent access (MCP)**에서 **Enable MCP server**를 켭니다. 서버는 이 컴퓨터(`http://127.0.0.1:47821/mcp`)에서만 열리고 접속 토큰을 요구합니다.
-2. **Command-line tool**의 **Install**로 `ftpb` 명령을 설치합니다(macOS·Linux는 `~/.local/bin/ftpb`, Windows는 사용자 폴더의 `ftpb.cmd`와 사용자 PATH). 그 폴더가 PATH에 없으면 화면에 나오는 한 줄을 실행합니다.
-3. **Connect an agent**에서 에이전트를 고르고 **Copy setup**으로 복사한 설정을 그 에이전트에 넣습니다. 터미널에서는 `ftpb setup <client>`가 같은 설정을 보여 줍니다(`ftpb setup --list`로 목록). 대부분의 설정은 토큰을 담지 않고 실행할 때 `ftpb`나 토큰 파일에서 읽습니다.
-4. 셸을 쓰는 에이전트를 위해 **Agent skill**을 설치하면 에이전트가 `ftpb` 사용법을 스스로 찾습니다(`ftpb skill install`과 같음).
+2. MCP 클라이언트에 등록합니다. Claude Code는 **Copy Claude Code command**로 복사한 명령을 터미널에서 실행합니다. 다른 클라이언트도 같은 URL과 `Authorization: Bearer <토큰>` 헤더로 등록합니다.
+3. 셸만 쓰는 에이전트는 **Copy CLI command**로 복사한 명령(앱에 든 `ftpb`를 앱 실행 파일로 돌립니다. Windows는 PowerShell 형식)에 `tools`, `<도구> --help`, `list-directory --path /photos`처럼 인자를 붙여 씁니다. `ftpb`는 앱이 실행 중이어야 동작하고, `--help`가 사용법·위험도·종료 코드(0 성공, 1 도구 오류, 2 사용법 오류, 4 앱 미실행·접근 꺼짐·토큰 거부)와 예제를 보여 줍니다.
 
-`ftpb`는 앱의 MCP 서버에 붙는 얇은 클라이언트라 앱이 꺼져 있으면 동작하지 않습니다. `ftpb tools`로 도구와 위험 등급을, `ftpb <도구> --help`로 인자를 보고 `ftpb list-directory --path /photos`처럼 실행합니다. 파이프로 받으면 JSON을 출력하고, 종료 코드는 0 성공, 1 도구 오류, 2 사용법 오류, 3 앱이 거부, 4 앱 미실행·접근 꺼짐·토큰 거부입니다. Claude Desktop처럼 로컬 HTTP에 직접 붙지 못하는 클라이언트는 `ftpb mcp-stdio` 브리지를 씁니다.
+각 도구 설명의 첫 줄은 위험도(`[RISK: read-only]`, `[RISK: changes state, no data loss]`, `[RISK: uploads local files to the server]`, `[RISK: DESTRUCTIVE — …]`)입니다. 앱은 실행 전에 묻지 않으니 업로드·삭제는 에이전트 도구의 승인 기능으로 확인하세요. 다운로드는 이미 있는 로컬 파일을 덮어쓰지 않고, 이름 변경도 덮어쓰지 않습니다.
 
-`ftpb get-image-previews`가 받은 미리보기는 파일로 저장되고, 출력에는 base64 대신 그 파일 경로(`savedTo`)가 나옵니다. 저장 폴더는 `--save-dir <폴더>`로 정하며 기본은 OS 임시 폴더의 `ftpb-previews`입니다. 앱이 보낸 결과를 base64까지 그대로 보려면 `--raw`를 붙입니다.
+`ftpb`의 출력은 항상 JSON입니다. `get-image-previews`가 받은 미리보기는 OS 임시 폴더의 `ftpb-previews`에 파일로 저장되고, 출력에는 base64 대신 그 경로(`savedTo`)가 나옵니다. 원격 파일 이름처럼 신뢰할 수 없는 문자열은 명령줄 인자가 아니라 stdin의 JSON으로 넘깁니다(`ftpb delete --args - < args.json`). 특히 Windows 셸은 따옴표·`&`·`|`·`%`가 든 인자를 다시 해석합니다.
 
-원격 파일 이름처럼 신뢰할 수 없는 문자열은 명령줄 인자가 아니라 stdin의 JSON으로 넘깁니다. `ftpb call <도구> --args -`는 인자 전체를 stdin에서 JSON 객체 하나로 읽습니다(`ftpb call delete --args - < args.json`). 특히 Windows에서는 `ftpb.cmd`를 cmd.exe가 다시 해석하므로 따옴표·`&`·`|`·`%`가 든 인자가 명령으로 바뀔 수 있습니다. 설치되는 에이전트 스킬도 이렇게 안내합니다.
-
-모든 도구는 R(읽기)·W(데이터 손실 없는 변경)·D(삭제)·X(업로드)·C(서버 설정) 중 한 등급이고, **Permissions**에서 등급마다 Allow·Ask·Block을 고릅니다. 기본값은 D·X·C가 Ask라서 에이전트가 삭제·업로드·서버 설정을 하려 하면 앱이 확인 창을 띄우며, 에이전트가 어떤 클라이언트를 쓰든 이 결정은 앱이 내립니다.
-
-**Regenerate token**을 누르면 이전 토큰은 바로 거부됩니다. 토큰을 직접 담는 설정(Gemini CLI, Qwen Code, VS Code에 입력한 값)만 다시 넣으면 됩니다.
+**Regenerate token**을 누르면 이전 토큰은 바로 거부됩니다. MCP 클라이언트에는 새 명령으로 다시 등록합니다(`ftpb`는 토큰을 앱에서 읽습니다).
 
 ## 자동 검증
 

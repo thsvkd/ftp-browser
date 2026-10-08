@@ -45,6 +45,6 @@ describe('build-cli', () => {
     expect(run.stderr).toBe('')
     expect(run.status).toBe(0)
     expect(run.stdout).toContain('Exit codes')
-    expect(run.stdout).toContain('mcp-stdio')
+    expect(run.stdout).toContain('ftpb tools')
   }, 60_000)
 })

@@ -1,10 +1,8 @@
 import { useEffect } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
-import { useLocalFsStore } from '@renderer/stores/useLocalFsStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
-import { localSyncAction, remoteSyncAction, type SyncAction } from '@renderer/lib/agentSync'
 import { emptyDraft, findSaved, serverAddress } from '@renderer/lib/serverAddress'
-import type { AgentSessionEvent, LocalChangeEvent } from '@shared/types/agent'
+import type { AgentSessionEvent } from '@shared/types/mcp'
 import type { FtpMutationEvent } from '@shared/types/ftp'
 
 /** 변경이 몰려 와도(폴더 업로드·삭제) 목록은 조용해진 뒤 한 번만 다시 읽는다. */
@@ -28,15 +26,36 @@ function debounced<T>(flush: (items: T[]) => void): { push: (item: T) => void; s
   }
 }
 
-function apply(
-  action: SyncAction,
-  pane: { navigateTo: (path: string) => Promise<void>; refresh: () => Promise<void> }
-): void {
-  if (action?.kind === 'navigate') void pane.navigateTo(action.path)
-  else if (action?.kind === 'refresh') void pane.refresh()
+/** POSIX 원격 경로의 부모. 원격 이름에는 `\`가 들어갈 수 있으므로 `/`만 구분자다. */
+function remoteParent(path: string): string {
+  const trimmed = path.replace(/\/+$/, '')
+  const cut = trimmed.lastIndexOf('/')
+  return cut <= 0 ? '/' : trimmed.slice(0, cut)
 }
 
-/** 에이전트가 연 세션을 GUI가 보여 준다(G3). 툴바는 그 서버, 원격 패널은 그 폴더. */
+/**
+ * 원격 변경 묶음에 대해 원격 패널이 할 일. 보고 있는 폴더(또는 그 위)가 지워지거나 옮겨졌으면 그 부모로
+ * 가고, 폴더 안이 바뀌었으면 새로 고친다.
+ */
+function syncRemote(events: FtpMutationEvent[]): void {
+  const ftp = useFtpStore.getState()
+  if (ftp.connectionStatus !== 'connected') return
+  const current = ftp.currentPath
+  for (const { kind, remotePath } of events) {
+    const within = current === remotePath || current.startsWith(`${remotePath}/`)
+    if ((kind === 'delete' || kind === 'rename') && within) {
+      void ftp.navigateTo(remoteParent(remotePath))
+      return
+    }
+  }
+  const touches = events.some(
+    (e) =>
+      remoteParent(e.remotePath) === current || (e.newPath && remoteParent(e.newPath) === current)
+  )
+  if (touches) void ftp.refresh()
+}
+
+/** 에이전트가 연 세션을 GUI가 보여 준다. 툴바는 그 서버, 원격 패널은 그 폴더. */
 async function followSession(event: AgentSessionEvent): Promise<void> {
   const ftp = useFtpStore.getState()
   if (event.status === 'disconnected') {
@@ -70,29 +89,17 @@ async function followSession(event: AgentSessionEvent): Promise<void> {
 }
 
 /**
- * main이 알리는 변경을 GUI에 반영한다(handoff agent-operations §2.5 G1–G3):
- * `ftp:remoteChanged`·`local:changed`는 보고 있는 폴더를 새로 고치거나 벗어나게 하고,
- * `agent:session`은 에이전트가 연결·해제한 세션을 툴바와 원격 패널에 보여 준다.
+ * main이 알리는 변경을 GUI에 반영한다(handoff agent-access K5): `ftp:remoteChanged`는 보고 있는
+ * 원격 폴더를 새로 고치거나 벗어나게 하고, `agent:session`은 에이전트가 연결·해제한 세션을 툴바와
+ * 원격 패널에 보여 준다.
  */
 export function useAgentSync(): void {
   useEffect(() => {
-    const remote = debounced<FtpMutationEvent>((events) => {
-      const ftp = useFtpStore.getState()
-      if (ftp.connectionStatus !== 'connected') return
-      apply(remoteSyncAction(events, ftp.currentPath), ftp)
-    })
-    const local = debounced<string>((paths) => {
-      const pane = useLocalFsStore.getState()
-      if (!pane.currentPath) return
-      apply(localSyncAction(paths, pane.currentPath), pane)
-    })
+    const remote = debounced<FtpMutationEvent>(syncRemote)
 
     const unsubscribers = [
       window.api.on('ftp:remoteChanged', (...args: unknown[]) => {
         remote.push(args[0] as FtpMutationEvent)
-      }),
-      window.api.on('local:changed', (...args: unknown[]) => {
-        for (const path of (args[0] as LocalChangeEvent).paths) local.push(path)
       }),
       window.api.on('agent:session', (...args: unknown[]) => {
         // 사용자가 직접 연결하는 중이면 그 흐름이 툴바와 패널을 정한다.
@@ -103,7 +110,6 @@ export function useAgentSync(): void {
     return () => {
       for (const unsubscribe of unsubscribers) unsubscribe()
       remote.stop()
-      local.stop()
     }
   }, [])
 }
