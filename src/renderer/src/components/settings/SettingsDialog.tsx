@@ -157,19 +157,17 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-6" onClick={onClose}>
+      {/* 머리말·꼬리말은 고정하고 본문만 스크롤한다. 스크롤바가 내용에 붙지 않도록 본문에 좌우 여백을 둔다. */}
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-dialog-title"
-        className="w-[480px] rounded-lg bg-white p-6 shadow-xl"
+        className="flex max-h-full w-[680px] max-w-full flex-col overflow-hidden rounded-lg bg-white shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 id="settings-dialog-title" className="text-lg font-semibold">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200 px-6">
+          <h2 id="settings-dialog-title" className="text-base font-semibold">
             {t('settings.title')}
           </h2>
           <button
@@ -179,16 +177,16 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
           >
             <X size={18} />
           </button>
-        </div>
+        </header>
 
-        <div className="max-h-[calc(100vh_-_12rem)] space-y-6 overflow-y-auto">
+        <div className="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto px-6 [scrollbar-gutter:stable] [&>section]:py-5">
           <section>
-            <label className="flex items-center justify-between">
+            <label className="flex items-center justify-between gap-6">
               <span className="text-sm text-gray-700">{t('settings.language')}</span>
               <select
                 value={language}
                 onChange={(e) => setLanguage(e.target.value as LanguageSetting)}
-                className="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700 focus:border-blue-500 focus:outline-none"
+                className="w-56 rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-700 focus:border-blue-500 focus:outline-none"
               >
                 <option value="system">{t('settings.languageSystem')}</option>
                 {LOCALES.map((l) => (
@@ -202,30 +200,36 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
 
           {/* Gallery */}
           <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
               {t('settings.gallery')}
             </h3>
-            <div className="flex items-center justify-between">
-              <label htmlFor="thumb-size" className="text-sm text-gray-700">
-                {t('settings.thumbnailSize')}
-              </label>
-              <span className="text-sm tabular-nums text-gray-500">{galleryThumbSize}px</span>
+            <div className="flex items-center justify-between gap-6">
+              <div className="min-w-0">
+                <label htmlFor="thumb-size" className="text-sm text-gray-700">
+                  {t('settings.thumbnailSize')}
+                </label>
+                <p className="mt-0.5 break-keep text-xs text-gray-500">{t('settings.zoomTip')}</p>
+              </div>
+              <div className="flex w-48 shrink-0 items-center gap-3">
+                <input
+                  id="thumb-size"
+                  type="range"
+                  min={GALLERY_THUMB_MIN}
+                  max={GALLERY_THUMB_MAX}
+                  value={galleryThumbSize}
+                  onChange={(e) => setGalleryThumbSize(Number(e.target.value))}
+                  className="min-w-0 flex-1 accent-blue-600"
+                />
+                <span className="w-12 text-right text-sm tabular-nums text-gray-500">
+                  {galleryThumbSize}px
+                </span>
+              </div>
             </div>
-            <input
-              id="thumb-size"
-              type="range"
-              min={GALLERY_THUMB_MIN}
-              max={GALLERY_THUMB_MAX}
-              value={galleryThumbSize}
-              onChange={(e) => setGalleryThumbSize(Number(e.target.value))}
-              className="mt-2 w-full accent-blue-600"
-            />
-            <p className="mt-1 text-xs text-gray-400">{t('settings.zoomTip')}</p>
           </section>
 
           {/* Browsing */}
           <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
               {t('settings.browsing')}
             </h3>
             <label className="flex cursor-pointer items-center justify-between py-1">
@@ -250,7 +254,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
 
           {/* Cache */}
           <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
               {t('settings.cache')}
             </h3>
             <div className="flex items-center justify-between">
@@ -278,17 +282,17 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
 
           {/* Updates */}
           <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
               {t('settings.updates')}
             </h3>
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center justify-between gap-6">
               <div className="min-w-0">
                 <div className="text-sm text-gray-700">
                   {updateState
                     ? t('update.version', { version: updateState.currentVersion })
                     : t('update.versionUnknown')}
                 </div>
-                <p className="mt-0.5 text-xs text-gray-400">{updateDescription()}</p>
+                <p className="mt-0.5 text-xs text-gray-500">{updateDescription()}</p>
               </div>
               {updateState?.status === 'available' ? (
                 <button
@@ -322,10 +326,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 </button>
               ) : null}
             </div>
-            <label className="mt-2 flex cursor-pointer items-center justify-between py-1">
+            <label className="mt-3 flex cursor-pointer items-center justify-between gap-6 py-1">
               <span className="text-sm text-gray-700">
                 {t('update.auto')}
-                <span className="block text-xs text-gray-400">{t('update.autoDescription')}</span>
+                <span className="mt-0.5 block text-xs text-gray-500">
+                  {t('update.autoDescription')}
+                </span>
               </span>
               <input
                 type="checkbox"
@@ -339,13 +345,15 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
 
           {/* Agent access (MCP) */}
           <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
               {t('settings.mcp')}
             </h3>
-            <label className="flex cursor-pointer items-center justify-between gap-4 py-1">
+            <label className="flex cursor-pointer items-center justify-between gap-6 py-1">
               <span className="text-sm text-gray-700">
                 {t('settings.mcpEnable')}
-                <span className="block text-xs text-gray-400">{t('settings.mcpDescription')}</span>
+                <span className="mt-0.5 block text-xs leading-relaxed text-gray-500">
+                  {t('settings.mcpDescription')}
+                </span>
               </span>
               <input
                 type="checkbox"
@@ -356,21 +364,21 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
               />
             </label>
             {mcpState?.enabled && (
-              <>
+              <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
                 <p
-                  className={`mt-1 break-all text-xs ${mcpState.error ? 'text-red-600' : 'text-gray-400'}`}
+                  className={`break-all text-xs ${mcpState.error ? 'text-red-600' : 'text-gray-500'}`}
                 >
                   {mcpState.error
                     ? t('settings.mcpStartFailed', { reason: mcpState.error })
                     : t('settings.mcpRunning', { url: mcpState.url })}
                 </p>
-                <div className="mt-2 flex gap-2">
+                <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     onClick={() =>
                       void copyCommand(mcpState.command, t('settings.mcpCommandCopied'))
                     }
                     disabled={!mcpState.command}
-                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('settings.mcpCopyCommand')}
                   </button>
@@ -379,30 +387,30 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                       void copyCommand(mcpState.cliCommand, t('settings.mcpCliCommandCopied'))
                     }
                     disabled={!mcpState.cliCommand}
-                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('settings.mcpCopyCliCommand')}
                   </button>
                   <button
                     onClick={() => void regenerateMcpToken()}
-                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
                   >
                     {t('settings.mcpRegenerateToken')}
                   </button>
                 </div>
-              </>
+              </div>
             )}
           </section>
         </div>
 
-        <div className="mt-6 flex justify-end">
+        <footer className="flex h-14 shrink-0 items-center justify-end border-t border-gray-200 bg-gray-50/70 px-6">
           <button
             onClick={onClose}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
           >
             {t('common.done')}
           </button>
-        </div>
+        </footer>
       </div>
     </div>
   )
