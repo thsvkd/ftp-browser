@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({
@@ -95,10 +96,13 @@ describe('CLI command', () => {
 
     const cli = bundledCliPath(asarMain)
 
+    // bundledCliPath는 path.join을 쓰므로 기대값도 실행 OS의 구분자로 맞춘다(Windows CI).
     expect(cli).toBe(
-      '/Applications/FTP Browser.app/Contents/Resources/app.asar.unpacked/out/cli/ftpb.cjs'
+      path.join(
+        '/Applications/FTP Browser.app/Contents/Resources/app.asar.unpacked/out/cli/ftpb.cjs'
+      )
     )
-    expect(bundledCliPath('/repo/out/main')).toBe('/repo/out/cli/ftpb.cjs')
+    expect(bundledCliPath('/repo/out/main')).toBe(path.join('/repo/out/cli/ftpb.cjs'))
     expect(buildCliCommand('darwin', mac, cli)).toBe(`ELECTRON_RUN_AS_NODE=1 '${mac}' '${cli}'`)
     expect(buildCliCommand('linux', "/opt/it's/ftp-browser", '/opt/cli.cjs')).toBe(
       `ELECTRON_RUN_AS_NODE=1 '/opt/it'\\''s/ftp-browser' '/opt/cli.cjs'`
