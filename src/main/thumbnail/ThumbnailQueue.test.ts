@@ -307,4 +307,19 @@ describe('ThumbnailQueue.cancelAll — cancelled work leaves nothing behind', ()
     await h.fail(remotePath(1))
     expect(h.onError.mock.calls).toEqual([[keyOf(1), '550 Permission denied']])
   })
+
+  it('downloads an item again when it is requested while its cancelled run is still connecting', async () => {
+    // (회귀) 폴더 A → B → Back으로 A: 취소된 작업이 아직 연결 중이면 같은 키의 새 요청이 중복으로 걸러져 셀이 비었다.
+    const h = harness({ holdFirstConnect: true })
+    h.queue.request(req(0))
+    await flush()
+
+    h.queue.cancelAll()
+    h.queue.request(req(0))
+    h.releaseConnect()
+    await h.drain()
+
+    expect(h.started).toEqual([remotePath(0)])
+    expect(h.onReady.mock.calls.map((call) => call[0].cacheKey)).toEqual([keyOf(0)])
+  })
 })

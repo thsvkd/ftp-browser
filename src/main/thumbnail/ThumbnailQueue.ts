@@ -32,7 +32,8 @@ type ErrorCallback = (cacheKey: string, error: string) => void
 export class ThumbnailQueue {
   private queue: Array<ThumbnailRequest & { cacheKey: string }> = []
   private activeCount = 0
-  private processing = new Set<string>()
+  /** 진행 중인 키 → 시작한 세대. cancelAll 뒤의 옛 세대 작업은 같은 키의 새 요청을 막지 않는다 */
+  private processing = new Map<string, number>()
   /** 직전 requestBatch의 키. 다음 배치는 이 중 빠진 미시작 항목을 버린다 */
   private batchKeys = new Set<string>()
 
@@ -69,7 +70,7 @@ export class ThumbnailQueue {
   request(req: ThumbnailRequest): string {
     const cacheKey = this.cacheKeyOf(req)
 
-    if (this.processing.has(cacheKey)) return cacheKey
+    if (this.processing.get(cacheKey) === this.generation) return cacheKey
     if (this.queue.some((q) => q.cacheKey === cacheKey)) return cacheKey
 
     // Check cache first (synchronous)
@@ -176,9 +177,9 @@ export class ThumbnailQueue {
 
     const item = this.queue.shift()!
     this.activeCount++
-    this.processing.add(item.cacheKey)
     // 전역 플래그는 다음 항목이 되돌려 버리므로, 시작 시점의 세대로 취소 여부를 판단한다
     const generation = this.generation
+    this.processing.set(item.cacheKey, generation)
 
     let secondaryClient: Client | null = null
 
@@ -262,7 +263,8 @@ export class ThumbnailQueue {
       }
     } finally {
       this.activeCount--
-      this.processing.delete(item.cacheKey)
+      // 같은 키를 새 세대가 다시 시작했으면 그 표시는 지우지 않는다
+      if (this.processing.get(item.cacheKey) === generation) this.processing.delete(item.cacheKey)
       this.processNext()
     }
   }
