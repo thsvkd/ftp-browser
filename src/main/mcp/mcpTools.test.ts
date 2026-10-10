@@ -60,7 +60,7 @@ const RISK_LINES = {
 const RISK_HINTS = {
   read: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   write: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
-  upload: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  upload: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
   delete: { readOnlyHint: false, destructiveHint: true, idempotentHint: false }
 }
 
@@ -418,6 +418,10 @@ describe('errors and safety', () => {
   it('rejects relative local paths and control characters before touching the disk', async () => {
     // covers: Test-471
     await expectLocalPathRejected(['relative/dir', 'C:x', '/tmp/a\nb', '/tmp/tab\there'])
+  })
+
+  it('rejects network (UNC) local paths so stat never opens an SMB connection', async () => {
+    await expectLocalPathRejected(['\\\\evil\\share', '//evil/share', '\\\\?\\C:\\x'])
   })
 
   it("rejects '..' segments in local paths with either separator", async () => {

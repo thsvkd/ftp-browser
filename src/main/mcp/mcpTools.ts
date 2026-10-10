@@ -34,7 +34,8 @@ export interface McpToolDeps extends ops.AgentDeps {
 const RISKS = {
   read: ['[RISK: read-only]', true, false],
   write: ['[RISK: changes state, no data loss]', false, false],
-  upload: ['[RISK: uploads local files to the server]', false, false],
+  // overwrite: true면 원격 파일을 덮어쓰므로 destructiveHint를 켠다(앱이 묻지 않으니 어노테이션이 유일한 신호다).
+  upload: ['[RISK: uploads local files to the server]', false, true],
   delete: ['[RISK: DESTRUCTIVE — permanently deletes; FTP has no trash]', false, true]
 } as const
 
@@ -116,14 +117,25 @@ const remotePath = z
       "except for the root '/', e.g. '/photos/2024'."
   )
 
-/** 로컬 경로는 이 OS의 절대경로만, 제어문자와 `..` 세그먼트(`/`·`\` 모두) 없이(K4). */
+/**
+ * 로컬 경로는 이 OS의 절대경로만, 제어문자와 `..` 세그먼트(`/`·`\` 모두) 없이(K4).
+ * `\\host\share`·`//host` 같은 네트워크 경로도 거절한다: Windows에서 stat만으로 SMB 접속이 열려 NTLM 해시가 나간다.
+ */
 const localPath = z
   .string()
-  .refine((p) => isAbsolute(p) && !/\p{Cc}/u.test(p) && !p.split(/[\\/]/).includes('..'), {
-    message:
-      "Use an absolute local path without '..' segments, e.g. /home/me/Downloads or " +
-      'C:\\Users\\me\\Downloads. Paths cannot contain control characters.'
-  })
+  .refine(
+    (p) =>
+      isAbsolute(p) &&
+      !/^[\\/]{2}/.test(p) &&
+      !/\p{Cc}/u.test(p) &&
+      !p.split(/[\\/]/).includes('..'),
+    {
+      message:
+        "Use an absolute local path without '..' segments, e.g. /home/me/Downloads or " +
+        'C:\\Users\\me\\Downloads. Paths cannot contain control characters or be network ' +
+        'paths starting with \\\\ or //.'
+    }
+  )
 
 /** 호출당 경로 100개 상한(K4) */
 const pathList = <T extends z.ZodType>(item: T, max = 100): z.ZodArray<T> =>
