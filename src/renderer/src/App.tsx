@@ -3,6 +3,7 @@ import { Toaster } from 'sonner'
 import { useLocale } from '@renderer/i18n'
 import { AppShell } from '@renderer/components/layout/AppShell'
 import { ConfirmDialog } from '@renderer/components/common/ConfirmDialog'
+import { useThemeSource } from '@renderer/hooks/useThemeSource'
 
 function App(): React.JSX.Element {
   const locale = useLocale()
@@ -10,6 +11,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     document.documentElement.lang = locale
   }, [locale])
+  useThemeSource()
 
   return (
     <>

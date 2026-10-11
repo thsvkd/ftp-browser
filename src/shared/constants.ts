@@ -30,3 +30,7 @@ export function isImageFile(filename: string): boolean {
   const ext = filename.substring(filename.lastIndexOf('.')).toLowerCase()
   return IMAGE_EXTENSIONS.has(ext)
 }
+
+/** 앱 테마. `system`은 OS 설정을 따른다(Electron `nativeTheme.themeSource`와 같은 값). */
+export const THEME_SETTINGS = ['system', 'light', 'dark'] as const
+export type ThemeSetting = (typeof THEME_SETTINGS)[number]

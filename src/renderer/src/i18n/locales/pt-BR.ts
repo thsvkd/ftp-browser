@@ -178,6 +178,10 @@ export const ptBR = {
   'settings.close': 'Fechar configurações',
   'settings.language': 'Idioma',
   'settings.languageSystem': 'Padrão do sistema',
+  'settings.theme': 'Tema',
+  'settings.themeSystem': 'Padrão do sistema',
+  'settings.themeLight': 'Claro',
+  'settings.themeDark': 'Escuro',
   'settings.grid': 'Grade',
   'settings.thumbnailSize': 'Tamanho das miniaturas',
   'settings.zoomTip':

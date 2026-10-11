@@ -182,6 +182,10 @@ export const de = {
   'settings.close': 'Einstellungen schließen',
   'settings.language': 'Sprache',
   'settings.languageSystem': 'Systemstandard',
+  'settings.theme': 'Design',
+  'settings.themeSystem': 'Systemstandard',
+  'settings.themeLight': 'Hell',
+  'settings.themeDark': 'Dunkel',
   'settings.grid': 'Raster',
   'settings.thumbnailSize': 'Größe der Miniaturansichten',
   'settings.zoomTip':

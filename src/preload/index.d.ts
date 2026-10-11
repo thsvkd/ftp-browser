@@ -26,6 +26,7 @@ type InvokeChannel =
   | 'local:mkdir'
   | 'local:getPlaces'
   | 'local:preview'
+  | 'app:setTheme'
   | 'transfer:enqueue'
   | 'transfer:enqueueBatch'
   | 'transfer:cancel'

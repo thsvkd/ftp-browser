@@ -181,6 +181,10 @@ export const fr = {
   'settings.close': 'Fermer les paramètres',
   'settings.language': 'Langue',
   'settings.languageSystem': 'Langue du système',
+  'settings.theme': 'Thème',
+  'settings.themeSystem': 'Thème du système',
+  'settings.themeLight': 'Clair',
+  'settings.themeDark': 'Sombre',
   'settings.grid': 'Grille',
   'settings.thumbnailSize': 'Taille des miniatures',
   'settings.zoomTip':

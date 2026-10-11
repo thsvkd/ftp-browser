@@ -147,6 +147,16 @@ describe('preload api', () => {
     }
   })
 
+  it('should allow choosing the app theme', async () => {
+    // covers: Test-844
+    const api = await loadExposedApi()
+    const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>
+
+    await invoke('app:setTheme', 'dark')
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('app:setTheme', 'dark')
+  })
+
   it('should allow saving a server without connecting', async () => {
     const api = await loadExposedApi()
     const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>

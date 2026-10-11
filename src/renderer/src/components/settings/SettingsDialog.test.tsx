@@ -9,6 +9,7 @@ import { useOperationStore } from '@renderer/stores/useOperationStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { ConfirmDialog } from '@renderer/components/common/ConfirmDialog'
 import type { McpState } from '@shared/types/mcp'
+import { useThemeSource } from '@renderer/hooks/useThemeSource'
 import { SettingsDialog } from './SettingsDialog'
 
 vi.mock('sonner', () => ({
@@ -387,6 +388,46 @@ describe('SettingsDialog localization', () => {
     expect(
       screen.getByText('앱을 시작할 때 업데이트를 확인합니다.', { selector: 'p' })
     ).not.toBeNull()
+  })
+})
+
+describe('SettingsDialog theme', () => {
+  afterEach(() => {
+    useSettingsStore.setState({ theme: 'system' })
+  })
+
+  it('defaults to system, saves the choice and sends it to main on start and on change', async () => {
+    // covers: Test-845
+    const user = userEvent.setup()
+    useSettingsStore.setState({ theme: 'dark' })
+    // 앱 셸처럼 테마 동기화 훅을 띄운다
+    function Harness(): React.JSX.Element {
+      useThemeSource()
+      return <SettingsDialog open={true} onClose={vi.fn()} />
+    }
+    render(<Harness />)
+
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'app:setTheme')).toEqual([['dark']]))
+    const select = screen.getByRole('combobox', { name: 'Theme' }) as HTMLSelectElement
+    expect(select.value).toBe('dark')
+    expect([...select.options].map((o) => [o.value, o.text])).toEqual([
+      ['system', 'System default'],
+      ['light', 'Light'],
+      ['dark', 'Dark']
+    ])
+
+    await user.selectOptions(select, 'light')
+
+    expect(useSettingsStore.getState().theme).toBe('light')
+    await waitFor(() =>
+      expect(invokeCalls(mockInvoke, 'app:setTheme')).toEqual([['dark'], ['light']])
+    )
+  })
+
+  it('starts from the system theme', () => {
+    // covers: Test-845
+    useSettingsStore.persist.clearStorage()
+    expect(useSettingsStore.getInitialState().theme).toBe('system')
   })
 })
 

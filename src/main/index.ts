@@ -12,6 +12,7 @@ import { registerPreviewHandlers } from './ipc/previewHandlers'
 import { registerDragHandlers } from './ipc/dragHandlers'
 import { registerGalleryHandlers } from './ipc/galleryHandlers'
 import { registerUpdateHandlers } from './ipc/updateHandlers'
+import { registerAppHandlers } from './ipc/appHandlers'
 import { buildCliCommand, bundledCliPath, registerMcpHandlers } from './ipc/mcpHandlers'
 import { McpService } from './mcp/McpService'
 import { createMcpToolServer, type McpToolDeps } from './mcp/mcpTools'
@@ -135,6 +136,7 @@ app.whenReady().then(() => {
   registerPreviewHandlers(db, manager)
   registerDragHandlers(manager)
   registerGalleryHandlers(win, db, manager)
+  registerAppHandlers()
 
   // 에이전트(내장 MCP 서버, ftpb)는 GUI와 같은 연결·전송 큐·파일 작업·썸네일 캐시를 쓴다(기본 꺼짐).
   const agentDeps: McpToolDeps = {

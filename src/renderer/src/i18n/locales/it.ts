@@ -179,6 +179,10 @@ export const it = {
   'settings.close': 'Chiudi impostazioni',
   'settings.language': 'Lingua',
   'settings.languageSystem': 'Predefinita di sistema',
+  'settings.theme': 'Tema',
+  'settings.themeSystem': 'Predefinito di sistema',
+  'settings.themeLight': 'Chiaro',
+  'settings.themeDark': 'Scuro',
   'settings.grid': 'Griglia',
   'settings.thumbnailSize': 'Dimensione delle miniature',
   'settings.zoomTip':

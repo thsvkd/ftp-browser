@@ -10,6 +10,7 @@ import { LOCALES, useLocale, useT, type LanguageSetting } from '@renderer/i18n'
 import type { IpcResult } from '@shared/types/ipc'
 import type { UpdateState } from '@shared/types/update'
 import type { McpState } from '@shared/types/mcp'
+import type { ThemeSetting } from '@shared/constants'
 
 interface SettingsDialogProps {
   open: boolean
@@ -29,6 +30,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   const confirmBeforeDelete = useSettingsStore((s) => s.confirmBeforeDelete)
   const language = useSettingsStore((s) => s.language)
   const setLanguage = useSettingsStore((s) => s.setLanguage)
+  const theme = useSettingsStore((s) => s.theme)
+  const setTheme = useSettingsStore((s) => s.setTheme)
   const t = useT()
   const locale = useLocale()
   const setConfirmBeforeDelete = useSettingsStore((s) => s.setConfirmBeforeDelete)
@@ -191,6 +194,18 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                     {l.name}
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="mt-3 flex items-center justify-between gap-6">
+              <span className="text-sm text-[var(--tx)]">{t('settings.theme')}</span>
+              <select
+                value={theme}
+                onChange={(e) => setTheme(e.target.value as ThemeSetting)}
+                className="w-56 rounded-md border border-[var(--bd2)] px-2 py-1.5 text-sm text-[var(--tx)] focus:border-[var(--ac)] focus:outline-none"
+              >
+                <option value="system">{t('settings.themeSystem')}</option>
+                <option value="light">{t('settings.themeLight')}</option>
+                <option value="dark">{t('settings.themeDark')}</option>
               </select>
             </label>
           </section>

@@ -30,6 +30,8 @@ const INVOKE_CHANNELS = [
   'local:mkdir',
   'local:getPlaces',
   'local:preview',
+  // App
+  'app:setTheme',
   // Transfer
   'transfer:enqueue',
   'transfer:enqueueBatch',

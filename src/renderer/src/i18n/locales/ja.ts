@@ -170,6 +170,10 @@ export const ja = {
   'settings.close': '設定を閉じる',
   'settings.language': '言語',
   'settings.languageSystem': 'システムの設定を使用',
+  'settings.theme': 'テーマ',
+  'settings.themeSystem': 'システムの設定を使用',
+  'settings.themeLight': 'ライト',
+  'settings.themeDark': 'ダーク',
   'settings.grid': 'グリッド',
   'settings.thumbnailSize': 'サムネイルのサイズ',
   'settings.zoomTip':

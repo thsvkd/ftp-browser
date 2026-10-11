@@ -199,6 +199,10 @@ export const ru = {
   'settings.close': 'Закрыть настройки',
   'settings.language': 'Язык',
   'settings.languageSystem': 'Как в системе',
+  'settings.theme': 'Тема',
+  'settings.themeSystem': 'Как в системе',
+  'settings.themeLight': 'Светлая',
+  'settings.themeDark': 'Тёмная',
   'settings.grid': 'Сетка',
   'settings.thumbnailSize': 'Размер эскизов',
   'settings.zoomTip':

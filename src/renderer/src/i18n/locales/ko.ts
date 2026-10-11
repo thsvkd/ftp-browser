@@ -167,6 +167,10 @@ export const ko = {
   'settings.close': '설정 닫기',
   'settings.language': '언어',
   'settings.languageSystem': '시스템 설정 사용',
+  'settings.theme': '테마',
+  'settings.themeSystem': '시스템 설정 사용',
+  'settings.themeLight': '밝게',
+  'settings.themeDark': '어둡게',
   'settings.grid': '격자',
   'settings.thumbnailSize': '썸네일 크기',
   'settings.zoomTip':
