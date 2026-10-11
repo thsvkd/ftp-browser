@@ -28,12 +28,16 @@ const INVOKE_CHANNELS = [
   'local:deleteBatch',
   'local:rename',
   'local:mkdir',
+  'local:getPlaces',
+  'local:preview',
   // Transfer
   'transfer:enqueue',
   'transfer:enqueueBatch',
   'transfer:cancel',
   'transfer:clearCompleted',
   'transfer:getAll',
+  'transfer:send',
+  'transfer:retry',
   // File operations (copy/move/delete progress)
   'operation:cancel',
   'operation:clearFinished',

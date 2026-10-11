@@ -47,11 +47,14 @@ export class LocalFileSystem {
   }
 
   /**
-   * Recursively collect every file under `root`, with paths relative to `root`
-   * and their sizes. Used to build a flat work list for copy progress.
+   * Recursively collect every file under `root`, with paths relative to `root`,
+   * their sizes and modification times (ISO). Used to build a flat work list for
+   * copy progress and upload plans.
    */
-  async collectFiles(root: string): Promise<Array<{ abs: string; rel: string; size: number }>> {
-    const out: Array<{ abs: string; rel: string; size: number }> = []
+  async collectFiles(
+    root: string
+  ): Promise<Array<{ abs: string; rel: string; size: number; modifiedAt: string }>> {
+    const out: Array<{ abs: string; rel: string; size: number; modifiedAt: string }> = []
 
     const walk = async (dir: string, rel: string): Promise<void> => {
       const dirents = await fs.readdir(dir, { withFileTypes: true })
@@ -62,7 +65,7 @@ export class LocalFileSystem {
           await walk(abs, childRel)
         } else if (dirent.isFile()) {
           const stat = await fs.stat(abs)
-          out.push({ abs, rel: childRel, size: stat.size })
+          out.push({ abs, rel: childRel, size: stat.size, modifiedAt: stat.mtime.toISOString() })
         }
       }
     }

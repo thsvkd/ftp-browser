@@ -911,6 +911,168 @@ describe('TransferQueue', () => {
     })
   })
 
+  describe('retry(ids)', () => {
+    /** 재시도하지 않는 실패(550) */
+    const denied = (): Error => Object.assign(new Error('550 Permission denied'), { code: 550 })
+
+    it('should revive a failed job under the same id and batch and run it to completion', async () => {
+      // covers: Test-759
+      pool.limit = 1
+      const download = mockFileOps.download as ReturnType<typeof vi.fn>
+      const transfers = deferTransfers(download)
+      download.mockRejectedValueOnce(denied())
+      const ids = queue.enqueueBatch('download', items(2))
+      // 실패 변경분까지 내보내 둔다. 아래 대기 상태는 retry가 따로 알려야 한다
+      await vi.advanceTimersByTimeAsync(200)
+      const failed = queue.getAll()[0]
+      expect(failed).toMatchObject({ status: 'failed', error: expect.any(String) })
+      const listener = vi.fn()
+      queue.on('queue:updated', listener)
+
+      queue.retry([ids[0]])
+
+      expect(queue.getAll()[0]).toMatchObject({
+        id: ids[0],
+        batchId: failed.batchId,
+        status: 'pending',
+        transferredBytes: 0
+      })
+      for (const field of ['error', 'retryCount', 'startedAt', 'completedAt'] as const) {
+        expect(queue.getAll()[0][field]).toBeUndefined()
+      }
+      // 1번이 슬롯을 쥐고 있어 0번은 대기로 남고, 그 상태가 렌더러로 나간다
+      await vi.advanceTimersByTimeAsync(200)
+      const sent = listener.mock.calls.flatMap(([update]) => update.upserts)
+      expect(sent).toContainEqual(expect.objectContaining({ id: ids[0], status: 'pending' }))
+
+      transfers.get('/remote/1.jpg')!.resolve()
+      await settle()
+      transfers.get('/remote/0.jpg')!.resolve()
+      await settle()
+      expect(queue.getAll().map((job) => [job.id, job.status])).toEqual([
+        [ids[0], 'completed'],
+        [ids[1], 'completed']
+      ])
+      expect(download).toHaveBeenCalledTimes(3)
+      // GUI 다운로드의 재시도는 claim 없이 돈다
+      expect(download.mock.calls[2][4]).toBeUndefined()
+    })
+
+    it('should keep an exclusive download claim on retry so it reopens the partial file it left', async () => {
+      // covers: Test-759
+      const seen: Array<{ created: boolean } | undefined> = []
+      ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockImplementation(
+        async (
+          _remote: string,
+          _local: string,
+          _onProgress: unknown,
+          _client: unknown,
+          claim?: { created: boolean }
+        ) => {
+          seen.push(claim && { ...claim })
+          if (seen.length === 1) {
+            // 첫 시도가 파일을 만들고 받다가 실패한다. 받다 만 파일은 남는다
+            claim!.created = true
+            throw denied()
+          }
+        }
+      )
+      const [id] = queue.enqueueBatch('download', items(1), false, undefined, { exclusive: true })
+      await settle()
+      expect(queue.getAll()[0].status).toBe('failed')
+
+      queue.retry([id])
+      await settle()
+
+      expect(queue.getAll()[0].status).toBe('completed')
+      // 'wx'로 열면 자기 파일에 EEXIST로 늘 실패한다
+      expect(seen).toEqual([{ created: false }, { created: true }])
+    })
+
+    it('should ignore jobs that have not failed and unknown ids', async () => {
+      // covers: Test-760
+      pool.limit = 1
+      const transfers = deferTransfers(mockFileOps.download)
+      const ids = queue.enqueueBatch('download', items(3))
+      await settle()
+      queue.cancel(ids[2])
+      const snapshot = (): TransferJob[] => queue.getAll().map((job) => ({ ...job }))
+      const before = snapshot()
+      expect(before.map((job) => job.status)).toEqual(['active', 'pending', 'cancelled'])
+
+      queue.retry([...ids, 'unknown'])
+      await settle()
+      expect(snapshot()).toEqual(before)
+
+      transfers.get('/remote/0.jpg')!.resolve()
+      await settle()
+      transfers.get('/remote/1.jpg')!.resolve()
+      await settle()
+      const done = snapshot()
+      queue.retry([ids[0], ids[1]])
+      await settle()
+
+      expect(snapshot()).toEqual(done)
+      expect(mockFileOps.download).toHaveBeenCalledTimes(2)
+    })
+
+    it('should ensure the parent folder again before retrying an upload of a batch with remote dirs', async () => {
+      // covers: Test-761
+      const events: string[] = []
+      pool.acquire.mockImplementation(async () => {
+        const client = createFakeClient()
+        client.sendIgnoringError.mockImplementation(async (command: string) => {
+          events.push(command)
+          return MKD_OK
+        })
+        pool.clients.push(client)
+        return client
+      })
+      const upload = mockFileOps.upload as ReturnType<typeof vi.fn>
+      upload.mockImplementation(async (_local: string, remote: string) => {
+        events.push(`STOR ${remote}`)
+      })
+      const failOnce = async (_local: string, remote: string): Promise<void> => {
+        events.push(`STOR ${remote}`)
+        throw denied()
+      }
+      upload.mockImplementationOnce(failOnce).mockImplementationOnce(failOnce)
+      const batch = [0, 1].map((i) => ({
+        localPath: `/l/${i}.txt`,
+        remotePath: `/t/a/${i}.txt`,
+        fileName: `${i}.txt`,
+        totalBytes: 1
+      }))
+      const ids = queue.enqueueBatch('upload', batch, true, ['/t/a'])
+      await settle()
+      expect(queue.getAll().map((job) => job.status)).toEqual(['failed', 'failed'])
+      events.length = 0
+
+      queue.retry(ids)
+      await settle()
+
+      // 한 번의 retry에서 같은 배치는 새 메모 하나를 함께 쓰므로 MKD는 한 번, STOR보다 먼저 간다
+      expect(events[0]).toBe('MKD /t/a')
+      expect(events.slice(1).sort()).toEqual(['STOR /t/a/0.txt', 'STOR /t/a/1.txt'])
+      expect(queue.getAll().map((job) => job.status)).toEqual(['completed', 'completed'])
+    })
+
+    it('should forget a failed job after clearCompleted so retrying it does nothing', async () => {
+      // covers: Test-762
+      ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockRejectedValueOnce(denied())
+      const [id] = queue.enqueueBatch('download', items(1))
+      await settle()
+      expect(queue.getAll()[0].status).toBe('failed')
+
+      queue.clearCompleted()
+      queue.retry([id])
+      await vi.advanceTimersByTimeAsync(200)
+
+      expect(queue.getAll()).toEqual([])
+      expect(mockFileOps.download).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe('fast upload fallback', () => {
     function fastSuspect(): Error {
       const err = new Error("Can't open data connection in passive mode: connect ECONNREFUSED")
@@ -1056,7 +1218,8 @@ describe('TransferQueue', () => {
         on: vi.fn(),
         off: vi.fn(),
         emit: vi.fn(),
-        runOnMainClient: vi.fn()
+        runOnMainClient: vi.fn(),
+        isConnected: vi.fn(() => true)
       }
       const realPool = new TransferClientPool(manager as unknown as FtpConnectionManager)
       return { pool: realPool, createSecondaryClient, manager }
@@ -1133,6 +1296,37 @@ describe('TransferQueue', () => {
 
       afterEach(() => {
         vi.mocked(console.warn).mockRestore()
+      })
+
+      it('should run a retried job once the server is back after an outage refused every login', async () => {
+        // covers: Test-759
+        const { pool: realPool, manager, createSecondaryClient } = createRealPool()
+        // 서버가 내려가 메인 연결도 끊겼다: 메인 클라이언트로 가면 실제 fileOps처럼 'Not connected'로 실패한다
+        manager.isConnected.mockReturnValue(false)
+        createSecondaryClient.mockRejectedValue(refusedError())
+        ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockImplementation(
+          async (_remote: string, _local: string, _progress: unknown, client?: Client) => {
+            if (!client) throw new Error('Not connected')
+          }
+        )
+        queue = new TransferQueue(mockFileOps, realPool)
+        const [id] = queue.enqueueBatch('download', items(1))
+        for (let i = 0; i < 60 && queue.getAll()[0].status !== 'failed'; i++) {
+          await vi.advanceTimersByTimeAsync(500)
+        }
+        expect(queue.getAll()[0].status).toBe('failed')
+
+        // 서버가 돌아왔다. 메인 연결은 다시 붙이지 않았다
+        createSecondaryClient.mockReset()
+        createSecondaryClient.mockImplementation(async () =>
+          Object.assign(createFakeClient(), { ftp: { socket: {} } })
+        )
+        queue.retry([id])
+        await vi.advanceTimersByTimeAsync(1_000)
+
+        expect(queue.getAll()[0].status).toBe('completed')
+        expect(createSecondaryClient).toHaveBeenCalled()
+        realPool.dispose()
       })
 
       it('should complete all 500 jobs when the first 20 logins are refused', async () => {
@@ -2261,6 +2455,30 @@ describe('TransferQueue', () => {
       await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
     })
 
+    it('should revive a failed segmented job pressed for retry while its other ranges are still closing', async () => {
+      // covers: Test-759
+      holdAll()
+      server.failures.set(0, new FTPError({ code: 550, message: 'Permission denied' }))
+      const id = enqueueBig()
+      await vi.waitFor(() => expect(big().transferredBytes).toBe(3 * CHUNK))
+      // 실패가 다른 구간을 닫는 그 순간(작업은 이미 failed)에 재시도를 누른다
+      const second = segmentClients()[2]
+      const close = second.close.getMockImplementation() as () => void
+      let statusAtRetry: string | undefined
+      second.close.mockImplementationOnce(() => {
+        statusAtRetry = big().status
+        server.holds.clear()
+        queue.retry([id])
+        close()
+      })
+      server.holds.get(0)!.resolve()
+
+      // 버려지지 않고, 구간 정리가 끝난 뒤 처음부터 다시 돈다
+      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      expect(statusAtRetry).toBe('failed')
+      expect(big().id).toBe(id)
+    })
+
     it('should give each range its own retry budget', async () => {
       // 4구간: [0,1000) [1000,2000) [2000,3000) [3000,4000). 네트워크가 한 번 끊겨 모든 구간이 한 번씩 실패한다.
       pool.limit = 4
@@ -2353,6 +2571,20 @@ describe('TransferQueue', () => {
       await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
     })
 
+    it('should retry a job that failed the size check at once, since its ranges are already closed', async () => {
+      // covers: Test-759
+      vi.mocked(planSegments).mockImplementationOnce(() => [
+        { start: 0, end: 1000, final: false },
+        { start: 2000, end: SEG_MIN, final: true }
+      ])
+      const id = enqueueBig()
+      await vi.waitFor(() => expect(big().status).toBe('failed'))
+
+      // 분할 상태가 남아 있으면 retry가 끝나지 않을 정리를 기다리며 미뤄진다
+      queue.retry([id])
+      await vi.waitFor(() => expect(big().status).toBe('completed'))
+    })
+
     it('should mark the file sparse on Windows before growing it to the server size', async () => {
       // NTFS는 늘리기만 한 파일의 끝쪽에 처음 쓸 때 그 앞을 0으로 채우며 모든 구간의 쓰기를 막는다
       setPlatform('win32')
@@ -2438,6 +2670,8 @@ describe('TransferQueue', () => {
         await vi.waitFor(() => expect(download).toHaveBeenCalledTimes(1))
         queue.cancel(smallId)
         await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(small))
+        // 자기 파일을 지웠으니 다음에 열 때는 다시 'wx'다
+        await vi.waitFor(() => expect(download.mock.calls[0][4]).toEqual({ created: false }))
       })
 
       it('should leave a file that appeared at the target alone when an exclusive download is cancelled before creating its file', async () => {

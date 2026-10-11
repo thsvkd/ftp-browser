@@ -22,7 +22,7 @@ async function downloadToBuffer(client: Client, remotePath: string): Promise<Buf
   return Buffer.concat(chunks)
 }
 
-const MIME_MAP: Record<string, string> = {
+export const MIME_MAP: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',

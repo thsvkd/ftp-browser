@@ -33,6 +33,7 @@ type MockManager = EventEmitter & {
   createSecondaryClient: ReturnType<typeof vi.fn>
   runOnMainClient: ReturnType<typeof vi.fn>
   getMaxTransfers: ReturnType<typeof vi.fn>
+  isConnected: ReturnType<typeof vi.fn>
 }
 
 function createMockManager(): MockManager {
@@ -40,6 +41,7 @@ function createMockManager(): MockManager {
   m.createSecondaryClient = vi.fn(async () => createFakeClient())
   m.runOnMainClient = vi.fn()
   m.getMaxTransfers = vi.fn(() => MAX_TRANSFER_CLIENTS)
+  m.isConnected = vi.fn(() => true)
   return m
 }
 

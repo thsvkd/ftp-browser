@@ -135,6 +135,18 @@ describe('preload api', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('ftp:getPasswordProtection')
   })
 
+  it('should allow the explorer shelf channels', async () => {
+    // covers: Test-770
+    // 렌더러 테스트는 window.api를 목으로 바꾸므로 허용 목록 누락은 여기서만 잡힌다.
+    const api = await loadExposedApi()
+    const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>
+
+    for (const channel of ['transfer:send', 'transfer:retry', 'local:getPlaces', 'local:preview']) {
+      await invoke(channel, 'arg')
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith(channel, 'arg')
+    }
+  })
+
   it('should allow saving a server without connecting', async () => {
     const api = await loadExposedApi()
     const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>

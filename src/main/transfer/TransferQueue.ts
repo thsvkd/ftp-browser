@@ -155,6 +155,10 @@ export class TransferQueue extends EventEmitter {
   private probeWake: ReturnType<typeof setTimeout> | null = null
   /** 배타적 다운로드 작업 → 로컬 파일 소유. 작업의 모든 시도(재시도, 구간, 한 스트림 재실행)가 공유한다. */
   private claims = new WeakMap<TransferJob, LocalFileClaim>()
+  /** 업로드 작업 → 그 배치의 원격 디렉터리 메모. retry가 같은 dirSet으로 새 메모를 만든다. */
+  private batchDirs = new WeakMap<TransferJob, BatchDirs>()
+  /** 분할 구간이 아직 닫히는 중에 들어온 retry. closeSegmented가 정리를 마치고 되살린다. */
+  private retryAfterClose = new Set<string>()
 
   constructor(
     private fileOps: FtpFileOperations,
@@ -201,6 +205,7 @@ export class TransferQueue extends EventEmitter {
 
     for (const job of jobs) {
       if (options?.exclusive && direction === 'download') this.claims.set(job, { created: false })
+      if (dirs) this.batchDirs.set(job, dirs)
       this.queue.push(job)
       this.byId.set(job.id, job)
       this.work.push({ job, dirs })
@@ -229,6 +234,42 @@ export class TransferQueue extends EventEmitter {
     // 분할 다운로드는 모든 구간 클라이언트를 닫고, 큐에 남은 구간은 꺼낼 때 버린다.
     if (segmented) this.stopSegmented(job, segmented)
     else for (const client of clients!) client.close()
+  }
+
+  /**
+   * 실패한 작업을 같은 id·batchId로 대기에 되돌려 다시 돌린다. 실패한 WorkItem은 다시 쓰지 않는다(구간 항목은
+   * 멈춘 분할을 가리킨다). 한 번의 호출에서 같은 배치의 업로드는 dirSet은 같고 created는 빈 새 메모 하나를
+   * 공유해 MKD를 다시 보낸다(그사이 지워진 폴더도 만든다). 배타적 다운로드의 claim은 그대로 둔다: 남은 파일이
+   * 자기 것이면 'w'로 다시 열고, 정리로 지웠으면 'wx'로 연다(removePartial). 분할 구간이 아직 닫히는 중인 작업은
+   * 정리가 끝난 뒤 되살린다. 실패하지 않은 작업과 모르는 id는 무시한다.
+   */
+  retry(ids: string[]): void {
+    const memos = new Map<string, BatchDirs>()
+    for (const id of ids) {
+      const job = this.byId.get(id)
+      if (job?.status !== 'failed') continue
+      // 실패한 분할 다운로드는 남은 구간이 닫힐 때까지 segmented에 남는다. 지금 되살리면 옛 정리가 새 상태를 지운다
+      if (this.segmented.has(id)) {
+        this.retryAfterClose.add(id)
+        continue
+      }
+      job.status = 'pending'
+      job.transferredBytes = 0
+      job.error = undefined
+      job.retryCount = undefined
+      job.startedAt = undefined
+      job.completedAt = undefined
+      const old = this.batchDirs.get(job)
+      let dirs: BatchDirs | undefined
+      if (old) {
+        const batch = job.batchId ?? job.id
+        dirs = memos.get(batch) ?? { dirSet: old.dirSet, created: new Map() }
+        memos.set(batch, dirs)
+      }
+      this.work.push({ job, dirs })
+      this.markDirty(job)
+    }
+    this.pump()
   }
 
   clearCompleted(): void {
@@ -692,7 +733,8 @@ export class TransferQueue extends EventEmitter {
     if (state.closing) return
     state.closing = true
     await state.file.close().catch(() => {})
-    this.segmented.delete(job.id)
+    // 실패한 분할은 받다 만 파일을 지운 뒤에 뺀다. 그 전에 빼면 그사이 들어온 retry가 바로 돌아 새 시도가 연 파일을 지운다
+    if (job.status !== 'failed' || state.remaining === 0) this.segmented.delete(job.id)
 
     if (isCancelled(job)) {
       this.removePartial(job)
@@ -711,7 +753,10 @@ export class TransferQueue extends EventEmitter {
       }
       this.markDirty(job)
     } else if (job.status === 'failed') {
-      this.removePartial(job)
+      // 지우기가 끝난 뒤 되살려야 새 시도가 연 파일을 옛 정리가 지우지 않는다
+      await this.removePartial(job)
+      this.segmented.delete(job.id)
+      if (this.retryAfterClose.delete(job.id)) this.retry([job.id])
     } else if (state.restart) {
       // 'w'로 다시 열어 처음부터 받으므로 구간이 써 둔 내용은 덮인다. 배타적 다운로드도 이 파일은 자기가 만든 것이다.
       // 구간이 쓴 재시도 횟수와 에러는 새 한 스트림 시도의 것이 아니므로 비운다.
@@ -726,9 +771,16 @@ export class TransferQueue extends EventEmitter {
   }
 
   /** 받다 만 로컬 파일을 지운다. 배타적 다운로드는 자기가 만든 파일만 지운다(그 경로에 생긴 남의 파일은 둔다). */
-  private removePartial(job: TransferJob): void {
-    if (this.claims.get(job)?.created === false) return
-    unlink(job.localPath).catch(() => {})
+  private removePartial(job: TransferJob): Promise<void> {
+    const claim = this.claims.get(job)
+    if (claim?.created === false) return Promise.resolve()
+    return unlink(job.localPath).then(
+      () => {
+        // 자기 파일을 지웠으니 재시도는 'wx'로 새로 만든다
+        if (claim) claim.created = false
+      },
+      () => {}
+    )
   }
 
   private addLease(jobId: string, client: Client): void {

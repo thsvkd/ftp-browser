@@ -1,17 +1,66 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron'
-import { stat, mkdir } from 'fs/promises'
-import { basename, join, dirname, sep } from 'path'
+import { ipcMain, dialog, app, BrowserWindow } from 'electron'
+import { stat, mkdir, access, readFile } from 'fs/promises'
+import { basename, join, dirname, extname, resolve, sep } from 'path'
 import { LocalFileSystem } from '../local/LocalFileSystem'
 import { OperationManager } from '../operation/OperationManager'
 import { ipcError } from '../utils/errorClassifier'
-import type { LocalListResult, UploadFileEntry } from '@shared/types/local'
+import { MIME_MAP } from './previewHandlers'
+import { isImageFile, MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
+import { isSafeLocalName } from '@shared/entryName'
+import type { LocalListResult, LocalPlaces, UploadFileEntry } from '@shared/types/local'
 import type { DeleteTarget } from '@shared/types/operation'
 import type { IpcResult } from '@shared/types/ipc'
+
+/** 드라이브 루트가 이 안에 답하지 않으면(끊긴 네트워크 드라이브 등) 장소에서 뺀다 */
+const DRIVE_TIMEOUT_MS = 1000
+
+/** 드라이브 루트가 있는지. 응답하지 않는 드라이브가 IPC를 붙잡지 않게 시간을 제한한다(existsSync는 막힌다). */
+function driveAnswers(root: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), DRIVE_TIMEOUT_MS)
+    access(root)
+      .then(
+        () => resolve(true),
+        () => resolve(false)
+      )
+      .finally(() => clearTimeout(timer))
+  })
+}
+
+async function driveRoots(): Promise<string[]> {
+  if (process.platform !== 'win32') return ['/']
+  const roots = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'].map((letter) => `${letter}:\\`)
+  const answers = await Promise.all(roots.map(driveAnswers))
+  return roots.filter((_, i) => answers[i])
+}
+
+/** app.getPath의 알려진 폴더. 이름을 모르거나(던짐) 폴더가 없으면 null이다. */
+async function knownFolder(name: Parameters<typeof app.getPath>[0]): Promise<string | null> {
+  try {
+    const folder = app.getPath(name)
+    await access(folder)
+    return folder
+  } catch {
+    return null
+  }
+}
 
 interface CopyWorkItem {
   src: string
   dest: string
   size: number
+}
+
+/** 복사 대상 이름(D32). Windows는 `\`·`:`도 막고, 그 밖은 `/`·`.`·`..`·빈 이름만 막는다. */
+export function isSafeCopyName(name: string, platform: string): boolean {
+  if (platform === 'win32') return isSafeLocalName(name)
+  return name !== '' && name !== '.' && name !== '..' && !name.includes('/')
+}
+
+/** 같은 파일인지. Windows·macOS 파일 시스템은 기본으로 대소문자를 가리지 않는다. */
+function samePath(a: string, b: string): boolean {
+  const fold = process.platform === 'win32' || process.platform === 'darwin'
+  return fold ? resolve(a).toLowerCase() === resolve(b).toLowerCase() : resolve(a) === resolve(b)
 }
 
 export function registerLocalFsHandlers(
@@ -34,6 +83,40 @@ export function registerLocalFsHandlers(
 
   ipcMain.handle('local:getHome', (): IpcResult<string> => {
     return { success: true, data: localFs.getHomePath() }
+  })
+
+  ipcMain.handle('local:getPlaces', async (): Promise<IpcResult<LocalPlaces>> => {
+    try {
+      const names = ['desktop', 'downloads', 'documents', 'pictures', 'music', 'videos'] as const
+      // 드라이브 확인을 먼저 시작해 폴더 확인과 함께 기다린다
+      const [roots, folders] = await Promise.all([
+        driveRoots(),
+        Promise.all(names.map(knownFolder))
+      ])
+      const [desktop, downloads, documents, pictures, music, videos] = folders
+      const home = localFs.getHomePath()
+      return {
+        success: true,
+        data: { home, desktop, downloads, documents, pictures, music, videos, roots }
+      }
+    } catch (err) {
+      return ipcError(err)
+    }
+  })
+
+  // 렌더러 CSP(img-src 'self' data:)는 file: 이미지를 막으므로 data URL로 준다. MIME은 원격 미리 보기와 같다.
+  ipcMain.handle('local:preview', async (_event, filePath: string): Promise<IpcResult<string>> => {
+    try {
+      if (!isImageFile(filePath)) return { success: false, error: 'Not an image file' }
+      if ((await stat(filePath)).size > MAX_IMAGE_SIZE_BYTES) {
+        return { success: false, error: 'File too large for preview' }
+      }
+      const mime = MIME_MAP[extname(filePath).toLowerCase()] || 'image/jpeg'
+      const data = (await readFile(filePath)).toString('base64')
+      return { success: true, data: `data:${mime};base64,${data}` }
+    } catch (err) {
+      return ipcError(err)
+    }
   })
 
   ipcMain.handle('local:selectDirectory', async (): Promise<IpcResult<string | null>> => {
@@ -117,15 +200,23 @@ export function registerLocalFsHandlers(
 
   ipcMain.handle(
     'local:copyFiles',
-    async (_event, sourcePaths: string[], destDir: string): Promise<IpcResult<void>> => {
+    async (
+      _event,
+      sourcePaths: string[],
+      destDir: string,
+      names?: string[]
+    ): Promise<IpcResult<void>> => {
       // Flatten sources (recursing into directories) into a file work list so
       // byte-based progress is uniform regardless of folder nesting.
       let work: CopyWorkItem[]
       try {
+        // 충돌 시트의 "둘 다 두기"가 준 대상 이름(D32). 폴더 밖으로 나가는 이름은 받지 않는다.
+        const unsafe = names?.find((n) => !isSafeCopyName(n, process.platform))
+        if (unsafe !== undefined) throw new Error(`Invalid name: ${unsafe}`)
         work = []
-        for (const src of sourcePaths) {
+        for (const [i, src] of sourcePaths.entries()) {
           const st = await stat(src)
-          const name = basename(src)
+          const name = names?.[i] ?? basename(src)
           if (st.isDirectory()) {
             const inner = await localFs.collectFiles(src)
             for (const f of inner) {
@@ -135,6 +226,9 @@ export function registerLocalFsHandlers(
             work.push({ src, dest: join(destDir, name), size: st.size })
           }
         }
+        // 자기 위에 복사하면 쓰기 스트림이 원본을 먼저 비운다.
+        const self = work.find((w) => samePath(w.src, w.dest))
+        if (self) throw new Error(`Source and destination are the same file: ${self.src}`)
       } catch (err) {
         return ipcError(err)
       }

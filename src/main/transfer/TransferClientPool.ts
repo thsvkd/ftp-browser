@@ -46,7 +46,7 @@ const UNEXPECTED_CLOSE_RE =
 
 type PoolManager = Pick<
   FtpConnectionManager,
-  'createSecondaryClient' | 'runOnMainClient' | 'getMaxTransfers' | 'on' | 'off'
+  'createSecondaryClient' | 'runOnMainClient' | 'getMaxTransfers' | 'isConnected' | 'on' | 'off'
 >
 
 /**
@@ -330,7 +330,8 @@ export class TransferClientPool {
    * 돌아가 재시도 횟수를 쓰지 않는다). 연결 중인 로그인은 세지 않는다: 함께 몰린 로그인은 함께 거부될 수
    * 있어, 세면 limit가 1까지 무너진다. 연결 중인 로그인만 있으면 줄이지 않고 LIMIT다. 아무것도 없으면
    * 슬롯을 잡아 둔 채 REFUSED_LOGIN_BACKOFF_MS만큼 쉬고 다시 로그인하고, 끝내 거부되면 메인 클라이언트
-   * fallback(null)이다.
+   * fallback(null)이다. 메인 연결도 끊겼으면 서버가 내려간 것이라 fallback으로 굳히지 않고 에러를 던진다:
+   * 끊긴 메인 클라이언트로는 아무것도 못 받고, fallback은 idle close 전까지 서버가 돌아와도 풀리지 않는다.
    */
   private async afterRefusedLogin(
     err: unknown,
@@ -344,7 +345,10 @@ export class TransferClientPool {
       return LIMIT
     }
     if (this.connecting > 0) return LIMIT
-    if (refusals >= REFUSED_LOGIN_BACKOFF_MS.length) return this.shrinkAfterLimitError()
+    if (refusals >= REFUSED_LOGIN_BACKOFF_MS.length) {
+      if (!this.manager.isConnected()) throw err
+      return this.shrinkAfterLimitError()
+    }
     this.connecting++
     await new Promise((resolve) => setTimeout(resolve, REFUSED_LOGIN_BACKOFF_MS[refusals]))
     this.connecting--

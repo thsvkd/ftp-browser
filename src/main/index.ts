@@ -45,7 +45,7 @@ function createWindow(): BrowserWindow {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    minWidth: 800,
+    minWidth: 1024,
     minHeight: 600,
     show: false,
     autoHideMenuBar: false,
@@ -130,7 +130,7 @@ app.whenReady().then(() => {
   const operationManager = registerOperationHandlers(win)
   const { manager, fileOps } = registerFtpHandlers(win, operationManager, passwords)
   const localFs = registerLocalFsHandlers(win, operationManager)
-  const transferQueue = registerTransferHandlers(win, fileOps, manager)
+  const transferQueue = registerTransferHandlers(win, fileOps, manager, localFs)
   const { cacheManager, generator } = registerThumbnailHandlers(win, db, manager)
   registerPreviewHandlers(db, manager)
   registerDragHandlers(manager)

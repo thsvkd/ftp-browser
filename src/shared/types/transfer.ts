@@ -33,3 +33,36 @@ export interface TransferUpdate {
   upserts: TransferJob[]
   removedIds: string[]
 }
+
+export type ConflictDecision = 'overwrite' | 'skip' | 'rename' | 'newer'
+
+export interface TransferSendRequest {
+  direction: TransferDirection
+  /** 다운로드면 원격 경로, 업로드면 로컬 경로. 파일·폴더 섞여도 된다 */
+  sources: string[]
+  /** 다운로드면 로컬 폴더, 업로드면 원격 폴더 */
+  destDir: string
+  /** 대상 경로 → 결정. 충돌마다 하나. 없으면 충돌이 있을 때 아무것도 넣지 않는다 */
+  decisions?: Record<string, ConflictDecision>
+}
+
+export interface TransferConflict {
+  /** 대상 경로(결정 키) */
+  target: string
+  source: string
+  name: string
+  incoming: { size: number; modifiedAt: string }
+  existing: { size: number; modifiedAt: string }
+  /** 같은 쪽 보내기에서 어느 한쪽이 폴더다: 둘 다 두기·건너뛰기만 묻는다(D32) */
+  folder?: boolean
+}
+
+export interface TransferSendResult {
+  /** 큐에 넣었으면 배치 id(강제 배치). 충돌로 멈췄으면 없음 */
+  batchId?: string
+  ids: string[]
+  skipped: Array<{ path: string; reason: string }>
+  /** 결정이 없는 충돌. 비어 있지 않으면 ids도 비어 있다 */
+  conflicts: TransferConflict[]
+  totalBytes: number
+}

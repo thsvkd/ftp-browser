@@ -1,3 +1,4 @@
+import { readFile } from 'fs/promises'
 import sharp from 'sharp'
 import { THUMBNAIL_SIZE, THUMBNAIL_QUALITY, MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
 
@@ -34,7 +35,8 @@ export class LocalThumbnailManager {
       throw new Error('File too large for thumbnail')
     }
 
-    const result = await sharp(localPath)
+    // A path input lets libvips keep the file mapped, which blocks overwriting it on Windows until the app exits
+    const result = await sharp(await readFile(localPath))
       .rotate()
       .resize(THUMBNAIL_SIZE, THUMBNAIL_SIZE, {
         fit: 'inside',
