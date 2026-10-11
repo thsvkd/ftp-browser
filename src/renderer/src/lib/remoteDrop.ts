@@ -1,8 +1,8 @@
 import { toast } from 'sonner'
 import { t } from '@renderer/i18n'
-import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
-import type { UploadFileEntry } from '@shared/types/local'
+import { useListingStore } from '@renderer/stores/useListingStore'
+import { connectedServer } from './sendItems'
 import type { IpcResult } from '@shared/types/ipc'
 
 /** Shape stored in the dataTransfer when dragging files out of the remote panel. */
@@ -44,26 +44,57 @@ export function planRemoteMoves(items: RemoteFileDragItem[], targetPath: string)
   return moves
 }
 
+/** One RNFR/RNTO. Resolves the failure reason, or null on success. */
+async function rename(from: string, to: string): Promise<string | null> {
+  const result = await window.api.invoke<IpcResult<void>>('ftp:rename', from, to)
+  return result.success ? null : result.error
+}
+
 /**
- * Move dragged remote files into `targetPath` via FTP rename (RNFR/RNTO).
+ * Replace the existing file at `move.newPath` (D32). RNTO onto an existing name replaces it on
+ * some servers and fails on others (K4), so park the target under a hidden name, move, then
+ * delete the parked file. If the move fails, the target goes back.
  */
-async function moveRemoteFiles(items: RemoteFileDragItem[], targetPath: string): Promise<void> {
+async function replaceRemote(move: RemoteMove): Promise<string | null> {
+  const name = move.newPath.slice(move.newPath.lastIndexOf('/') + 1)
+  const aside = joinRemotePath(
+    remoteDirname(move.newPath),
+    `.${name}.${Math.random().toString(36).slice(2, 10)}.old`
+  )
+  const parked = await rename(move.newPath, aside)
+  if (parked) return parked
+  const moved = await rename(move.oldPath, move.newPath)
+  if (moved) {
+    const back = await rename(aside, move.newPath)
+    return back ? `${moved} (${aside}: ${back})` : moved
+  }
+  const result = await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', [
+    { path: aside, isDirectory: false }
+  ])
+  return result.success ? null : result.error
+}
+
+/**
+ * Move dragged remote files into `targetPath` via FTP rename (RNFR/RNTO). Targets listed in
+ * `replace` already exist and are replaced. Resolves true when every planned move succeeded
+ * (failures are toasted).
+ */
+export async function moveRemoteFiles(
+  items: RemoteFileDragItem[],
+  targetPath: string,
+  replace: ReadonlySet<string> = new Set()
+): Promise<boolean> {
   const moves = planRemoteMoves(items, targetPath)
-  if (moves.length === 0) return
+  if (moves.length === 0) return true
 
   let moved = 0
   const errors: string[] = []
   for (const move of moves) {
-    const result = await window.api.invoke<IpcResult<void>>(
-      'ftp:rename',
-      move.oldPath,
-      move.newPath
-    )
-    if (result.success) {
-      moved++
-    } else {
-      errors.push(`${move.newPath}: ${result.error}`)
-    }
+    const error = replace.has(move.newPath)
+      ? await replaceRemote(move)
+      : await rename(move.oldPath, move.newPath)
+    if (error === null) moved++
+    else errors.push(`${move.newPath}: ${error}`)
   }
   if (errors.length > 0) {
     toast.error(t('toast.moveFailed', { count: errors.length }), {
@@ -71,90 +102,10 @@ async function moveRemoteFiles(items: RemoteFileDragItem[], targetPath: string):
     })
   }
   if (moved > 0) {
-    useFtpStore.getState().refresh()
+    // 옮긴 쪽과 받은 쪽 폴더의 목록을 다시 읽는다(읽은 적이 있는 것만).
+    const server = connectedServer(useFtpStore.getState()) ?? undefined
+    const dirs = new Set([targetPath, ...moves.map((m) => remoteDirname(m.oldPath))])
+    for (const dir of dirs) useListingStore.getState().invalidate('remote', server, dir)
   }
-}
-
-/**
- * Upload local/OS files into `targetPath`, expanding dropped folders. Missing
- * remote subdirectories are created by the transfer queue as part of the batch.
- */
-async function uploadLocalPaths(localPaths: string[], targetPath: string): Promise<void> {
-  const enqueueBatch = useTransferStore.getState().enqueueBatch
-
-  // Expand dropped folders into their files, preserving folder structure.
-  const expanded = await window.api.invoke<IpcResult<UploadFileEntry[]>>(
-    'local:expandForUpload',
-    localPaths
-  )
-  if (!expanded.success) {
-    toast.error(t('toast.readDropFailed'), { description: expanded.error })
-    return
-  }
-  const entries = expanded.data
-  const toRemote = (rel: string): string => joinRemotePath(targetPath, rel)
-
-  // Remote subdirectories the batch must create, ancestors included, down from the
-  // target (which already exists). The main process issues one MKD per directory
-  // through the transfer pool, overlapped with the uploads, so a missing folder
-  // that cannot be created surfaces as failed file transfers in the queue.
-  const dirs = new Set<string>()
-  for (const entry of entries) {
-    let dir = remoteDirname(toRemote(entry.relativePath))
-    while (dir !== targetPath && dir !== '/' && !dirs.has(dir)) {
-      dirs.add(dir)
-      dir = remoteDirname(dir)
-    }
-  }
-
-  const containsFolder = entries.some((entry) => entry.relativePath.includes('/'))
-  await enqueueBatch(
-    'upload',
-    entries.map((entry) => ({
-      localPath: entry.localPath,
-      remotePath: toRemote(entry.relativePath),
-      fileName: entry.relativePath.slice(entry.relativePath.lastIndexOf('/') + 1),
-      totalBytes: entry.size
-    })),
-    containsFolder,
-    [...dirs]
-  )
-}
-
-/**
- * Handle a drop onto the remote panel, targeting `targetPath` (the hovered
- * folder, or the current directory when dropped on empty space).
- *
- * - remote → remote: move files into the target folder.
- * - local / OS → remote: upload files into the target folder.
- *
- * All `dataTransfer` reads happen synchronously before the first await so the
- * data is still available (the browser clears it once the drop event returns).
- */
-export async function performRemoteDrop(
-  dataTransfer: DataTransfer,
-  targetPath: string
-): Promise<void> {
-  // Intra-server move (dragged from the remote panel).
-  const remoteData = dataTransfer.getData('application/x-remote-files')
-  if (remoteData) {
-    const items = JSON.parse(remoteData) as RemoteFileDragItem[]
-    await moveRemoteFiles(items, targetPath)
-    return
-  }
-
-  // Upload from the local panel (custom MIME) or a native OS drop.
-  let localPaths: string[]
-  const localFilesData = dataTransfer.getData('application/x-local-files')
-  if (localFilesData) {
-    const localFiles = JSON.parse(localFilesData) as Array<{ localPath: string }>
-    localPaths = localFiles.map((f) => f.localPath)
-  } else {
-    // Electron 32+ removed File.path; resolve via webUtils-backed bridge.
-    localPaths = Array.from(dataTransfer.files)
-      .map((f) => window.api.getPathForFile(f))
-      .filter((p): p is string => Boolean(p))
-  }
-  if (localPaths.length === 0) return
-  await uploadLocalPaths(localPaths, targetPath)
+  return errors.length === 0
 }

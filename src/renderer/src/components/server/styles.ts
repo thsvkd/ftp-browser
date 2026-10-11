@@ -1,10 +1,10 @@
 import { cn } from '@renderer/lib/utils'
 
 const TONES = {
-  primary: 'bg-blue-600 text-white shadow-sm hover:bg-blue-700',
-  secondary: 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50',
-  ghost: 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
-  dangerGhost: 'text-red-600 hover:bg-red-50'
+  primary: 'bg-[var(--ac)] text-[var(--acx)] shadow-sm hover:brightness-110',
+  secondary: 'border border-[var(--bd2)] bg-[var(--sf)] text-[var(--tx)] hover:bg-[var(--hv)]',
+  ghost: 'text-[var(--mu)] hover:bg-[var(--hv)] hover:text-[var(--tx)]',
+  dangerGhost: 'text-[var(--dg)] hover:bg-[var(--dgw)]'
 }
 
 const SIZES = {
@@ -21,7 +21,7 @@ export function btn(
   className?: string
 ): string {
   return cn(
-    'inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40 focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-45',
+    'inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ac)] focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-45',
     TONES[tone],
     SIZES[size],
     className
@@ -29,10 +29,10 @@ export function btn(
 }
 
 export const inputCls =
-  'h-8 w-full min-w-0 rounded-md border border-gray-300 bg-white px-2.5 text-[13px] text-gray-900 placeholder:text-gray-400 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/20 disabled:bg-gray-50 disabled:text-gray-500'
+  'h-8 w-full min-w-0 rounded-md border border-[var(--bd2)] bg-[var(--sf)] px-2.5 text-[13px] text-[var(--tx)] placeholder:text-[var(--mu)] focus:border-[var(--ac)] focus:outline-none focus:ring-2 focus:ring-[var(--acw)] disabled:bg-[var(--sb)] disabled:text-[var(--mu)]'
 
 /** Background of the active row in server lists. */
-export const selectedCls = 'bg-blue-600/10 text-gray-900'
+export const selectedCls = 'bg-[var(--acw)] text-[var(--tx)]'
 
 /** lucide stroke width used throughout the server UI. */
 export const STROKE = 1.75

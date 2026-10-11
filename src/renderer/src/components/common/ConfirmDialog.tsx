@@ -44,7 +44,7 @@ export function ConfirmDialog(): React.JSX.Element | null {
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
-        className="w-[380px] rounded-lg bg-white p-5 shadow-xl outline-none"
+        className="w-[380px] rounded-lg bg-[var(--sf)] p-5 shadow-xl outline-none"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           e.stopPropagation()
@@ -57,25 +57,28 @@ export function ConfirmDialog(): React.JSX.Element | null {
           }
         }}
       >
-        <h2 id="confirm-dialog-title" className="break-words text-sm font-semibold text-gray-900">
+        <h2
+          id="confirm-dialog-title"
+          className="break-words text-sm font-semibold text-[var(--tx)]"
+        >
           {request.title}
         </h2>
-        {request.message && <p className="mt-2 text-sm text-gray-600">{request.message}</p>}
+        {request.message && <p className="mt-2 text-sm text-[var(--mu)]">{request.message}</p>}
         <div className="mt-5 flex justify-end gap-2">
           <button
             ref={cancelRef}
             onClick={() => settle(false)}
-            className="rounded-md border border-gray-300 px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="rounded-md border border-[var(--bd2)] px-4 py-1.5 text-sm font-medium text-[var(--tx)] hover:bg-[var(--hv)]"
           >
             {t('common.cancel')}
           </button>
           <button
             ref={confirmRef}
             onClick={() => settle(true)}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+            className={`rounded-md px-4 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-1 ${
               request.destructive
-                ? 'bg-red-600 hover:bg-red-700 focus:ring-red-400'
-                : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-400'
+                ? 'bg-[var(--dg)] text-white hover:brightness-110 focus:ring-[var(--dg)]'
+                : 'bg-[var(--ac)] text-[var(--acx)] hover:brightness-110 focus:ring-[var(--ac)]'
             }`}
           >
             {request.confirmLabel}

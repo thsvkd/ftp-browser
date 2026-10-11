@@ -53,7 +53,7 @@ export function PasswordInput({
         onClick={() => setShow((s) => !s)}
         aria-label={show ? t('connect.hidePassword') : t('connect.showPassword')}
         title={show ? t('connect.hidePassword') : t('connect.showPassword')}
-        className="absolute inset-y-0 right-0 grid w-8 place-items-center text-gray-400 hover:text-gray-700"
+        className="absolute inset-y-0 right-0 grid w-8 place-items-center text-[var(--mu)] hover:text-[var(--tx)]"
       >
         {show ? <EyeOff size={14} /> : <Eye size={14} />}
       </button>
@@ -115,7 +115,7 @@ function Switch({
   disabled?: boolean
 }): React.JSX.Element {
   return (
-    <label className="inline-flex cursor-pointer select-none items-center gap-2 text-[13px] text-gray-700">
+    <label className="inline-flex cursor-pointer select-none items-center gap-2 text-[13px] text-[var(--tx)]">
       <button
         type="button"
         role="switch"
@@ -123,13 +123,13 @@ function Switch({
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn(
-          'relative h-[18px] w-8 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/40',
-          checked ? 'bg-blue-600' : 'bg-gray-300'
+          'relative h-[18px] w-8 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ac)]',
+          checked ? 'bg-[var(--ac)]' : 'bg-[var(--bd2)]'
         )}
       >
         <span
           className={cn(
-            'absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow transition-[left]',
+            'absolute top-[2px] h-[14px] w-[14px] rounded-full bg-[var(--sf)] shadow transition-[left]',
             checked ? 'left-[16px]' : 'left-[2px]'
           )}
         />
@@ -168,8 +168,8 @@ function PathChips({
             className={cn(
               'inline-flex h-6 max-w-full items-center gap-1 rounded-full px-2 text-[11.5px] ring-1 ring-inset transition-colors',
               on
-                ? 'bg-blue-600/10 text-blue-700 ring-blue-600/35'
-                : 'bg-white text-gray-600 ring-gray-200 hover:bg-gray-50 hover:ring-gray-300'
+                ? 'bg-[var(--acw)] text-[var(--ac)] ring-[var(--ac)]'
+                : 'bg-[var(--sf)] text-[var(--mu)] ring-[var(--bd)] hover:bg-[var(--hv)] hover:ring-[var(--bd2)]'
             )}
           >
             <Folder size={11} strokeWidth={STROKE} className="shrink-0" />
@@ -208,7 +208,7 @@ export function ServerForm({
     draft.maxTransfers.trim() !== '' && !isValidMaxTransfers(Number(draft.maxTransfers))
   const row = (label: ReactNode, forId: string, node: ReactNode): React.JSX.Element => (
     <div className="min-w-0">
-      <label htmlFor={forId} className="mb-1 block text-xs font-medium text-gray-600">
+      <label htmlFor={forId} className="mb-1 block text-xs font-medium text-[var(--mu)]">
         {label}
       </label>
       {node}
@@ -220,7 +220,7 @@ export function ServerForm({
       {row(
         <>
           {t('connect.name')}{' '}
-          <span className="font-normal text-gray-400">{t('common.optional')}</span>
+          <span className="font-normal text-[var(--mu)]">{t('common.optional')}</span>
         </>,
         `${id}-alias`,
         <input
@@ -246,7 +246,7 @@ export function ServerForm({
             />
           )}
         </div>
-        <span className="pb-[7px] text-gray-400">:</span>
+        <span className="pb-[7px] text-[var(--mu)]">:</span>
         <div className="w-[72px] shrink-0">
           {row(
             t('connect.port'),
@@ -263,7 +263,7 @@ export function ServerForm({
               className={cn(
                 inputCls,
                 'tabular-nums',
-                portInvalid && 'border-red-400 focus:border-red-500 focus:ring-red-500/20'
+                portInvalid && 'border-[var(--dg)] focus:border-[var(--dg)] focus:ring-[var(--dgw)]'
               )}
               onChange={(e) => onPatch({ port: e.target.value.replace(/\D/g, '') })}
             />
@@ -304,17 +304,17 @@ export function ServerForm({
                   type="button"
                   disabled={disabled}
                   onClick={() => onPatch({ savedPassword: false })}
-                  className="text-[11.5px] text-gray-500 hover:text-red-600 hover:underline disabled:pointer-events-none disabled:opacity-50"
+                  className="text-[11.5px] text-[var(--mu)] hover:text-[var(--dg)] hover:underline disabled:pointer-events-none disabled:opacity-50"
                 >
                   {t('connect.removeSavedPassword')}
                 </button>
               )}
-              {passwordHint && <p className="text-[11.5px] text-amber-700">{passwordHint}</p>}
+              {passwordHint && <p className="text-[11.5px] text-[var(--shx)]">{passwordHint}</p>}
             </div>
           )}
         </div>
         {passwordWarning && (
-          <p className="flex items-start gap-1.5 text-xs text-amber-700">
+          <p className="flex items-start gap-1.5 text-xs text-[var(--shx)]">
             <ShieldAlert size={13} strokeWidth={STROKE} className="mt-px shrink-0" />
             {passwordWarning}
           </p>
@@ -327,7 +327,7 @@ export function ServerForm({
         label={
           <span>
             {t('connect.secure')}
-            <span className="ml-1.5 text-xs text-gray-400">{t('connect.secureHint')}</span>
+            <span className="ml-1.5 text-xs text-[var(--mu)]">{t('connect.secureHint')}</span>
           </span>
         }
       />
@@ -347,11 +347,12 @@ export function ServerForm({
             className={cn(
               inputCls,
               'w-[72px] shrink-0 tabular-nums',
-              maxTransfersInvalid && 'border-red-400 focus:border-red-500 focus:ring-red-500/20'
+              maxTransfersInvalid &&
+                'border-[var(--dg)] focus:border-[var(--dg)] focus:ring-[var(--dgw)]'
             )}
             onChange={(e) => onPatch({ maxTransfers: e.target.value.replace(/\D/g, '') })}
           />
-          <span className="text-xs text-gray-400">{t('connect.maxTransfersHint')}</span>
+          <span className="text-xs text-[var(--mu)]">{t('connect.maxTransfersHint')}</span>
         </div>
       )}
       {row(

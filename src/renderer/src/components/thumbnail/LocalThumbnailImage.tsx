@@ -4,26 +4,26 @@ import {
   buildLocalThumbnailKey
 } from '@renderer/stores/useLocalThumbnailStore'
 
-import { useT } from '@renderer/i18n'
+import { ThumbFace } from './ThumbnailImage'
 
 interface LocalThumbnailImageProps {
   localPath: string
   fileSize: number
   modifiedAt: string
-  alt: string
+  /** "느린 응답" 배지를 보일지 */
+  showSlow?: boolean
 }
 
 export function LocalThumbnailImage({
   localPath,
   fileSize,
   modifiedAt,
-  alt
+  showSlow = true
 }: LocalThumbnailImageProps): React.JSX.Element {
   const cacheKey = buildLocalThumbnailKey(localPath, fileSize, modifiedAt)
   const thumbnailData = useLocalThumbnailStore((s) => s.thumbnails[cacheKey])
   const thumbnailError = useLocalThumbnailStore((s) => s.errors[cacheKey])
   const clearError = useLocalThumbnailStore((s) => s.clearError)
-  const t = useT()
   const ref = useRef<HTMLDivElement>(null)
   const requestedRef = useRef(false)
 
@@ -57,40 +57,20 @@ export function LocalThumbnailImage({
     requestedRef.current = false
   }, [cacheKey])
 
-  if (thumbnailData) {
-    return (
-      <div ref={ref} className="flex h-full w-full items-center justify-center">
-        <img
-          src={thumbnailData.dataUrl}
-          alt={alt}
-          className="h-full w-full rounded object-contain"
-          loading="lazy"
-        />
-      </div>
-    )
-  }
-
-  if (thumbnailError) {
-    return (
-      <div
-        ref={ref}
-        className="flex h-full w-full cursor-pointer items-center justify-center rounded bg-gray-100 text-xs text-gray-400 hover:bg-gray-200"
-        onClick={() => {
-          clearError(cacheKey)
-          requestedRef.current = false
-          requestThumbnail()
-        }}
-        title={t('thumbnail.retry', { reason: thumbnailError })}
-      >
-        ↻
-      </div>
-    )
+  const retry = (): void => {
+    clearError(cacheKey)
+    requestedRef.current = false
+    requestThumbnail()
   }
 
   return (
-    <div
-      ref={ref}
-      className="flex h-full w-full items-center justify-center rounded bg-gray-100 text-2xl text-gray-300"
-    />
+    <div ref={ref} className="h-full w-full">
+      <ThumbFace
+        url={thumbnailData?.dataUrl}
+        error={thumbnailError}
+        onRetry={retry}
+        showSlow={showSlow}
+      />
+    </div>
   )
 }

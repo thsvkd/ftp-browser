@@ -255,23 +255,23 @@ export function ServerManagerDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-gray-900/30 p-6">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-6">
       <div
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
         aria-modal="true"
         aria-label={t('connect.serverManager')}
-        className="relative flex h-[580px] max-h-full w-[840px] max-w-full flex-col overflow-hidden rounded-lg bg-white shadow-2xl outline-none ring-1 ring-black/5 motion-safe:animate-pop"
+        className="relative flex h-[580px] max-h-full w-[840px] max-w-full flex-col overflow-hidden rounded-lg bg-[var(--sf)] shadow-2xl outline-none ring-1 ring-black/5 motion-safe:animate-pop"
         onKeyDown={(e) => {
           trapTab(e)
           onEnterEsc({ enter: () => void handleConnect() })(e)
         }}
       >
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-gray-200 px-4">
-          <ServerIcon size={16} strokeWidth={STROKE} className="text-gray-500" />
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--bd)] px-4">
+          <ServerIcon size={16} strokeWidth={STROKE} className="text-[var(--mu)]" />
           <h2 className="text-sm font-semibold">{t('connect.serverManager')}</h2>
-          <span className="text-xs text-gray-400">
+          <span className="text-xs text-[var(--mu)]">
             {t('servers.count', { count: servers.length })}
           </span>
           <div className="flex-1" />
@@ -286,12 +286,12 @@ export function ServerManagerDialog({
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <aside className="flex w-[260px] shrink-0 flex-col border-r border-gray-200 bg-gray-50/80">
+          <aside className="flex w-[260px] shrink-0 flex-col border-r border-[var(--bd)] bg-[var(--sb)]">
             <div className="relative p-2">
               <Search
                 size={14}
                 strokeWidth={STROKE}
-                className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
+                className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--mu)]"
               />
               <input
                 value={query}
@@ -334,7 +334,7 @@ export function ServerManagerDialog({
                     }}
                     className={cn(
                       'flex h-12 cursor-default items-center gap-2.5 rounded-md px-2.5',
-                      on ? selectedCls : 'hover:bg-gray-100'
+                      on ? selectedCls : 'hover:bg-[var(--hv)]'
                     )}
                   >
                     <ServerAvatar size={24} />
@@ -343,14 +343,16 @@ export function ServerManagerDialog({
                         <span className="truncate text-[13px] font-medium">{serverLabel(s)}</span>
                         {s.secure && <TlsBadge />}
                       </div>
-                      <div className="truncate text-[11px] text-gray-500">{serverAddress(s)}</div>
+                      <div className="truncate text-[11px] text-[var(--mu)]">
+                        {serverAddress(s)}
+                      </div>
                     </div>
                     {connecting && connectingId === s.id ? (
-                      <span className="text-blue-600">
+                      <span className="text-[var(--ac)]">
                         <Spinner size={13} />
                       </span>
                     ) : (
-                      <span className="shrink-0 self-start pt-[7px] text-[10.5px] text-gray-400">
+                      <span className="shrink-0 self-start pt-[7px] text-[10.5px] text-[var(--mu)]">
                         {last ?? '—'}
                       </span>
                     )}
@@ -358,12 +360,12 @@ export function ServerManagerDialog({
                 )
               })}
               {list.length === 0 && (
-                <p className="px-3 py-6 text-center text-xs text-gray-400">
+                <p className="px-3 py-6 text-center text-xs text-[var(--mu)]">
                   {query ? t('servers.noMatch', { query }) : t('servers.empty')}
                 </p>
               )}
             </div>
-            <div className="border-t border-gray-200 p-2">
+            <div className="border-t border-[var(--bd)] p-2">
               <button
                 className={cn(
                   btn('ghost', 'md', 'w-full justify-start'),
@@ -378,18 +380,18 @@ export function ServerManagerDialog({
           </aside>
 
           <section className="flex min-w-0 flex-1 flex-col">
-            <div className="flex items-center gap-3 border-b border-gray-100 px-5 py-3">
+            <div className="flex items-center gap-3 border-b border-[var(--bd)] px-5 py-3">
               <ServerAvatar size={36} />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold">
                   {serverLabel(draft) || t('connect.newServer')}
                 </div>
-                <div className="truncate text-xs text-gray-500">
+                <div className="truncate text-xs text-[var(--mu)]">
                   {draft.host.trim() ? serverAddress(draft) : t('servers.addressHint')}
                 </div>
               </div>
               {dirty && (
-                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+                <span className="rounded-full bg-[var(--shw)] px-2 py-0.5 text-[11px] font-medium text-[var(--shx)] ring-1 ring-inset ring-[var(--sh)]">
                   {selected ? t('servers.modified') : t('servers.unsaved')}
                 </span>
               )}
@@ -417,7 +419,7 @@ export function ServerManagerDialog({
                 />
               </div>
             )}
-            <footer className="flex h-14 shrink-0 items-center gap-2 border-t border-gray-200 bg-gray-50/70 px-5">
+            <footer className="flex h-14 shrink-0 items-center gap-2 border-t border-[var(--bd)] bg-[var(--sb)] px-5">
               {selected && (
                 <button
                   className={btn('dangerGhost', 'md')}
@@ -431,7 +433,7 @@ export function ServerManagerDialog({
               <div className="flex-1" />
               {connecting ? (
                 <>
-                  <span className="flex min-w-0 items-center gap-2 truncate text-xs text-gray-500">
+                  <span className="flex min-w-0 items-center gap-2 truncate text-xs text-[var(--mu)]">
                     <Spinner />
                     {t('connect.connectingTo', { name: serverLabel(draft) })}
                   </span>

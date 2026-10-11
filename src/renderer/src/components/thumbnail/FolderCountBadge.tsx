@@ -13,7 +13,7 @@ export function FolderCountBadge({ count }: FolderCountBadgeProps): React.JSX.El
   if (count <= 0) return null
   return (
     <span
-      className="absolute bottom-0 right-0 rounded-tl bg-gray-900/70 px-1 text-[10px] leading-tight text-white"
+      className="mono absolute bottom-1.5 right-1.5 rounded-full bg-black/55 px-1.5 text-[10px] font-semibold leading-4 text-white"
       title={t('common.itemCount', { count })}
     >
       {count}

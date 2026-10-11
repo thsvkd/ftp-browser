@@ -5,10 +5,7 @@
  * POSIX 고정 vs OS 감지, 전송 방향이 반대)는 여기 헬퍼들엔 하나도 해당하지 않는다.
  * 이들은 패널과 무관한 테스트 인프라라 중복시킬 이유가 없다.
  */
-import { screen } from '@testing-library/react'
 import { vi, type Mock } from 'vitest'
-import { useLocalSelectionStore } from '@renderer/stores/useLocalSelectionStore'
-import { useSelectionStore } from '@renderer/stores/useSelectionStore'
 
 /** preload가 없는 테스트 환경에 주입하는 `window.api` 목. */
 export interface ApiMock {
@@ -40,40 +37,6 @@ export function makeApiMock(invoke: Mock): ApiMock {
 /** 해당 IPC 채널로 호출된 인자 목록(채널명은 제외). */
 export function invokeCalls(invoke: Mock, channel: string): unknown[][] {
   return invoke.mock.calls.filter((call) => call[0] === channel).map((call) => call.slice(1))
-}
-
-/**
- * 열려 있는 컨텍스트 메뉴. 메뉴는 선택 상태와 무관하게 항상 New Folder를 가지므로
- * (계약 §6 라벨 표) 이 버튼의 존재를 메뉴의 존재로 삼는다.
- */
-export function queryMenu(): HTMLElement | null {
-  return screen.queryByRole('menuitem', { name: 'New folder…' })
-}
-
-/**
- * 열려 있는 컨텍스트 메뉴의 루트 DOM 노드. Fragment는 DOM 노드가 아니므로
- * New Folder 버튼의 부모가 곧 메뉴 루트 div다(핸드오프 6절 C표).
- *
- * 전제조건: 메뉴가 **버튼 목록 상태**로 보이고 있어야 한다(editing 브랜치가 아님).
- * editing 상태(rename/newFolder 입력창)에서는 New Folder 버튼 자체가 렌더되지 않으므로
- * (LocalFileContextMenu.tsx/FileContextMenu.tsx의 `editing ? <input/> : <>...버튼들...</>`
- * 분기가 배타적) 이 함수를 그 상태에서 부르면 안 된다. 위치가 입력창 전환 후에도
- * 유지되는지 보려면(Test-107) editing 진입 **전에** 루트를 한 번 잡아 참조를 재사용하라
- * — 같은 외곽 div가 재사용되므로 참조는 계속 유효하다.
- */
-export function menuRoot(): HTMLElement {
-  // 셀렉터는 queryMenu와 같아야 한다. 따로 적으면 라벨이 바뀔 때 한쪽만 따라간다.
-  const button = queryMenu()
-  if (!button) {
-    throw new Error(
-      'menuRoot() is only valid while the button list is showing (New Folder button not found). ' +
-        'If the menu just switched to the inline rename/new-folder input, capture the root ' +
-        'before that transition and reuse the reference instead of calling menuRoot() again.'
-    )
-  }
-  const root = button.parentElement
-  if (!root) throw new Error('menu root element not found')
-  return root
 }
 
 /**
@@ -142,16 +105,6 @@ export function stubMenuViewport(
       }
     }
   }
-}
-
-/** 로컬 선택 스토어의 현재 선택(정렬본). */
-export function localSelectedNames(): string[] {
-  return [...useLocalSelectionStore.getState().selectedNames].sort()
-}
-
-/** 원격 선택 스토어의 현재 선택(정렬본). */
-export function remoteSelectedNames(): string[] {
-  return [...useSelectionStore.getState().selectedNames].sort()
 }
 
 const GRID_LAYOUT_PROPS = [

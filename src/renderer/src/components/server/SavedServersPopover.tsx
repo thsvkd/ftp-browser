@@ -45,7 +45,7 @@ export function SavedServersPopover({
 
   return (
     <div
-      className="absolute left-0 top-[calc(100%+8px)] z-50 flex max-h-[460px] w-[400px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-lg bg-white shadow-xl ring-1 ring-black/10 motion-safe:animate-drop"
+      className="absolute left-0 top-[calc(100%+8px)] z-50 flex max-h-[460px] w-[400px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-lg bg-[var(--sf)] shadow-xl ring-1 ring-black/10 motion-safe:animate-drop"
       onKeyDown={(e) => {
         if (e.nativeEvent.isComposing) return
         const next = arrowIndex(e.key, idx, list.length)
@@ -63,11 +63,11 @@ export function SavedServersPopover({
         }
       }}
     >
-      <div className="relative border-b border-gray-100 p-2">
+      <div className="relative border-b border-[var(--bd)] p-2">
         <Search
           size={14}
           strokeWidth={STROKE}
-          className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
+          className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--mu)]"
         />
         <input
           autoFocus
@@ -78,7 +78,7 @@ export function SavedServersPopover({
           }}
           placeholder={t('servers.search')}
           aria-label={t('servers.search')}
-          className={cn(inputCls, 'border-transparent bg-gray-100 pl-8 focus:bg-white')}
+          className={cn(inputCls, 'border-transparent bg-[var(--sb)] pl-8 focus:bg-[var(--sf)]')}
         />
       </div>
       <div
@@ -110,12 +110,12 @@ export function SavedServersPopover({
                   <span className="truncate text-[13px] font-medium">{label}</span>
                   {s.secure && <TlsBadge />}
                   {s.id === currentId && (
-                    <span className="shrink-0 text-[10.5px] text-blue-600">
+                    <span className="shrink-0 text-[10.5px] text-[var(--ac)]">
                       {t('servers.current')}
                     </span>
                   )}
                 </div>
-                <div className="truncate text-[11px] text-gray-500">{serverAddress(s)}</div>
+                <div className="truncate text-[11px] text-[var(--mu)]">{serverAddress(s)}</div>
               </div>
               <span className={cn('flex items-center gap-0.5', !on && 'hidden')}>
                 <button
@@ -133,7 +133,7 @@ export function SavedServersPopover({
                 </button>
                 <button
                   tabIndex={-1}
-                  className={btn('ghost', 'iconSm', 'hover:bg-red-50 hover:text-red-600')}
+                  className={btn('ghost', 'iconSm', 'hover:bg-[var(--dgw)] hover:text-[var(--dg)]')}
                   aria-label={t('servers.deleteLabel', { name: label })}
                   title={t('servers.deleteLabel', { name: label })}
                   onClick={(e) => {
@@ -146,7 +146,7 @@ export function SavedServersPopover({
                 </button>
               </span>
               {!on && (
-                <span className="shrink-0 text-[11px] text-gray-400">
+                <span className="shrink-0 text-[11px] text-[var(--mu)]">
                   {formatLastConnected(s.lastConnected, locale) ?? t('servers.neverConnected')}
                 </span>
               )}
@@ -154,17 +154,17 @@ export function SavedServersPopover({
           )
         })}
         {list.length === 0 && (
-          <p className="px-3 py-5 text-center text-xs text-gray-400">
+          <p className="px-3 py-5 text-center text-xs text-[var(--mu)]">
             {query ? t('servers.noMatch', { query }) : t('servers.empty')}
           </p>
         )}
       </div>
-      <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50/70 px-2 py-1.5">
+      <div className="flex items-center justify-between border-t border-[var(--bd)] bg-[var(--sb)] px-2 py-1.5">
         <button className={btn('ghost', 'sm')} onClick={onAdd}>
           <Plus size={13} strokeWidth={STROKE} />
           {t('servers.add')}
         </button>
-        <span className="pr-1 text-[10.5px] text-gray-400">{t('servers.hint')}</span>
+        <span className="pr-1 text-[10.5px] text-[var(--mu)]">{t('servers.hint')}</span>
       </div>
     </div>
   )

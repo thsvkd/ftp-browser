@@ -2,11 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useEscapeKey } from '@renderer/hooks/useEscapeKey'
 import { X, Database, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import {
-  useSettingsStore,
-  GALLERY_THUMB_MIN,
-  GALLERY_THUMB_MAX
-} from '@renderer/stores/useSettingsStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { TILE_MAX, TILE_MIN, TILE_STEP } from '@renderer/lib/explorerLayout'
 import { formatBytes } from '@renderer/lib/utils'
 import { installUpdate } from '@renderer/lib/installUpdate'
 import { LOCALES, useLocale, useT, type LanguageSetting } from '@renderer/i18n'
@@ -25,8 +22,8 @@ interface CacheStats {
 }
 
 export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JSX.Element | null {
-  const galleryThumbSize = useSettingsStore((s) => s.galleryThumbSize)
-  const setGalleryThumbSize = useSettingsStore((s) => s.setGalleryThumbSize)
+  const tileSize = useSettingsStore((s) => s.tileSize)
+  const setTileSize = useSettingsStore((s) => s.setTileSize)
   const showHidden = useSettingsStore((s) => s.showHidden)
   const setShowHidden = useSettingsStore((s) => s.setShowHidden)
   const confirmBeforeDelete = useSettingsStore((s) => s.confirmBeforeDelete)
@@ -163,30 +160,30 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-dialog-title"
-        className="flex max-h-full w-[680px] max-w-full flex-col overflow-hidden rounded-lg bg-white shadow-xl"
+        className="flex max-h-full w-[680px] max-w-full flex-col overflow-hidden rounded-lg bg-[var(--sf)] shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200 px-6">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--bd)] px-6">
           <h2 id="settings-dialog-title" className="text-base font-semibold">
             {t('settings.title')}
           </h2>
           <button
             onClick={onClose}
-            className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            className="rounded p-1 text-[var(--mu)] hover:bg-[var(--hv)] hover:text-[var(--tx)]"
             aria-label={t('settings.close')}
           >
             <X size={18} />
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto px-6 [scrollbar-gutter:stable] [&>section]:py-5">
+        <div className="min-h-0 flex-1 divide-y divide-[var(--bd)] overflow-y-auto px-6 [scrollbar-gutter:stable] [&>section]:py-5">
           <section>
             <label className="flex items-center justify-between gap-6">
-              <span className="text-sm text-gray-700">{t('settings.language')}</span>
+              <span className="text-sm text-[var(--tx)]">{t('settings.language')}</span>
               <select
                 value={language}
                 onChange={(e) => setLanguage(e.target.value as LanguageSetting)}
-                className="w-56 rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-700 focus:border-blue-500 focus:outline-none"
+                className="w-56 rounded-md border border-[var(--bd2)] px-2 py-1.5 text-sm text-[var(--tx)] focus:border-[var(--ac)] focus:outline-none"
               >
                 <option value="system">{t('settings.languageSystem')}</option>
                 {LOCALES.map((l) => (
@@ -198,30 +195,33 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
             </label>
           </section>
 
-          {/* Gallery */}
+          {/* Grid */}
           <section>
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
-              {t('settings.gallery')}
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--mu)]">
+              {t('settings.grid')}
             </h3>
             <div className="flex items-center justify-between gap-6">
               <div className="min-w-0">
-                <label htmlFor="thumb-size" className="text-sm text-gray-700">
+                <label htmlFor="thumb-size" className="text-sm text-[var(--tx)]">
                   {t('settings.thumbnailSize')}
                 </label>
-                <p className="mt-0.5 break-keep text-xs text-gray-500">{t('settings.zoomTip')}</p>
+                <p className="mt-0.5 break-keep text-xs text-[var(--mu)]">
+                  {t('settings.zoomTip')}
+                </p>
               </div>
               <div className="flex w-48 shrink-0 items-center gap-3">
                 <input
                   id="thumb-size"
                   type="range"
-                  min={GALLERY_THUMB_MIN}
-                  max={GALLERY_THUMB_MAX}
-                  value={galleryThumbSize}
-                  onChange={(e) => setGalleryThumbSize(Number(e.target.value))}
-                  className="min-w-0 flex-1 accent-blue-600"
+                  min={TILE_MIN}
+                  max={TILE_MAX}
+                  step={TILE_STEP}
+                  value={tileSize}
+                  onChange={(e) => setTileSize(Number(e.target.value))}
+                  className="min-w-0 flex-1 accent-[var(--ac)]"
                 />
-                <span className="w-12 text-right text-sm tabular-nums text-gray-500">
-                  {galleryThumbSize}px
+                <span className="w-12 text-right text-sm tabular-nums text-[var(--mu)]">
+                  {tileSize}px
                 </span>
               </div>
             </div>
@@ -229,37 +229,37 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
 
           {/* Browsing */}
           <section>
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--mu)]">
               {t('settings.browsing')}
             </h3>
             <label className="flex cursor-pointer items-center justify-between py-1">
-              <span className="text-sm text-gray-700">{t('settings.showHidden')}</span>
+              <span className="text-sm text-[var(--tx)]">{t('settings.showHidden')}</span>
               <input
                 type="checkbox"
                 checked={showHidden}
                 onChange={(e) => setShowHidden(e.target.checked)}
-                className="h-4 w-4 rounded accent-blue-600"
+                className="h-4 w-4 rounded accent-[var(--ac)]"
               />
             </label>
             <label className="flex cursor-pointer items-center justify-between py-1">
-              <span className="text-sm text-gray-700">{t('settings.confirmDelete')}</span>
+              <span className="text-sm text-[var(--tx)]">{t('settings.confirmDelete')}</span>
               <input
                 type="checkbox"
                 checked={confirmBeforeDelete}
                 onChange={(e) => setConfirmBeforeDelete(e.target.checked)}
-                className="h-4 w-4 rounded accent-blue-600"
+                className="h-4 w-4 rounded accent-[var(--ac)]"
               />
             </label>
           </section>
 
           {/* Cache */}
           <section>
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--mu)]">
               {t('settings.cache')}
             </h3>
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-gray-700">
-                <Database size={14} className="text-gray-400" />
+              <div className="flex items-center gap-2 text-sm text-[var(--tx)]">
+                <Database size={14} className="text-[var(--mu)]" />
                 <span>
                   {cacheStats
                     ? t('settings.cacheSummary', {
@@ -272,7 +272,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
               <button
                 onClick={handleClearCache}
                 disabled={clearing || !cacheStats || cacheStats.totalCount === 0}
-                className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-md border border-[var(--bd2)] px-3 py-1.5 text-sm text-[var(--tx)] hover:bg-[var(--hv)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Trash2 size={14} />
                 {clearing ? t('settings.clearingCache') : t('settings.clearCache')}
@@ -282,29 +282,29 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
 
           {/* Updates */}
           <section>
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--mu)]">
               {t('settings.updates')}
             </h3>
             <div className="flex items-center justify-between gap-6">
               <div className="min-w-0">
-                <div className="text-sm text-gray-700">
+                <div className="text-sm text-[var(--tx)]">
                   {updateState
                     ? t('update.version', { version: updateState.currentVersion })
                     : t('update.versionUnknown')}
                 </div>
-                <p className="mt-0.5 text-xs text-gray-500">{updateDescription()}</p>
+                <p className="mt-0.5 text-xs text-[var(--mu)]">{updateDescription()}</p>
               </div>
               {updateState?.status === 'available' ? (
                 <button
                   onClick={() => void runUpdateCommand('update:download')}
-                  className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                  className="shrink-0 rounded-md border border-[var(--bd2)] px-3 py-1.5 text-sm text-[var(--tx)] hover:bg-[var(--hv)]"
                 >
                   {t('update.download', { version: updateState.availableVersion ?? '' })}
                 </button>
               ) : updateState?.status === 'ready' ? (
                 <button
                   onClick={() => void installUpdate()}
-                  className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                  className="shrink-0 rounded-md bg-[var(--ac)] px-3 py-1.5 text-sm font-medium text-[var(--acx)] hover:brightness-110"
                 >
                   {t('update.restartAndUpdate')}
                 </button>
@@ -316,7 +316,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                     updateState.status === 'checking' ||
                     updateState.status === 'downloading'
                   }
-                  className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="shrink-0 rounded-md border border-[var(--bd2)] px-3 py-1.5 text-sm text-[var(--tx)] hover:bg-[var(--hv)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {updateState?.status === 'checking'
                     ? t('update.checkingButton')
@@ -327,9 +327,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
               ) : null}
             </div>
             <label className="mt-3 flex cursor-pointer items-center justify-between gap-6 py-1">
-              <span className="text-sm text-gray-700">
+              <span className="text-sm text-[var(--tx)]">
                 {t('update.auto')}
-                <span className="mt-0.5 block text-xs text-gray-500">
+                <span className="mt-0.5 block text-xs text-[var(--mu)]">
                   {t('update.autoDescription')}
                 </span>
               </span>
@@ -338,20 +338,20 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 checked={updateState?.autoUpdate ?? false}
                 disabled={!updateState || updateState.status === 'unsupported'}
                 onChange={(e) => void setAutoUpdate(e.target.checked)}
-                className="h-4 w-4 shrink-0 rounded accent-blue-600 disabled:cursor-not-allowed"
+                className="h-4 w-4 shrink-0 rounded accent-[var(--ac)] disabled:cursor-not-allowed"
               />
             </label>
           </section>
 
           {/* Agent access (MCP) */}
           <section>
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--mu)]">
               {t('settings.mcp')}
             </h3>
             <label className="flex cursor-pointer items-center justify-between gap-6 py-1">
-              <span className="text-sm text-gray-700">
+              <span className="text-sm text-[var(--tx)]">
                 {t('settings.mcpEnable')}
-                <span className="mt-0.5 block text-xs leading-relaxed text-gray-500">
+                <span className="mt-0.5 block text-xs leading-relaxed text-[var(--mu)]">
                   {t('settings.mcpDescription')}
                 </span>
               </span>
@@ -360,13 +360,13 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 checked={mcpState?.enabled ?? false}
                 disabled={!mcpState}
                 onChange={(e) => void setMcpEnabled(e.target.checked)}
-                className="h-4 w-4 shrink-0 rounded accent-blue-600 disabled:cursor-not-allowed"
+                className="h-4 w-4 shrink-0 rounded accent-[var(--ac)] disabled:cursor-not-allowed"
               />
             </label>
             {mcpState?.enabled && (
-              <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+              <div className="mt-3 rounded-md border border-[var(--bd)] bg-[var(--sb)] p-3">
                 <p
-                  className={`break-all text-xs ${mcpState.error ? 'text-red-600' : 'text-gray-500'}`}
+                  className={`break-all text-xs ${mcpState.error ? 'text-[var(--dg)]' : 'text-[var(--mu)]'}`}
                 >
                   {mcpState.error
                     ? t('settings.mcpStartFailed', { reason: mcpState.error })
@@ -378,7 +378,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                       void copyCommand(mcpState.command, t('settings.mcpCommandCopied'))
                     }
                     disabled={!mcpState.command}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md border border-[var(--bd2)] bg-[var(--sf)] px-3 py-1.5 text-sm text-[var(--tx)] hover:bg-[var(--hv)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('settings.mcpCopyCommand')}
                   </button>
@@ -387,13 +387,13 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                       void copyCommand(mcpState.cliCommand, t('settings.mcpCliCommandCopied'))
                     }
                     disabled={!mcpState.cliCommand}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md border border-[var(--bd2)] bg-[var(--sf)] px-3 py-1.5 text-sm text-[var(--tx)] hover:bg-[var(--hv)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('settings.mcpCopyCliCommand')}
                   </button>
                   <button
                     onClick={() => void regenerateMcpToken()}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                    className="rounded-md border border-[var(--bd2)] bg-[var(--sf)] px-3 py-1.5 text-sm text-[var(--tx)] hover:bg-[var(--hv)]"
                   >
                     {t('settings.mcpRegenerateToken')}
                   </button>
@@ -403,10 +403,10 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
           </section>
         </div>
 
-        <footer className="flex h-14 shrink-0 items-center justify-end border-t border-gray-200 bg-gray-50/70 px-6">
+        <footer className="flex h-14 shrink-0 items-center justify-end border-t border-[var(--bd)] bg-[var(--sb)] px-6">
           <button
             onClick={onClose}
-            className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+            className="rounded-md bg-[var(--ac)] px-4 py-1.5 text-sm font-medium text-[var(--acx)] hover:brightness-110"
           >
             {t('common.done')}
           </button>

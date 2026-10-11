@@ -11,7 +11,7 @@ export function ServerAvatar({ size }: { size: number }): React.JSX.Element {
   return (
     <span
       aria-hidden
-      className="grid shrink-0 place-items-center rounded-md bg-gray-100 text-gray-500 ring-1 ring-inset ring-gray-200/70"
+      className="grid shrink-0 place-items-center rounded-md bg-[var(--sb)] text-[var(--mu)] ring-1 ring-inset ring-[var(--bd)]"
       style={{ width: size, height: size }}
     >
       <ServerIcon size={Math.round(size * 0.5)} strokeWidth={STROKE} />
@@ -24,7 +24,7 @@ export function TlsBadge(): React.JSX.Element {
   return (
     <span
       title={t('servers.tlsBadge')}
-      className="inline-flex shrink-0 items-center gap-0.5 rounded bg-emerald-50 px-1 py-px text-[10px] font-semibold tracking-wide text-emerald-700 ring-1 ring-inset ring-emerald-200"
+      className="inline-flex shrink-0 items-center gap-0.5 rounded bg-[color-mix(in_srgb,var(--ok)_12%,transparent)] px-1 py-px text-[10px] font-semibold tracking-wide text-[var(--ok)] ring-1 ring-inset ring-[var(--ok)]"
     >
       <Lock size={9} strokeWidth={2.5} />
       TLS
@@ -50,7 +50,7 @@ export function ErrorNote({
     <div
       role="alert"
       className={cn(
-        'flex items-start gap-2 rounded-md bg-red-50 px-2.5 py-2 text-xs leading-relaxed text-red-700 ring-1 ring-inset ring-red-200 motion-safe:animate-drop',
+        'flex items-start gap-2 rounded-md bg-[var(--dgw)] px-2.5 py-2 text-xs leading-relaxed text-[var(--dg)] ring-1 ring-inset ring-[var(--dg)] motion-safe:animate-drop',
         className
       )}
     >
@@ -61,7 +61,7 @@ export function ErrorNote({
           onClick={onClose}
           aria-label={t('connect.dismissError')}
           title={t('connect.dismissError')}
-          className="-m-0.5 rounded p-0.5 text-red-400 hover:bg-red-100 hover:text-red-700"
+          className="-m-0.5 rounded p-0.5 text-[var(--dg)] hover:bg-[var(--dgw)] hover:text-[var(--dg)]"
         >
           <X size={12} />
         </button>

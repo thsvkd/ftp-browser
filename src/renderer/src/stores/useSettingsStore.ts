@@ -1,64 +1,67 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { THUMBNAIL_SIZE } from '@shared/constants'
 import type { LanguageSetting } from '@renderer/i18n'
-
-export type ViewMode = 'list' | 'grid' | 'gallery'
-
-/** Gallery thumbnail size bounds (px), used by Ctrl+wheel zoom and the settings slider. */
-export const GALLERY_THUMB_MIN = 96
-/** Never display larger than we generate, so the image stays crisp at max zoom. */
-export const GALLERY_THUMB_MAX = THUMBNAIL_SIZE
-export const GALLERY_THUMB_DEFAULT = 150
-export const GALLERY_THUMB_STEP = 24
-
-/** Extra height a gallery cell adds around the square thumbnail for label + padding. */
-export const GALLERY_CELL_PADDING = 40
-
-function clampThumbSize(size: number): number {
-  if (Number.isNaN(size)) return GALLERY_THUMB_DEFAULT
-  return Math.min(GALLERY_THUMB_MAX, Math.max(GALLERY_THUMB_MIN, Math.round(size)))
-}
+import { TILE_DEFAULT } from '@renderer/lib/explorerLayout'
+import { clampTileSize } from '@renderer/lib/gridGeometry'
 
 interface SettingsStore {
-  remoteViewMode: ViewMode
-  localViewMode: ViewMode
-  galleryThumbSize: number
+  /** 새 탭의 보기(D16). 탭마다 자기 보기를 가진다. */
+  viewMode: 'grid' | 'list'
+  /** 그리드 타일 크기(px), 8px 단계 96–280 */
+  tileSize: number
   showHidden: boolean
   confirmBeforeDelete: boolean
   language: LanguageSetting
 
-  setRemoteViewMode: (mode: ViewMode) => void
-  setLocalViewMode: (mode: ViewMode) => void
-  setGalleryThumbSize: (size: number) => void
-  adjustGalleryThumbSize: (delta: number) => void
+  setViewMode: (mode: 'grid' | 'list') => void
+  setTileSize: (size: number) => void
+  adjustTileSize: (delta: number) => void
   setShowHidden: (show: boolean) => void
   setConfirmBeforeDelete: (confirm: boolean) => void
   setLanguage: (language: LanguageSetting) => void
 }
 
+/** v1에만 있던 필드. 두 패널의 보기와 갤러리 썸네일 크기다. */
+interface SettingsV1 {
+  remoteViewMode?: 'list' | 'grid' | 'gallery'
+  localViewMode?: 'list' | 'grid' | 'gallery'
+  galleryThumbSize?: number
+}
+
+/**
+ * v1 → v2: 새 탭의 보기(`viewMode`)는 v1 원격 보기에서 가져오고(`gallery`·`grid` → `grid`)
+ * `tileSize`를 더한다. 두 패널의 보기와 갤러리 크기는 버린다.
+ */
+export function migrateSettings(persisted: unknown, version: number): Partial<SettingsStore> {
+  const state = { ...((persisted ?? {}) as Partial<SettingsStore> & SettingsV1) }
+  if (version >= 2) return state
+  const viewMode = state.remoteViewMode === 'list' ? 'list' : 'grid'
+  delete state.remoteViewMode
+  delete state.localViewMode
+  delete state.galleryThumbSize
+  return { ...state, viewMode, tileSize: TILE_DEFAULT }
+}
+
 export const useSettingsStore = create<SettingsStore>()(
   persist(
     (set) => ({
-      remoteViewMode: 'list',
-      localViewMode: 'list',
-      galleryThumbSize: GALLERY_THUMB_DEFAULT,
+      viewMode: 'grid',
+      tileSize: TILE_DEFAULT,
       showHidden: false,
       confirmBeforeDelete: true,
       language: 'system',
 
-      setRemoteViewMode: (mode) => set({ remoteViewMode: mode }),
-      setLocalViewMode: (mode) => set({ localViewMode: mode }),
-      setGalleryThumbSize: (size) => set({ galleryThumbSize: clampThumbSize(size) }),
-      adjustGalleryThumbSize: (delta) =>
-        set((s) => ({ galleryThumbSize: clampThumbSize(s.galleryThumbSize + delta) })),
+      setViewMode: (mode) => set({ viewMode: mode }),
+      setTileSize: (size) => set({ tileSize: clampTileSize(size) }),
+      adjustTileSize: (delta) => set((s) => ({ tileSize: clampTileSize(s.tileSize + delta) })),
       setShowHidden: (show) => set({ showHidden: show }),
       setConfirmBeforeDelete: (confirm) => set({ confirmBeforeDelete: confirm }),
       setLanguage: (language) => set({ language })
     }),
     {
       name: 'ftp-browser-settings',
-      version: 1
+      version: 2,
+      migrate: migrateSettings
     }
   )
 )

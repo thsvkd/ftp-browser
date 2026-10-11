@@ -1,0 +1,280 @@
+/** @vitest-environment jsdom */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { toast } from 'sonner'
+import { en } from '@renderer/i18n/locales/en'
+import { fromFtpEntry, fromLocalEntry, type ExplorerEntry } from '@renderer/lib/explorerEntry'
+import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { useShelfStore } from '@renderer/stores/useShelfStore'
+import { useTabsStore } from '@renderer/stores/useTabsStore'
+import { invokeCalls } from '@renderer/test/rendererTestUtils'
+import {
+  ftp,
+  local,
+  localLoc,
+  remoteLoc,
+  server,
+  setupExplorer,
+  type ExplorerHarness
+} from '@renderer/components/explorer/explorerTestHarness'
+import { AppShell } from '@renderer/components/layout/AppShell'
+import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
+import { Shelf } from './Shelf'
+
+vi.mock('sonner', () => ({
+  toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }),
+  Toaster: () => null
+}))
+
+let h: ExplorerHarness
+// 내려놓으면 더미가 활동 알약으로 날아간다(Web Animations). jsdom에는 없다.
+beforeEach(() => {
+  HTMLElement.prototype.animate = vi.fn(() => ({}) as Animation)
+})
+afterEach(() => {
+  cleanup()
+  h.restore()
+  Reflect.deleteProperty(HTMLElement.prototype, 'animate')
+})
+
+const remoteItem = (name: string): ExplorerEntry =>
+  fromFtpEntry(ftp(name, { size: 1024 }), '/x', server())
+const localItem = (name: string): ExplorerEntry =>
+  fromLocalEntry(local('C:\\pics', name, { size: 2048 }))
+const shelfNames = (): string[] => useShelfStore.getState().items.map((i) => i.entry.name)
+const row = (name: string): HTMLElement =>
+  within(screen.getByRole('list', { name: en['shelf.items'] })).getByRole('listitem', {
+    name: new RegExp(`^${name.replace('.', '\\.')},`)
+  })
+
+describe('Shelf — list and drop button', () => {
+  it('shows each item with source dot, size and direction, removes with Delete and names the drop', () => {
+    // covers: Test-806
+    h = setupExplorer({ remote: { '/DCIM/2024': [] } })
+    useShelfStore.getState().add([localItem('b.jpg'), localItem('c.jpg'), remoteItem('a.jpg')])
+    useTabsStore.getState().openTab(remoteLoc('/DCIM/2024'))
+    render(<Shelf />)
+
+    expect(row('b.jpg').getAttribute('aria-label')).toBe(`b.jpg, ${en['sidebar.thisPc']}, 2 KB`)
+    expect(row('a.jpg').getAttribute('aria-label')).toBe('a.jpg, example.org:21, 1 KB')
+    expect(row('b.jpg').querySelector('[data-side="local"]')).toBeTruthy()
+    expect(row('a.jpg').querySelector('[data-side="remote"]')).toBeTruthy()
+    // 원격 탭에서 로컬 항목은 올라가고(↑), 같은 쪽 항목은 방향이 없다.
+    expect(row('b.jpg').textContent).toContain('↑')
+    expect(row('a.jpg').textContent).not.toMatch(/[↑↓]/)
+    // 버튼 문구: 동사·수·목적지 이름, 둘째 줄은 출처와 전체 경로
+    expect(
+      screen.getByRole('button', {
+        name: /^Upload 2 · Move 1 to 2024\s*→ example\.org:21 › \/DCIM\/2024/
+      })
+    ).toBeTruthy()
+
+    row('a.jpg').focus()
+    fireEvent.keyDown(row('a.jpg'), { key: 'Delete' })
+    expect(shelfNames()).toEqual(['b.jpg', 'c.jpg'])
+    expect(document.activeElement).toBe(row('c.jpg'))
+    const drop = screen.getByRole('button', { name: /^Upload 2 to 2024\s*→/ })
+    expect(drop.hasAttribute('disabled')).toBe(false)
+
+    // 막히면 사유와 함께 비활성
+    act(() => useFtpStore.setState({ connectionStatus: 'disconnected' }))
+    const blocked = screen.getByRole('button', { name: new RegExp(en['shelf.cantDropHere']) })
+    expect(blocked.hasAttribute('disabled')).toBe(true)
+    expect(blocked.textContent).toContain(en['send.invalidNotConnected'])
+  })
+})
+
+describe('Shelf — dropping into the active tab', () => {
+  const setup = (): void => {
+    h = setupExplorer({ local: { 'C:\\dl': [] } })
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['t1'], skipped: [], conflicts: [], totalBytes: 1024 }
+    })
+    useTabsStore.getState().openTab(localLoc('C:\\dl'))
+  }
+  const sends = (): unknown[][] => invokeCalls(h.invoke, 'transfer:send')
+
+  it('downloads remote items into the local tab by button, Enter and Ctrl+Enter anywhere, and empties the shelf', async () => {
+    // covers: Test-807
+    setup()
+    render(<AppShell />)
+    await screen.findByRole('region', { name: en['shelf.title'] })
+
+    useShelfStore.getState().add([remoteItem('a.jpg')])
+    fireEvent.click(
+      await screen.findByRole('button', { name: /^Download 1 to dl\s*→ This PC › C:\\dl/ })
+    )
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    expect(sends()).toEqual([[{ direction: 'download', sources: ['/x/a.jpg'], destDir: 'C:\\dl' }]])
+
+    act(() => {
+      useShelfStore.getState().add([remoteItem('b.jpg')])
+    })
+    fireEvent.keyDown(row('b.jpg'), { key: 'Enter' })
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    expect(sends()).toHaveLength(2)
+
+    act(() => {
+      useShelfStore.getState().add([remoteItem('c.jpg')])
+    })
+    fireEvent.keyDown(document.body, { key: 'Enter', ctrlKey: true })
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    expect(sends()[2]).toEqual([
+      { direction: 'download', sources: ['/x/c.jpg'], destDir: 'C:\\dl' }
+    ])
+  })
+
+  it('runs the transfer and the same-side copy of a mixed shelf together, and keeps the shelf on failure', async () => {
+    // covers: Test-807
+    setup()
+    useShelfStore.getState().add([remoteItem('a.jpg'), localItem('b.jpg')])
+    render(<Shelf />)
+    fireEvent.click(screen.getByRole('button', { name: /^Download 1 · Copy 1 to dl\s*→/ }))
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    expect(sends()).toEqual([[{ direction: 'download', sources: ['/x/a.jpg'], destDir: 'C:\\dl' }]])
+    expect(invokeCalls(h.invoke, 'local:copyFiles')).toEqual([
+      [['C:\\pics\\b.jpg'], 'C:\\dl', ['b.jpg']]
+    ])
+
+    // 다운로드만 실패하면 복사를 시작한 항목은 빠지고 실패한 항목만 남는다
+    const send = h.handlers['transfer:send']
+    h.handlers['transfer:send'] = () => ({ success: false, error: 'boom' })
+    act(() => {
+      useShelfStore.getState().add([remoteItem('d.jpg'), localItem('e.jpg')])
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^Download 1 · Copy 1 to dl\s*→/ }))
+    await waitFor(() => expect(sends()).toHaveLength(2))
+    await waitFor(() => expect(shelfNames()).toEqual(['d.jpg']))
+
+    // 내려놓는 중에 다시 눌러도 같은 항목을 또 보내지 않는다
+    h.handlers['transfer:send'] = send
+    const button = screen.getByRole('button', { name: /^Download 1 to dl\s*→ This PC › C:\\dl/ })
+    fireEvent.click(button)
+    fireEvent.click(button)
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    expect(sends()).toHaveLength(3)
+  })
+})
+
+describe('Shelf — same-side conflicts', () => {
+  const sheet = (): Promise<HTMLElement> => screen.findByRole('alertdialog')
+  const channels = (): string[] =>
+    h.invoke.mock.calls
+      .map(([c]) => c as string)
+      .filter((c) => c === 'ftp:deleteBatch' || c === 'ftp:rename')
+
+  it('asks before moving onto an existing remote name: overwrite deletes then renames, keep-both picks a free name, cancel does nothing', async () => {
+    // covers: Test-838
+    h = setupExplorer({ remote: { '/dst': [ftp('a.jpg'), ftp('a (1).jpg')] } })
+    useTabsStore.getState().openTab(remoteLoc('/dst'))
+    useShelfStore.getState().add([remoteItem('a.jpg'), remoteItem('c.jpg')])
+    render(
+      <>
+        <Shelf />
+        <ConflictSheet />
+      </>
+    )
+    const drop = (): void => {
+      fireEvent.click(screen.getByRole('button', { name: /^Move \d to dst\s*→/ }))
+    }
+
+    drop()
+    expect(within(await sheet()).getByText('"a.jpg" already exists')).toBeTruthy()
+    expect(channels()).toEqual([])
+    fireEvent.click(within(await sheet()).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(channels()).toEqual([])
+    expect(shelfNames()).toEqual(['a.jpg', 'c.jpg'])
+
+    // 덮어쓰기: 대상을 숨은 이름으로 비켜 두고, 옮긴 뒤에 지운다
+    drop()
+    fireEvent.click(within(await sheet()).getByRole('button', { name: 'Overwrite' }))
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    const renames = (): unknown[][] => invokeCalls(h.invoke, 'ftp:rename')
+    const aside = renames()[0][1] as string
+    expect(aside).toMatch(/^\/dst\/\.a\.jpg\.[a-z0-9]+\.old$/)
+    expect(renames()).toEqual([
+      ['/dst/a.jpg', aside],
+      ['/x/a.jpg', '/dst/a.jpg'],
+      ['/x/c.jpg', '/dst/c.jpg']
+    ])
+    expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toEqual([
+      [[{ path: aside, isDirectory: false }]]
+    ])
+    expect(channels()).toEqual(['ftp:rename', 'ftp:rename', 'ftp:deleteBatch', 'ftp:rename'])
+
+    // 옮기기가 실패하면 비켜 둔 대상을 제자리로 되돌리고 지우지 않는다
+    h.handlers['ftp:rename'] = (from) =>
+      from === '/x/a.jpg' ? { success: false, error: '550 denied' } : { success: true }
+    act(() => {
+      useShelfStore.getState().add([remoteItem('a.jpg')])
+    })
+    drop()
+    fireEvent.click(within(await sheet()).getByRole('button', { name: 'Overwrite' }))
+    await waitFor(() => expect(renames()).toHaveLength(6))
+    const aside2 = renames()[3][1] as string
+    expect(renames().slice(3)).toEqual([
+      ['/dst/a.jpg', aside2],
+      ['/x/a.jpg', '/dst/a.jpg'],
+      [aside2, '/dst/a.jpg']
+    ])
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toHaveLength(1)
+    expect(shelfNames()).toEqual(['a.jpg'])
+    delete h.handlers['ftp:rename']
+
+    drop()
+    fireEvent.click(within(await sheet()).getByRole('button', { name: 'Keep both (rename)' }))
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    expect(invokeCalls(h.invoke, 'ftp:rename').at(-1)).toEqual(['/x/a.jpg', '/dst/a (2).jpg'])
+    expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toHaveLength(1)
+  })
+
+  it('asks before copying onto an existing local name: keep-both passes new names, skip copies nothing, an unreadable folder only toasts', async () => {
+    // covers: Test-839
+    h = setupExplorer({
+      local: { 'C:\\dl': [local('C:\\dl', 'b.jpg'), local('C:\\dl', 'E.JPG')] }
+    })
+    useTabsStore.getState().openTab(localLoc('C:\\dl'))
+    useShelfStore.getState().add([localItem('b.jpg'), localItem('e.jpg')])
+    render(
+      <>
+        <Shelf />
+        <ConflictSheet />
+      </>
+    )
+    const drop = (): void => {
+      fireEvent.click(screen.getByRole('button', { name: /^Copy \d to dl\s*→/ }))
+    }
+    const copies = (): unknown[][] => invokeCalls(h.invoke, 'local:copyFiles')
+
+    drop()
+    // "나머지에 적용"이 기본으로 켜져 있어 두 충돌에 같은 결정(Windows는 대소문자 무시)
+    fireEvent.click(within(await sheet()).getByRole('button', { name: 'Keep both (rename)' }))
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    expect(copies()).toEqual([
+      [['C:\\pics\\b.jpg', 'C:\\pics\\e.jpg'], 'C:\\dl', ['b (1).jpg', 'e (1).jpg']]
+    ])
+
+    act(() => {
+      useShelfStore.getState().add([localItem('b.jpg'), localItem('e.jpg')])
+    })
+    drop()
+    fireEvent.click(within(await sheet()).getByRole('button', { name: 'Skip' }))
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    expect(copies()).toHaveLength(1)
+
+    h.handlers['local:list'] = () => ({ success: false, error: 'EACCES' })
+    act(() => {
+      useShelfStore.getState().add([localItem('b.jpg')])
+    })
+    drop()
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(en['toast.sendFailed'], { description: 'EACCES' })
+    )
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(copies()).toHaveLength(1)
+    expect(shelfNames()).toEqual(['b.jpg'])
+  })
+})

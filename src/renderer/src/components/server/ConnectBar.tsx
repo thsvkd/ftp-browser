@@ -149,16 +149,16 @@ export function ConnectBar(): React.JSX.Element {
           aria-expanded={popover}
           title={t('toolbar.switchServer')}
           className={cn(
-            'group flex min-w-0 items-center gap-2 rounded-md px-2 py-1 hover:bg-gray-50',
-            popover && 'bg-gray-50'
+            'group flex min-w-0 items-center gap-2 rounded-md px-2 py-1 hover:bg-[var(--hv)]',
+            popover && 'bg-[var(--sb)]'
           )}
         >
-          <span className="h-2 w-2 shrink-0 rounded-full bg-green-500" />
-          <span className="truncate text-[13px] font-medium text-gray-900">{label}</span>
+          <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--ok)]" />
+          <span className="truncate text-[13px] font-medium text-[var(--tx)]">{label}</span>
           {draft.host && (
-            <span className="truncate text-xs text-gray-400">{serverAddress(draft)}</span>
+            <span className="truncate text-xs text-[var(--mu)]">{serverAddress(draft)}</span>
           )}
-          <ChevronDown size={14} className="shrink-0 text-gray-400" />
+          <ChevronDown size={14} className="shrink-0 text-[var(--mu)]" />
         </button>
         {popoverEl}
       </div>
@@ -171,8 +171,8 @@ export function ConnectBar(): React.JSX.Element {
       <div ref={barRef} className="relative flex min-w-0 items-center gap-2">
         <div
           className={cn(
-            'flex h-8 w-[560px] min-w-0 items-stretch rounded-md border bg-white transition-shadow focus-within:border-blue-600 focus-within:ring-2 focus-within:ring-blue-600/20',
-            error ? 'border-red-300' : 'border-gray-300'
+            'flex h-8 w-[560px] min-w-0 items-stretch rounded-md border bg-[var(--sf)] transition-shadow focus-within:border-[var(--ac)] focus-within:ring-2 focus-within:ring-[var(--acw)]',
+            error ? 'border-[var(--dg)]' : 'border-[var(--bd2)]'
           )}
           onKeyDown={(e) => {
             if (e.nativeEvent.isComposing) return
@@ -195,24 +195,24 @@ export function ConnectBar(): React.JSX.Element {
             aria-expanded={popover}
             title={t('connect.savedServersTooltip')}
             className={cn(
-              'flex max-w-[180px] shrink-0 items-center gap-1.5 rounded-l-md border-r border-gray-200 pl-2.5 pr-2 text-[12.5px] hover:bg-gray-50',
-              popover && 'bg-gray-50'
+              'flex max-w-[180px] shrink-0 items-center gap-1.5 rounded-l-md border-r border-[var(--bd)] pl-2.5 pr-2 text-[12.5px] hover:bg-[var(--hv)]',
+              popover && 'bg-[var(--sb)]'
             )}
           >
             {saved ? (
               <>
                 <ServerDot label={serverLabel(saved)} />
-                <span className="truncate font-medium text-gray-800">{serverLabel(saved)}</span>
+                <span className="truncate font-medium text-[var(--tx)]">{serverLabel(saved)}</span>
               </>
             ) : (
               <>
-                <BookMarked size={14} strokeWidth={STROKE} className="shrink-0 text-gray-500" />
-                <span className="truncate text-gray-500">
+                <BookMarked size={14} strokeWidth={STROKE} className="shrink-0 text-[var(--mu)]" />
+                <span className="truncate text-[var(--mu)]">
                   {draft.host ? t('connect.newServer') : t('connect.savedServers')}
                 </span>
               </>
             )}
-            <ChevronDown size={13} className="shrink-0 text-gray-400" />
+            <ChevronDown size={13} className="shrink-0 text-[var(--mu)]" />
           </button>
           <input
             ref={addressRef}
@@ -223,7 +223,7 @@ export function ConnectBar(): React.JSX.Element {
             onChange={(e) => setAddress(e.target.value)}
             placeholder={t('connect.addressPlaceholder')}
             aria-label={t('connect.address')}
-            className="min-w-0 flex-1 bg-transparent px-2.5 font-mono text-[12.5px] text-gray-900 placeholder:font-sans placeholder:text-gray-400 focus:outline-none disabled:text-gray-500"
+            className="min-w-0 flex-1 bg-transparent px-2.5 font-mono text-[12.5px] text-[var(--tx)] placeholder:font-sans placeholder:text-[var(--mu)] focus:outline-none disabled:text-[var(--mu)]"
           />
           {hasUser && (
             <PasswordInput
@@ -234,7 +234,7 @@ export function ConnectBar(): React.JSX.Element {
               placeholder={draft.savedPassword ? SAVED_PASSWORD_DOTS : t('connect.password')}
               label={draft.savedPassword ? t('connect.savedPassword') : undefined}
               onChange={(password) => patch({ password })}
-              className="w-[118px] border-l border-gray-200"
+              className="w-[118px] border-l border-[var(--bd)]"
               inputClassName={cn(BARE, 'bg-transparent text-[12.5px]')}
             />
           )}
@@ -245,8 +245,8 @@ export function ConnectBar(): React.JSX.Element {
             title={draft.secure ? t('connect.secureOn') : t('connect.secureOff')}
             aria-label={t('connect.secure')}
             className={cn(
-              'grid w-8 shrink-0 place-items-center border-l border-gray-200',
-              draft.secure ? 'text-emerald-600' : 'text-gray-400 hover:text-gray-700'
+              'grid w-8 shrink-0 place-items-center border-l border-[var(--bd)]',
+              draft.secure ? 'text-[var(--ok)]' : 'text-[var(--mu)] hover:text-[var(--tx)]'
             )}
           >
             {draft.secure ? (
@@ -262,7 +262,7 @@ export function ConnectBar(): React.JSX.Element {
             }}
             title={t('connect.serverManager')}
             aria-label={t('connect.serverManager')}
-            className="grid w-8 shrink-0 place-items-center rounded-r-md border-l border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-800"
+            className="grid w-8 shrink-0 place-items-center rounded-r-md border-l border-[var(--bd)] text-[var(--mu)] hover:bg-[var(--hv)] hover:text-[var(--tx)]"
           >
             <SlidersHorizontal size={13} strokeWidth={STROKE} />
           </button>
@@ -286,7 +286,7 @@ export function ConnectBar(): React.JSX.Element {
           </button>
         )}
         {connecting && !manager && (
-          <span className="truncate text-xs text-gray-500">
+          <span className="truncate text-xs text-[var(--mu)]">
             {t('connect.connectingTo', { name: serverLabel(draft) })}
           </span>
         )}

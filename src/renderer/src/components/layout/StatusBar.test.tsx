@@ -1,0 +1,72 @@
+/** @vitest-environment jsdom */
+import { afterEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { en } from '@renderer/i18n/locales/en'
+import { fromLocalEntry } from '@renderer/lib/explorerEntry'
+import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { useListingStore } from '@renderer/stores/useListingStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { useTabsStore } from '@renderer/stores/useTabsStore'
+import {
+  activeTab,
+  local,
+  localLoc,
+  setupExplorer,
+  type ExplorerHarness
+} from '@renderer/components/explorer/explorerTestHarness'
+import { StatusBar } from './StatusBar'
+
+const DIR = 'C:\\work'
+let h: ExplorerHarness
+afterEach(() => {
+  cleanup()
+  h.restore()
+})
+
+describe('StatusBar', () => {
+  it('shows selection or item count, folder and file totals, hidden count, the tile slider in grid and the connection', () => {
+    // covers: Test-824
+    h = setupExplorer({ connected: false })
+    const entries = [
+      local(DIR, 'docs', { dir: true }),
+      local(DIR, 'a.jpg', { size: 1024 }),
+      local(DIR, 'b.jpg', { size: 2048 }),
+      local(DIR, '.env', { size: 10 })
+    ].map(fromLocalEntry)
+    useListingStore.getState().put(localLoc(DIR), entries)
+    useTabsStore.getState().openTab(localLoc(DIR))
+    render(<StatusBar />)
+
+    // 선택 없음: 보이는 항목 수, 폴더·파일 합계와 크기, 숨긴 수
+    const bar = screen.getByRole('contentinfo')
+    expect(bar.textContent).toContain('3 items')
+    expect(bar.textContent).toContain('1 folder')
+    expect(bar.textContent).toContain('3 files')
+    expect(bar.textContent).toContain('3 KB')
+    expect(bar.textContent).toContain('1 hidden')
+
+    // 선택: 수와 크기
+    act(() =>
+      useTabsStore.getState().patchTab(activeTab().id, { sel: [`${DIR}\\a.jpg`, `${DIR}\\b.jpg`] })
+    )
+    expect(bar.textContent).toContain('2 selected')
+    expect(bar.textContent).toMatch(/2 selected\s*·\s*3 KB/)
+
+    // 그리드에서만 타일 크기 조절
+    const slider = screen.getByRole('slider', { name: en['status.tileSize'] })
+    fireEvent.change(slider, { target: { value: '200' } })
+    expect(useSettingsStore.getState().tileSize).toBe(200)
+    fireEvent.click(screen.getByRole('button', { name: en['status.tileLarger'] }))
+    expect(useSettingsStore.getState().tileSize).toBeGreaterThan(200)
+    fireEvent.click(screen.getByRole('button', { name: en['status.tileSmaller'] }))
+    expect(useSettingsStore.getState().tileSize).toBe(200)
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { view: 'list' }))
+    expect(screen.queryByRole('slider')).toBeNull()
+
+    // 연결 상태
+    expect(bar.textContent).toContain(en['status.disconnected'])
+    act(() => useFtpStore.setState({ connectionStatus: 'connected', host: 'nas.local' }))
+    expect(bar.textContent).toContain(en['status.connected'])
+    expect(bar.textContent).toContain('nas.local')
+  })
+})

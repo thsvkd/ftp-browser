@@ -25,7 +25,6 @@ interface GalleryStore {
 
   clearAll: () => void
   clearRemote: () => void
-  clearLocal: () => void
 }
 
 export const useGalleryStore = create<GalleryStore>((set) => ({
@@ -69,6 +68,5 @@ export const useGalleryStore = create<GalleryStore>((set) => ({
     })),
 
   clearAll: () => set({ remoteFolderPreviews: {}, localFolderPreviews: {} }),
-  clearRemote: () => set({ remoteFolderPreviews: {} }),
-  clearLocal: () => set({ localFolderPreviews: {} })
+  clearRemote: () => set({ remoteFolderPreviews: {} })
 }))

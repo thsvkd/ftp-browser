@@ -1,7 +1,7 @@
 import type { FtpFileEntry } from '@shared/types/ftp'
 
-export interface ThumbnailTarget {
-  entry: FtpFileEntry
+export interface ThumbnailTarget<T extends { isImage: boolean } = { isImage: boolean }> {
+  entry: T
   /** 보이는 행 범위로부터의 행 거리. 보이는 행은 0. 낮을수록 먼저 받는다. */
   priority: number
 }
@@ -11,12 +11,25 @@ export interface ThumbnailTarget {
  * 보이는 행이 먼저(priority 0), 그다음 거리 1, 2… 의 마진 행이다. 같은 거리면 위 행 먼저,
  * 행 안에서는 왼쪽부터. 'parent'와 이미지가 아닌 항목은 건너뛰고, 행은 [0, 마지막 행]으로 자른다.
  */
+export function viewportThumbnailTargets<T extends { isImage: boolean }>(
+  items: ReadonlyArray<T | 'parent'>,
+  columnCount: number,
+  visibleRows: { startIndex: number; endIndex: number },
+  marginRows: number
+): ThumbnailTarget<T>[]
+// 마지막 시그니처가 ReturnType<typeof viewportThumbnailTargets>의 기준이다.
 export function viewportThumbnailTargets(
   items: ReadonlyArray<FtpFileEntry | 'parent'>,
   columnCount: number,
   visibleRows: { startIndex: number; endIndex: number },
   marginRows: number
-): ThumbnailTarget[] {
+): ThumbnailTarget<FtpFileEntry>[]
+export function viewportThumbnailTargets<T extends { isImage: boolean }>(
+  items: ReadonlyArray<T | 'parent'>,
+  columnCount: number,
+  visibleRows: { startIndex: number; endIndex: number },
+  marginRows: number
+): ThumbnailTarget<T>[] {
   const rows: Array<{ row: number; priority: number }> = []
   for (let row = visibleRows.startIndex; row <= visibleRows.endIndex; row++) {
     rows.push({ row, priority: 0 })
@@ -26,7 +39,7 @@ export function viewportThumbnailTargets(
     rows.push({ row: visibleRows.endIndex + distance, priority: distance })
   }
 
-  const targets: ThumbnailTarget[] = []
+  const targets: ThumbnailTarget<T>[] = []
   for (const { row, priority } of rows) {
     // 마지막 행 너머는 slice가 빈 배열을 돌려주므로 음수 행만 거른다
     if (row < 0) continue

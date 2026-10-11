@@ -2,37 +2,89 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Shelf 토큰(랩 V2). 컴포넌트는 `bg-[var(--sf)]`처럼 쓴다. 테마는 OS를 따른다(H3).
+ * --bg 창 바탕 · --sf 면 · --sb 사이드바 · --bd/--bd2 테두리 · --tx 글자 · --mu 흐린 글자 · --hv 올림
+ * --selin 포커스 없는 선택 · --sh/--shw/--shx/--shink 선반 · --dg/--dgw 위험 · --ok 성공
+ * --sk/--sk2 스켈레톤 · --tile 타일 바탕 · --local 내 PC 배지 · --ac/--acw/--acx 강조
+ */
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --primary: 222.2 47.4% 11.2%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96.1%;
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --accent: 210 40% 96.1%;
-  --accent-foreground: 222.2 47.4% 11.2%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 210 40% 98%;
-  --ring: 222.2 84% 4.9%;
-  --radius: 0.5rem;
+  --bg: #f4f6f5;
+  --sf: #ffffff;
+  --sb: #eef1f0;
+  --bd: #dde3e1;
+  --bd2: #c9d1cf;
+  --tx: #13201e;
+  --mu: #5e6b69;
+  --hv: rgba(19, 32, 30, 0.05);
+  --selin: #e2e7e5;
+  --sh: #e9a23b;
+  --shw: #fdf1dc;
+  --shx: #7a4a00;
+  --shink: #2a1b00;
+  --dg: #c93a30;
+  --dgw: #fce9e7;
+  --ok: #1b8a50;
+  --sk: #e7ecea;
+  --sk2: #f6f8f7;
+  --tile: #e9eeec;
+  --shadow: 0 1px 2px rgba(19, 32, 30, 0.06), 0 8px 24px -8px rgba(19, 32, 30, 0.18);
+  --local: #5b6b7a;
+  --ac: #0e8c88;
+  --acw: #ddf2f1;
+  --acx: #ffffff;
+  --spring: 600ms;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1413;
+    --sf: #161c1b;
+    --sb: #121817;
+    --bd: #25302e;
+    --bd2: #34413f;
+    --tx: #e4ecea;
+    --mu: #8fa19e;
+    --hv: rgba(228, 236, 234, 0.05);
+    --selin: #232c2b;
+    --sh: #f2b95a;
+    --shw: #33270f;
+    --shx: #f2b95a;
+    --shink: #231600;
+    --dg: #f2766d;
+    --dgw: #3a1c1a;
+    --ok: #3ccb7f;
+    --sk: #1c2423;
+    --sk2: #252f2e;
+    --tile: #1b2221;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px -10px rgba(0, 0, 0, 0.6);
+    --local: #8ea0b2;
+    --ac: #34c2bc;
+    --acw: #133432;
+    --acx: #06201f;
+  }
 }
 
 @layer base {
   * {
-    @apply border-border;
+    border-color: var(--bd);
   }
   body {
-    @apply bg-background text-foreground;
+    background-color: var(--bg);
+    color: var(--tx);
+    /* 시스템 글꼴(D4): CSP가 CDN을 막고 한글 웹 글꼴은 수 MB다. */
     font-family:
-      -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      'Segoe UI Variable Text',
+      'Segoe UI',
+      system-ui,
+      -apple-system,
+      'Malgun Gothic',
+      'Apple SD Gothic Neo',
+      'Noto Sans CJK KR',
+      sans-serif;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
     margin: 0;
     padding: 0;
     overflow: hidden;
@@ -44,22 +96,167 @@
     display: flex;
     flex-direction: column;
   }
-}
-
-@layer base {
   [draggable='true'] {
     -webkit-user-drag: element;
   }
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ac);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--acw);
+  }
 }
 
-@layer utilities {
-  .border-border {
-    border-color: hsl(var(--border));
+/* 랩 V2의 공용 클래스. 이름은 랩과 같게 두어 옮겨 오기 쉽게 한다. */
+.mono {
+  font-family: 'Cascadia Mono', Consolas, 'SF Mono', Menlo, 'D2Coding', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+.ring-focus {
+  box-shadow:
+    0 0 0 2px var(--sf),
+    0 0 0 4px var(--ac);
+}
+.scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bd2) transparent;
+}
+
+@keyframes shelf-shimmer {
+  from {
+    background-position: 150% 0;
   }
-  .bg-background {
-    background-color: hsl(var(--background));
+  to {
+    background-position: -50% 0;
   }
-  .text-foreground {
-    color: hsl(var(--foreground));
+}
+.shimmer {
+  background: linear-gradient(100deg, var(--sk) 35%, var(--sk2) 50%, var(--sk) 65%) var(--sk);
+  background-size: 250% 100%;
+  animation: shelf-shimmer 1.4s linear infinite;
+}
+@keyframes shelf-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.spring-fill {
+  transform-origin: left center;
+  animation: shelf-fill var(--spring) linear forwards;
+}
+@keyframes shelf-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+}
+.pop {
+  animation: shelf-pop 0.16s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes shelf-fade {
+  from {
+    opacity: 0;
+  }
+}
+.fade {
+  animation: shelf-fade 0.12s ease-out;
+}
+@keyframes shelf-indet {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+.indet {
+  animation: shelf-indet 1.1s ease-in-out infinite;
+}
+@keyframes shelf-bump {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.bump {
+  animation: shelf-bump 0.32s cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+@keyframes shelf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: shelf-spin 0.9s linear infinite;
+}
+@keyframes shelf-slide {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+.slide {
+  animation: shelf-slide 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes shelf-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+.rise {
+  animation: shelf-rise 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.tile-img {
+  transition: transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+[data-tile]:hover .tile-img {
+  transform: scale(1.025);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+  .shimmer,
+  .indet,
+  .spin {
+    animation: none !important;
+  }
+  .fade {
+    animation: shelf-fade 90ms ease-out !important;
+  }
+  [data-tile]:hover .tile-img {
+    transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  [aria-selected='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .ring-focus {
+    outline: 2px solid CanvasText;
   }
 }

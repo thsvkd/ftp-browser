@@ -1,92 +1,98 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Database, Trash2 } from 'lucide-react'
+import { Minus, Plus } from 'lucide-react'
+import { useT } from '@renderer/i18n'
+import { useTabEntries } from '@renderer/hooks/useTabEntries'
+import { TILE_MAX, TILE_MIN, TILE_STEP } from '@renderer/lib/explorerLayout'
+import { cn, formatBytes } from '@renderer/lib/utils'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
-import { formatBytes, filterHidden } from '@renderer/lib/utils'
-import { useT } from '@renderer/i18n'
-import type { IpcResult } from '@shared/types/ipc'
+import { useActiveTab } from '@renderer/stores/useTabsStore'
+import { ZOOM_STEP } from '@renderer/components/explorer/FileGrid'
 
-interface CacheStats {
-  totalBytes: number
-  totalCount: number
-}
+const fileBytes = (sum: number, e: { type: string; size: number }): number =>
+  sum + (e.type === 'file' ? e.size : 0)
 
+const STATUS_DOT = {
+  connected: 'bg-[var(--ok)]',
+  connecting: 'animate-pulse bg-[var(--sh)]',
+  error: 'bg-[var(--dg)]',
+  disconnected: 'bg-[var(--bd2)]'
+} as const
+
+const tileBtn =
+  'flex h-6 w-6 items-center justify-center rounded text-[var(--mu)] hover:bg-[var(--hv)] hover:text-[var(--tx)]'
+
+/**
+ * 상태 표시줄(D19): 선택 수·크기(없으면 보이는 항목 수), 폴더·파일 합계와 크기, 숨긴 수,
+ * 그리드일 때 타일 크기, 연결 상태. 캐시 통계는 설정 창에만 있다.
+ */
 export function StatusBar(): React.JSX.Element {
-  const connectionStatus = useFtpStore((s) => s.connectionStatus)
-  const entries = useFtpStore((s) => s.entries)
-  const currentPath = useFtpStore((s) => s.currentPath)
-  const showHidden = useSettingsStore((s) => s.showHidden)
   const t = useT()
+  const tab = useActiveTab()
+  const { all, visible, selected } = useTabEntries(tab)
+  const tileSize = useSettingsStore((s) => s.tileSize)
+  const status = useFtpStore((s) => s.connectionStatus)
+  const host = useFtpStore((s) => s.host)
+  const { setTileSize, adjustTileSize } = useSettingsStore.getState()
 
-  const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
-  const [clearing, setClearing] = useState(false)
-
-  // Count only what the file views actually show (respect the hidden-files setting).
-  const visibleEntries = filterHidden(entries, showHidden)
-  const dirCount = visibleEntries.filter((e) => e.type === 'directory').length
-  const fileCount = visibleEntries.filter((e) => e.type === 'file').length
-
-  const fetchCacheStats = useCallback(async () => {
-    const result = await window.api.invoke<IpcResult<CacheStats>>('cache:getStats')
-    if (result.success) {
-      setCacheStats(result.data)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchCacheStats()
-    const interval = setInterval(fetchCacheStats, 30_000)
-    return () => clearInterval(interval)
-  }, [fetchCacheStats])
-
-  const handleClearCache = async (): Promise<void> => {
-    setClearing(true)
-    try {
-      await window.api.invoke('cache:clear')
-      await fetchCacheStats()
-    } finally {
-      setClearing(false)
-    }
-  }
+  const dirs = all.filter((e) => e.type === 'directory').length
+  const hidden = all.length - visible.length
 
   return (
-    <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-500">
-      <div>
-        {connectionStatus === 'connected' && (
-          <span>
-            {t('status.location', {
-              path: currentPath,
-              folders: t('status.folderCount', { count: dirCount }),
-              files: t('status.fileCount', { count: fileCount })
-            })}
+    <footer className="tnum flex h-8 shrink-0 items-center gap-4 border-t border-[var(--bd)] bg-[var(--sb)] px-3 text-[12px] text-[var(--mu)]">
+      <span className="flex min-w-0 items-center gap-1.5" aria-live="polite">
+        {selected.length ? (
+          <b className="shrink-0 font-semibold text-[var(--tx)]">
+            {t('status.selected', { count: selected.length })} ·{' '}
+            <span className="mono">{formatBytes(selected.reduce(fileBytes, 0))}</span>
+          </b>
+        ) : (
+          <span className="shrink-0">{t('common.itemCount', { count: visible.length })}</span>
+        )}
+        {all.length > 0 && (
+          <span className="truncate">
+            · {t('status.folderCount', { count: dirs })} ·{' '}
+            {t('status.fileCount', { count: all.length - dirs })} ·{' '}
+            <span className="mono">{formatBytes(all.reduce(fileBytes, 0))}</span>
+            {hidden > 0 && ` · ${t('status.hidden', { count: hidden })}`}
           </span>
         )}
-      </div>
-      <div className="flex items-center gap-3">
-        {cacheStats && (
-          <div className="flex items-center gap-1.5">
-            <Database size={12} className="text-gray-400" />
-            <span>
-              {t('status.cache', {
-                count: cacheStats.totalCount,
-                size: formatBytes(cacheStats.totalBytes)
-              })}
-            </span>
-            {cacheStats.totalCount > 0 && (
-              <button
-                onClick={handleClearCache}
-                disabled={clearing}
-                className="ml-0.5 rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-red-500 disabled:opacity-50"
-                title={t('status.clearCache')}
-                aria-label={t('status.clearCache')}
-              >
-                <Trash2 size={12} />
-              </button>
-            )}
-          </div>
+      </span>
+      <span className="flex-1" />
+      {tab?.view === 'grid' && (
+        <span className="flex items-center gap-1.5" title={t('status.tileTooltip')}>
+          <button
+            onClick={() => adjustTileSize(-ZOOM_STEP)}
+            aria-label={t('status.tileSmaller')}
+            className={tileBtn}
+          >
+            <Minus className="h-3.5 w-3.5" aria-hidden />
+          </button>
+          <input
+            type="range"
+            min={TILE_MIN}
+            max={TILE_MAX}
+            step={TILE_STEP}
+            value={tileSize}
+            onChange={(e) => setTileSize(Number(e.target.value))}
+            aria-label={t('status.tileSize')}
+            className="h-1 w-24 accent-[var(--ac)]"
+          />
+          <button
+            onClick={() => adjustTileSize(ZOOM_STEP)}
+            aria-label={t('status.tileLarger')}
+            className={tileBtn}
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </span>
+      )}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className={cn('h-2 w-2 shrink-0 rounded-full', STATUS_DOT[status])} aria-hidden />
+        {host && status !== 'disconnected' && (
+          <span className="mono truncate text-[var(--tx)]">{host}</span>
         )}
-        <span>{t(`status.${connectionStatus}`)}</span>
-      </div>
-    </div>
+        <span className="shrink-0">{t(`status.${status}`)}</span>
+      </span>
+    </footer>
   )
 }

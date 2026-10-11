@@ -37,13 +37,3 @@ export function getFileExtension(name: string): string {
 export function isHiddenName(name: string): boolean {
   return name.startsWith('.')
 }
-
-/**
- * Drop dotfile entries unless `showHidden` is true.
- * Always returns a fresh array so callers can safely sort in place.
- * Works for any entry type that exposes a `name`.
- */
-export function filterHidden<T extends { name: string }>(entries: T[], showHidden: boolean): T[] {
-  if (showHidden) return [...entries]
-  return entries.filter((e) => !isHiddenName(e.name))
-}

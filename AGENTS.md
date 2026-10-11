@@ -7,7 +7,9 @@ basic-ftp connection, a transfer queue over a pool of parallel connections (larg
 split into segments), sharp thumbnails in a disk cache indexed in SQLite (better-sqlite3, which
 also stores saved servers), local file operations, and auto-update (electron-updater, packaged
 Windows installer only). The renderer (`src/renderer/src`, React 19 + zustand + Tailwind) shows
-remote and local panes side by side in list/grid views, in 11 UI locales. The two sides talk only
+one explorer pane whose tabs each hold a local or remote folder (grid/list), a sidebar of places
+and servers, and a right rail with the shelf (items gathered to drop into another tab) and
+details, in 11 UI locales. The two sides talk only
 through the preload bridge `window.api`.
 
 ## Source map
@@ -19,9 +21,10 @@ through the preload bridge `window.api`.
   `update/` `UpdateManager` · `operation/` copy/move/delete progress · `debug/` DevTools shortcuts ·
   `menu/`, `preview/`, `utils/` (`errorClassifier.ts`, `remotePath.ts`, `sparseFile.ts`).
 - `src/preload/index.ts` + `index.d.ts` — the only bridge; exposes `window.api`.
-- `src/renderer/src/`: `components/<area>/` (remote, local, transfer, server, settings, thumbnail,
-  layout, common) · `stores/` one zustand `use*Store.ts` each · `hooks/` · `lib/` pure helpers ·
-  `i18n/` · `test/rendererTestUtils.ts`.
+- `src/renderer/src/`: `components/<area>/` (explorer, shelf, activity, layout, server, settings,
+  thumbnail, common) · `stores/` one zustand `use*Store.ts` each (`useTabsStore` tabs and their
+  locations, `useListingStore` listing cache, `useShelfStore`; `useFtpStore` only the connection) ·
+  `hooks/` · `lib/` pure helpers · `i18n/` · `test/rendererTestUtils.ts`.
 - `src/shared/` — imported by both sides: `types/` (incl. `ipc.ts`), `constants.ts`, `debug.ts`,
   plus repo contract tests. Aliases: `@shared/*` everywhere, `@renderer/*` in renderer and vitest.
 - `script/` — dev helpers and `smoke-packaged.mjs`. `docs/handoff/` — feature specs (see below).

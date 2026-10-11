@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useFtpStore } from './useFtpStore'
+import { useListingStore } from './useListingStore'
+import { useTabsStore } from './useTabsStore'
 import type { FtpConnectPayload } from '@shared/types/ftp'
 
 const mockInvoke = vi.fn()
@@ -23,13 +25,10 @@ function resetStore(): void {
     connectionStatus: 'disconnected',
     host: '',
     port: 21,
-    error: null,
-    currentPath: '/',
-    entries: [],
-    loading: false,
-    history: ['/'],
-    historyIndex: 0
+    error: null
   })
+  useTabsStore.setState({ tabs: [], activeId: '', recent: [] })
+  useListingStore.setState({ byKey: {} })
 }
 
 describe('useFtpStore', () => {
@@ -50,7 +49,7 @@ describe('useFtpStore', () => {
     await expect(useFtpStore.getState().connect(CONFIG, '/photos')).resolves.toBe(true)
     const state = useFtpStore.getState()
     expect(state.host).toBe('ftp.example.com')
-    expect(state.currentPath).toBe('/photos')
+    expect(useTabsStore.getState().tabs.map((t) => t.loc.path)).toEqual(['/photos'])
     expect(mockInvoke.mock.calls.map((c) => c[0])).toEqual(['ftp:connect', 'ftp:list'])
   })
 
@@ -119,8 +118,8 @@ describe('useFtpStore', () => {
       })
 
       await expect(connectPromise).resolves.toBe(false)
-      expect(useFtpStore.getState().entries).toEqual([])
-      expect(useFtpStore.getState().loading).toBe(false)
+      expect(useTabsStore.getState().tabs).toEqual([])
+      expect(useListingStore.getState().byKey).toEqual({})
     })
 
     it('does not surface the cancelled connect as an error', async () => {

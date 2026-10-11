@@ -41,13 +41,4 @@ export function isTypeAheadKey(e: React.KeyboardEvent): boolean {
   return e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey
 }
 
-/** Same order every file view renders: directories first, then by name. */
-export function sortForDisplay<T extends { name: string; type: string }>(entries: T[]): T[] {
-  return [...entries].sort((a, b) => {
-    if (a.type === 'directory' && b.type !== 'directory') return -1
-    if (a.type !== 'directory' && b.type === 'directory') return 1
-    return a.name.localeCompare(b.name)
-  })
-}
-
 export const TYPE_AHEAD_RESET_MS = 1000

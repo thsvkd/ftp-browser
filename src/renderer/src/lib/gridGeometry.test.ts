@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { itemIndicesInRect, type GridRect } from './gridGeometry'
+import { clampTileSize, gridLayout, itemIndicesInRect, type GridRect } from './gridGeometry'
 
 // Layout used across these tests: 3 columns, 100px cells, 10px gap, 8px left pad.
 //   col x ranges: 0 -> 8..108, 1 -> 118..218, 2 -> 228..328
@@ -49,5 +49,41 @@ describe('itemIndicesInRect', () => {
   it('returns an empty array for an empty grid or zero columns', () => {
     expect(itemIndicesInRect(rect(0, 0, 999, 999), 0, COLS, CELL, GAP, PAD, 0)).toEqual([])
     expect(itemIndicesInRect(rect(0, 0, 999, 999), 9, 0, CELL, GAP, PAD, 0)).toEqual([])
+  })
+})
+
+describe('itemIndicesInRect with 4:3 cells', () => {
+  it('uses a separate row height when given', () => {
+    // 2 columns of 100px wide, 120px tall cells: row 1 starts at y = 130.
+    expect(itemIndicesInRect(rect(0, 125, 220, 128), 4, 2, 100, 10, 0, 0, 120)).toEqual([])
+    expect(itemIndicesInRect(rect(0, 105, 50, 115), 4, 2, 100, 10, 0, 0, 120)).toEqual([0])
+    expect(itemIndicesInRect(rect(0, 135, 220, 140), 4, 2, 100, 10, 0, 0, 120)).toEqual([2, 3])
+  })
+})
+
+describe('grid layout', () => {
+  it('derives columns, 4:3 image height and row height, and clamps the tile size', () => {
+    // covers: Test-778
+    // 1000 wide, 160 tiles, 12 gap, 16 pad: inner 968 → 5 columns of 184.
+    expect(gridLayout(1000, 160, 12, 16, 46)).toEqual({
+      cols: 5,
+      cellWidth: 184,
+      imageHeight: 138,
+      rowHeight: 138 + 46 + 12
+    })
+    expect(gridLayout(1000, 280, 12, 16, 46).cols).toBe(3)
+    // Never fewer than one column.
+    expect(gridLayout(100, 280, 12, 16, 46)).toMatchObject({
+      cols: 1,
+      cellWidth: 68,
+      imageHeight: 51
+    })
+    expect(gridLayout(0, 160, 12, 16, 46).cols).toBe(1)
+
+    expect(clampTileSize(163)).toBe(160)
+    expect(clampTileSize(165)).toBe(168)
+    expect(clampTileSize(10)).toBe(96)
+    expect(clampTileSize(999)).toBe(280)
+    expect(clampTileSize(Number.NaN)).toBe(160)
   })
 })

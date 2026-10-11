@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
+import { Folder } from 'lucide-react'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import {
   useLocalThumbnailStore,
@@ -9,7 +10,17 @@ import { useT } from '@renderer/i18n'
 import type { IpcResult } from '@shared/types/ipc'
 import type { LocalFolderPreview } from '@shared/types/gallery'
 
-const FOLDER_ICON = '\u{1F4C1}'
+/** 미리보기가 없을 때의 폴더 글리프(이모지 대신 lucide, 기준선 #16). */
+function FolderGlyph({ size }: { size: number }): React.JSX.Element {
+  return (
+    <Folder
+      aria-hidden
+      className="fill-amber-400/25 text-amber-500"
+      strokeWidth={1.5}
+      style={{ width: Math.round(size * 0.4), height: Math.round(size * 0.4) }}
+    />
+  )
+}
 
 interface LocalFolderThumbnailProps {
   folderPath: string
@@ -74,12 +85,7 @@ export function LocalFolderThumbnail({
       {preview ? (
         <LocalFolderPreviewImage preview={preview} folderPath={folderPath} size={size} />
       ) : (
-        <div
-          className="flex h-full w-full items-center justify-center leading-none"
-          style={{ fontSize: Math.round(size * 0.6) }}
-        >
-          {FOLDER_ICON}
-        </div>
+        <FolderGlyph size={size} />
       )}
     </div>
   )
@@ -121,14 +127,14 @@ function LocalFolderPreviewImage({
         <img
           src={thumbnailData.dataUrl}
           alt={t('preview.folderAlt', { path: folderPath })}
-          className="h-full w-full rounded object-contain"
+          className="tile-img h-full w-full object-cover"
           loading="lazy"
         />
         <span
-          className="absolute bottom-0 left-0 rounded-tr bg-gray-900/70 px-1 text-[10px] text-white"
+          className="absolute bottom-1.5 left-1.5 flex h-6 w-6 items-center justify-center rounded-md bg-[var(--sf)]/90 shadow-sm"
           aria-hidden
         >
-          {FOLDER_ICON}
+          <Folder className="h-3.5 w-3.5 fill-amber-400/30 text-amber-500" />
         </span>
         <FolderCountBadge count={preview.itemCount} />
       </div>
@@ -137,9 +143,7 @@ function LocalFolderPreviewImage({
 
   return (
     <div className="relative flex h-full w-full items-center justify-center">
-      <span className="leading-none" style={{ fontSize: Math.round(size * 0.6) }}>
-        {FOLDER_ICON}
-      </span>
+      <FolderGlyph size={size} />
       <FolderCountBadge count={preview.itemCount} />
     </div>
   )

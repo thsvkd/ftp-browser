@@ -1,6 +1,8 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: ['./src/renderer/index.html', './src/renderer/src/**/*.{js,ts,jsx,tsx}'],
+  // 테마는 OS를 따른다(H3). 색은 globals.css의 토큰이 바꾸고, `dark:` 변형도 같은 미디어 쿼리다.
+  darkMode: 'media',
   theme: {
     extend: {
       keyframes: {

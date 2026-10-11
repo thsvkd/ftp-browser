@@ -7,6 +7,9 @@ import type {
 } from '@shared/types/ftp'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
 import { t } from '@renderer/i18n'
+import { fromFtpEntry } from '@renderer/lib/explorerEntry'
+import { useListingStore } from './useListingStore'
+import { useTabsStore } from './useTabsStore'
 
 interface FtpListData {
   path: string
@@ -18,16 +21,9 @@ interface FtpStore {
   connectionStatus: ConnectionStatus
   host: string
   port: number
+  /** 연결한 사용자 이름. 서버 키 `"user@host:port"`(D1)를 만든다. */
+  username: string
   error: string | null
-
-  // Directory state
-  currentPath: string
-  entries: FtpFileEntry[]
-  loading: boolean
-
-  // Path history
-  history: string[]
-  historyIndex: number
 
   // Actions
   connect: (config: FtpConnectPayload, initialPath?: string) => Promise<boolean>
@@ -36,12 +32,12 @@ interface FtpStore {
    * Main changed the connection by itself (an agent, handoff agent-access K5): reset the
    * session state like `disconnect()` without asking main to disconnect, then take `session`.
    */
-  adoptSession: (session: { status: ConnectionStatus; host?: string; port?: number }) => void
-  navigateTo: (path: string) => Promise<void>
-  navigateUp: () => Promise<void>
-  goBack: () => Promise<void>
-  goForward: () => Promise<void>
-  refresh: () => Promise<void>
+  adoptSession: (session: {
+    status: ConnectionStatus
+    host?: string
+    port?: number
+    user?: string
+  }) => void
   setConnectionState: (state: FtpConnectionState) => void
 }
 
@@ -51,29 +47,30 @@ interface FtpStore {
  */
 let connectGeneration = 0
 
+/** 원격 폴더 하나를 읽는다. 호출이 던지면 실패 값으로 바꾼다. */
+async function listDir(path: string): Promise<IpcResult<FtpListData>> {
+  try {
+    return await window.api.invoke<IpcResult<FtpListData>>('ftp:list', path)
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 /** 연결이 없을 때의 세션 상태. disconnect()와 adoptSession()이 같은 초기화를 쓴다. */
 const DISCONNECTED = {
   connectionStatus: 'disconnected',
   host: '',
   port: 21,
-  currentPath: '/',
-  entries: [],
-  error: null,
-  loading: false,
-  history: ['/'],
-  historyIndex: 0
+  username: '',
+  error: null
 } satisfies Partial<FtpStore>
 
 export const useFtpStore = create<FtpStore>((set, get) => ({
   connectionStatus: 'disconnected',
   host: '',
   port: 21,
+  username: '',
   error: null,
-  currentPath: '/',
-  entries: [],
-  loading: false,
-  history: ['/'],
-  historyIndex: 0,
 
   connect: async (config, initialPath = '/') => {
     const generation = ++connectGeneration
@@ -81,24 +78,27 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
     const result = await window.api.invoke<IpcResult<void>>('ftp:connect', config)
     if (generation !== connectGeneration) return false
     if (result.success) {
-      set({ host: config.host, port: config.port })
-      await get().navigateTo(initialPath)
-      if (generation !== connectGeneration) {
-        set({ error: null, loading: false })
+      set({ host: config.host, port: config.port, username: config.user })
+      // 시작 폴더를 읽지 못하면 루트로 물러선다.
+      let path = initialPath
+      let listed = await listDir(path)
+      if (generation !== connectGeneration) return false
+      if (!listed.success && path !== '/') {
+        path = '/'
+        listed = await listDir(path)
+        if (generation !== connectGeneration) return false
+      }
+      if (!listed.success) {
+        set({ error: listed.error })
         return false
       }
-      // If initial path failed, fall back to root
-      if (get().error && initialPath !== '/') {
-        set({ error: null })
-        await get().navigateTo('/')
-        if (generation !== connectGeneration) {
-          set({ error: null, loading: false })
-          return false
-        }
-      }
-      if (get().error) {
-        return false
-      }
+      // 확정된 시작 폴더의 목록을 캐시에 넣고 원격 탭 하나를 그리로 옮겨 활성화한다(D3).
+      const server = `${config.user}@${config.host}:${config.port}`
+      useListingStore.getState().put(
+        { side: 'remote', path, server },
+        listed.data.entries.map((e) => fromFtpEntry(e, path, server))
+      )
+      useTabsStore.getState().adoptRemote(server, path)
       return true
     }
     // 저장된 비밀번호를 이 컴퓨터에서 풀 수 없으면 다시 입력하라고 알린다(E12).
@@ -124,109 +124,9 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
       ...DISCONNECTED,
       connectionStatus: session.status,
       host: session.host ?? '',
-      port: session.port ?? 21
+      port: session.port ?? 21,
+      username: session.user ?? ''
     })
-  },
-
-  navigateTo: async (path) => {
-    const generation = connectGeneration
-    set({ loading: true, error: null })
-    try {
-      const result = await window.api.invoke<IpcResult<FtpListData>>('ftp:list', path)
-      if (generation !== connectGeneration) return
-      if (result.success) {
-        const { history, historyIndex } = get()
-        const newHistory = [...history.slice(0, historyIndex + 1), path]
-        set({
-          currentPath: path,
-          entries: result.data.entries,
-          loading: false,
-          history: newHistory,
-          historyIndex: newHistory.length - 1
-        })
-      } else {
-        set({ error: result.error, loading: false })
-      }
-    } catch (err) {
-      if (generation !== connectGeneration) return
-      set({
-        error: err instanceof Error ? err.message : String(err),
-        loading: false
-      })
-    }
-  },
-
-  navigateUp: async () => {
-    const { currentPath } = get()
-    if (currentPath === '/') return
-    const parts = currentPath.split('/').filter(Boolean)
-    parts.pop()
-    const parentPath = '/' + parts.join('/')
-    await get().navigateTo(parentPath)
-  },
-
-  goBack: async () => {
-    const { history, historyIndex } = get()
-    if (historyIndex <= 0) return
-    const newIndex = historyIndex - 1
-    const path = history[newIndex]
-    set({ loading: true, error: null })
-    try {
-      const result = await window.api.invoke<IpcResult<FtpListData>>('ftp:list', path)
-      if (result.success) {
-        set({
-          currentPath: path,
-          entries: result.data.entries,
-          loading: false,
-          historyIndex: newIndex
-        })
-      } else {
-        set({ error: result.error, loading: false })
-      }
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err), loading: false })
-    }
-  },
-
-  goForward: async () => {
-    const { history, historyIndex } = get()
-    if (historyIndex >= history.length - 1) return
-    const newIndex = historyIndex + 1
-    const path = history[newIndex]
-    set({ loading: true, error: null })
-    try {
-      const result = await window.api.invoke<IpcResult<FtpListData>>('ftp:list', path)
-      if (result.success) {
-        set({
-          currentPath: path,
-          entries: result.data.entries,
-          loading: false,
-          historyIndex: newIndex
-        })
-      } else {
-        set({ error: result.error, loading: false })
-      }
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err), loading: false })
-    }
-  },
-
-  refresh: async () => {
-    // Silent refresh — same path 재로딩 시 loading 플래그를 켜지 않음.
-    // 그리드/리스트 컴포넌트가 unmount되지 않아 화면 깜빡임이 사라진다.
-    const path = get().currentPath
-    try {
-      const result = await window.api.invoke<IpcResult<FtpListData>>('ftp:list', path)
-      // 기다리는 사이 다른 폴더로 옮겼으면 이전 폴더의 목록으로 덮어쓰지 않는다.
-      if (get().currentPath !== path) return
-      if (result.success) {
-        set({ entries: result.data.entries, error: null })
-      } else {
-        set({ error: result.error })
-      }
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) })
-    }
   },
 
   setConnectionState: (state) => {

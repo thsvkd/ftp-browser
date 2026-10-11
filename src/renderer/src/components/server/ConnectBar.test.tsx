@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { emptyDraft } from '@renderer/lib/serverAddress'
 import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
 import { Toolbar } from '@renderer/components/layout/Toolbar'
@@ -72,13 +73,9 @@ beforeEach(() => {
     connectionStatus: 'disconnected',
     host: '',
     port: 21,
-    error: null,
-    currentPath: '/',
-    entries: [],
-    loading: false,
-    history: ['/'],
-    historyIndex: 0
+    error: null
   })
+  useTabsStore.setState({ tabs: [], activeId: '', recent: [] })
 })
 
 afterEach(() => {
@@ -651,6 +648,12 @@ describe('reconnecting — start folder', () => {
       })
   }
   const listedPaths = (): unknown[] => invokeCalls(mockInvoke, 'ftp:list').map((c) => c[0])
+  /** 활성 원격 탭이 보는 경로 */
+  const activeRemotePath = (): string | undefined => {
+    const { tabs, activeId } = useTabsStore.getState()
+    const tab = tabs.find((t) => t.id === activeId)
+    return tab?.loc.side === 'remote' ? tab.loc.path : undefined
+  }
 
   it('opens the folder the server was last left in', async () => {
     mockIpc([NAS], { 'ftp:getRecentPaths': recent('/photos/2026', '/photos', '/') })
@@ -659,7 +662,7 @@ describe('reconnecting — start folder', () => {
 
     await user.dblClick(await screen.findByTitle(/Double-click to connect/))
 
-    await waitFor(() => expect(useFtpStore.getState().currentPath).toBe('/photos/2026'))
+    await waitFor(() => expect(activeRemotePath()).toBe('/photos/2026'))
     expect(listedPaths()[0]).toBe('/photos/2026')
     expect(invokeCalls(mockInvoke, 'ftp:getRecentPaths')[0]).toEqual(['nas.local', 21])
   })
@@ -691,7 +694,7 @@ describe('reconnecting — start folder', () => {
 
     await waitFor(() => expect(useFtpStore.getState().connectionStatus).not.toBe('error'))
     await waitFor(() => expect(listedPaths()).toEqual(['/gone', '/']))
-    expect(useFtpStore.getState().currentPath).toBe('/')
+    expect(activeRemotePath()).toBe('/')
   })
 
   it('opens a folder typed in the address instead of the last one', async () => {
