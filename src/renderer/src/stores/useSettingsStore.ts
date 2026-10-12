@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ThemeSetting } from '@shared/constants'
 import type { LanguageSetting } from '@renderer/i18n'
+import type { ConflictDecision } from '@shared/types/transfer'
 import { TILE_DEFAULT } from '@renderer/lib/explorerLayout'
 import { clampTileSize } from '@renderer/lib/gridGeometry'
 
@@ -15,6 +16,8 @@ interface SettingsStore {
   language: LanguageSetting
   /** 앱 테마(D33). 바뀌면 useThemeSource가 main에 알린다 */
   theme: ThemeSetting
+  /** 충돌 시트에서 "지금 결정 기억하기"로 기억한 결정. 다음 시트가 이것을 미리 고른다. 없으면 `null` */
+  conflictChoice: ConflictDecision | null
 
   setViewMode: (mode: 'grid' | 'list') => void
   setTileSize: (size: number) => void
@@ -23,6 +26,7 @@ interface SettingsStore {
   setConfirmBeforeDelete: (confirm: boolean) => void
   setLanguage: (language: LanguageSetting) => void
   setTheme: (theme: ThemeSetting) => void
+  setConflictChoice: (choice: ConflictDecision | null) => void
 }
 
 /** v1에만 있던 필드. 두 패널의 보기와 갤러리 썸네일 크기다. */
@@ -55,6 +59,7 @@ export const useSettingsStore = create<SettingsStore>()(
       confirmBeforeDelete: true,
       language: 'system',
       theme: 'system',
+      conflictChoice: null,
 
       setViewMode: (mode) => set({ viewMode: mode }),
       setTileSize: (size) => set({ tileSize: clampTileSize(size) }),
@@ -62,7 +67,8 @@ export const useSettingsStore = create<SettingsStore>()(
       setShowHidden: (show) => set({ showHidden: show }),
       setConfirmBeforeDelete: (confirm) => set({ confirmBeforeDelete: confirm }),
       setLanguage: (language) => set({ language }),
-      setTheme: (theme) => set({ theme })
+      setTheme: (theme) => set({ theme }),
+      setConflictChoice: (conflictChoice) => set({ conflictChoice })
     }),
     {
       name: 'ftp-browser-settings',

@@ -552,7 +552,8 @@ describe('Explorer — drag and drop', () => {
     const sheet = await screen.findByRole('alertdialog')
     expect(invokeCalls(h.invoke, 'local:copyFiles')).toEqual([])
 
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Overwrite' }))
+    fireEvent.click(within(sheet).getByRole('radio', { name: 'Overwrite' }))
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Confirm' }))
     await flush()
     expect(invokeCalls(h.invoke, 'local:copyFiles')).toEqual([[['C:\\in\\x.jpg'], LDIR, ['x.jpg']]])
 
@@ -562,8 +563,8 @@ describe('Explorer — drag and drop', () => {
       dataTransfer: dt({ types: ['Files'], files: [new File([], 'x.jpg')] })
     })
     const folder = await screen.findByRole('alertdialog')
-    expect(within(folder).queryByRole('button', { name: 'Overwrite' })).toBeNull()
-    expect(within(folder).getByRole('button', { name: 'Skip' })).toBeTruthy()
+    expect(within(folder).queryByRole('radio', { name: 'Overwrite' })).toBeNull()
+    expect(within(folder).getByRole('radio', { name: 'Skip' })).toBeTruthy()
   })
 })
 

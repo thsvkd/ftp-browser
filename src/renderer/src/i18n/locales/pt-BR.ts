@@ -458,6 +458,9 @@ export const ptBR = {
   'conflict.newerOnlyHint':
     'Substitui apenas se o item enviado for mais recente; caso contrário, ignora',
   'conflict.skip': 'Ignorar',
+  'conflict.choiceLabel': 'O que fazer com este item',
+  'conflict.rememberChoice': 'Lembrar desta decisão',
+  'conflict.confirm': 'Confirmar',
 
   'lightbox.label': 'Visualização: {{name}}',
   'lightbox.previous': 'Anterior (←)',

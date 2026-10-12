@@ -462,6 +462,9 @@ export const de = {
   'conflict.newerOnlyHint':
     'Nur überschreiben, wenn das gesendete Element neuer ist, sonst überspringen',
   'conflict.skip': 'Überspringen',
+  'conflict.choiceLabel': 'Was soll mit diesem Element geschehen',
+  'conflict.rememberChoice': 'Diese Entscheidung merken',
+  'conflict.confirm': 'Bestätigen',
 
   'lightbox.label': 'Vorschau: {{name}}',
   'lightbox.previous': 'Zurück (←)',

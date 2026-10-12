@@ -459,6 +459,9 @@ export const it = {
   'conflict.newerOnlyHint':
     'Sovrascrive solo se l’elemento inviato è più recente, altrimenti lo salta',
   'conflict.skip': 'Salta',
+  'conflict.choiceLabel': 'Cosa fare con questo elemento',
+  'conflict.rememberChoice': 'Ricorda questa decisione',
+  'conflict.confirm': 'Conferma',
 
   'lightbox.label': 'Anteprima: {{name}}',
   'lightbox.previous': 'Precedente (←)',

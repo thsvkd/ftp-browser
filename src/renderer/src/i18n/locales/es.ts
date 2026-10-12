@@ -460,6 +460,9 @@ export const es = {
   'conflict.newerOnlyHint':
     'Sobrescribe solo si el elemento enviado es más reciente; si no, lo omite',
   'conflict.skip': 'Omitir',
+  'conflict.choiceLabel': 'Qué hacer con este elemento',
+  'conflict.rememberChoice': 'Recordar esta decisión',
+  'conflict.confirm': 'Confirmar',
 
   'lightbox.label': 'Vista previa: {{name}}',
   'lightbox.previous': 'Anterior (←)',

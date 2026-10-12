@@ -419,6 +419,9 @@ export const zhTW = {
   'conflict.newerOnly': '僅較新的',
   'conflict.newerOnlyHint': '僅當要傳送的項目較新時才覆寫，否則略過',
   'conflict.skip': '略過',
+  'conflict.choiceLabel': '如何處理此項目',
+  'conflict.rememberChoice': '記住這次的選擇',
+  'conflict.confirm': '確認',
 
   'lightbox.label': '預覽：{{name}}',
   'lightbox.previous': '上一個 (←)',

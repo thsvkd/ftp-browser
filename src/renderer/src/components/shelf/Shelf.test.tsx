@@ -227,9 +227,9 @@ describe('Shelf — items from two servers', () => {
       useShelfStore.getState().add([remoteItem('a.jpg')])
     })
     fireEvent.click(await screen.findByRole('button', { name: /^Copy 1 to in\s*→/ }))
-    fireEvent.click(
-      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Overwrite' })
-    )
+    const open = await screen.findByRole('alertdialog')
+    fireEvent.click(within(open).getByRole('radio', { name: 'Overwrite' }))
+    fireEvent.click(within(open).getByRole('button', { name: 'Confirm' }))
     await waitFor(() => expect(shelfNames()).toEqual([]))
     const relay = {
       direction: 'relay',
@@ -246,6 +246,12 @@ describe('Shelf — items from two servers', () => {
 
 describe('Shelf — same-side conflicts', () => {
   const sheet = (): Promise<HTMLElement> => screen.findByRole('alertdialog')
+  /** 충돌 시트에서 라디오를 고르고 확인을 누른다. */
+  const choose = async (name: string): Promise<void> => {
+    const open = await sheet()
+    fireEvent.click(within(open).getByRole('radio', { name }))
+    fireEvent.click(within(open).getByRole('button', { name: 'Confirm' }))
+  }
   const channels = (): string[] =>
     h.invoke.mock.calls
       .map(([c]) => c as string)
@@ -276,7 +282,7 @@ describe('Shelf — same-side conflicts', () => {
 
     // 덮어쓰기: 대상을 숨은 이름으로 비켜 두고, 옮긴 뒤에 지운다
     drop()
-    fireEvent.click(within(await sheet()).getByRole('button', { name: 'Overwrite' }))
+    await choose('Overwrite')
     await waitFor(() => expect(shelfNames()).toEqual([]))
     const renames = (): unknown[][] => remoteCalls(h.invoke, 'ftp:rename')
     const aside = renames()[0][1] as string
@@ -298,7 +304,7 @@ describe('Shelf — same-side conflicts', () => {
       useShelfStore.getState().add([remoteItem('a.jpg')])
     })
     drop()
-    fireEvent.click(within(await sheet()).getByRole('button', { name: 'Overwrite' }))
+    await choose('Overwrite')
     await waitFor(() => expect(renames()).toHaveLength(6))
     const aside2 = renames()[3][1] as string
     expect(renames().slice(3)).toEqual([
@@ -312,7 +318,7 @@ describe('Shelf — same-side conflicts', () => {
     delete h.handlers['ftp:rename']
 
     drop()
-    fireEvent.click(within(await sheet()).getByRole('button', { name: 'Keep both (rename)' }))
+    await choose('Keep both (rename)')
     await waitFor(() => expect(shelfNames()).toEqual([]))
     expect(remoteCalls(h.invoke, 'ftp:rename').at(-1)).toEqual(['/x/a.jpg', '/dst/a (2).jpg'])
     expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toHaveLength(1)
@@ -338,7 +344,7 @@ describe('Shelf — same-side conflicts', () => {
 
     drop()
     // "나머지에 적용"이 기본으로 켜져 있어 두 충돌에 같은 결정(Windows는 대소문자 무시)
-    fireEvent.click(within(await sheet()).getByRole('button', { name: 'Keep both (rename)' }))
+    await choose('Keep both (rename)')
     await waitFor(() => expect(shelfNames()).toEqual([]))
     expect(copies()).toEqual([
       [['C:\\pics\\b.jpg', 'C:\\pics\\e.jpg'], 'C:\\dl', ['b (1).jpg', 'e (1).jpg']]
@@ -348,7 +354,7 @@ describe('Shelf — same-side conflicts', () => {
       useShelfStore.getState().add([localItem('b.jpg'), localItem('e.jpg')])
     })
     drop()
-    fireEvent.click(within(await sheet()).getByRole('button', { name: 'Skip' }))
+    await choose('Skip')
     await waitFor(() => expect(shelfNames()).toEqual([]))
     expect(copies()).toHaveLength(1)
 

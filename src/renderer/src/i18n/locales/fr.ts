@@ -461,6 +461,9 @@ export const fr = {
   'conflict.newerOnlyHint':
     'Remplace uniquement si l’élément envoyé est plus récent, sinon l’ignore',
   'conflict.skip': 'Ignorer',
+  'conflict.choiceLabel': 'Que faire de cet élément',
+  'conflict.rememberChoice': 'Mémoriser cette décision',
+  'conflict.confirm': 'Confirmer',
 
   'lightbox.label': 'Aperçu : {{name}}',
   'lightbox.previous': 'Précédent (←)',

@@ -454,6 +454,9 @@ export const en = {
   'conflict.newerOnly': 'Newer only',
   'conflict.newerOnlyHint': 'Overwrite only when the item being sent is newer; otherwise skip',
   'conflict.skip': 'Skip',
+  'conflict.choiceLabel': 'What to do with this item',
+  'conflict.rememberChoice': 'Remember this decision',
+  'conflict.confirm': 'Confirm',
 
   'lightbox.label': 'Preview: {{name}}',
   'lightbox.previous': 'Previous (←)',

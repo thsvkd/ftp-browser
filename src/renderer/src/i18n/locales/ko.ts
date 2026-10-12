@@ -428,6 +428,9 @@ export const ko = {
   'conflict.newerOnly': '더 최신 것만',
   'conflict.newerOnlyHint': '보낼 것이 더 최신일 때만 덮어쓰고, 아니면 건너뜁니다',
   'conflict.skip': '건너뛰기',
+  'conflict.choiceLabel': '이 항목을 어떻게 할까요',
+  'conflict.rememberChoice': '지금 결정 기억하기',
+  'conflict.confirm': '확인',
 
   'lightbox.label': '미리 보기: {{name}}',
   'lightbox.previous': '이전 (←)',

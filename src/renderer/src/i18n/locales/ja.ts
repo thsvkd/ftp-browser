@@ -432,6 +432,9 @@ export const ja = {
   'conflict.newerOnly': '新しい場合のみ',
   'conflict.newerOnlyHint': '送信する項目のほうが新しい場合のみ上書きし、それ以外はスキップします',
   'conflict.skip': 'スキップ',
+  'conflict.choiceLabel': 'この項目の処理',
+  'conflict.rememberChoice': '今回の選択を記憶する',
+  'conflict.confirm': '確定',
 
   'lightbox.label': 'プレビュー: {{name}}',
   'lightbox.previous': '前へ (←)',

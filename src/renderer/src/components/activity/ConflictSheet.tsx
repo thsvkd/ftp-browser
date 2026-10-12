@@ -8,14 +8,24 @@ import { EntryThumb } from '@renderer/components/thumbnail/EntryThumb'
 import { isImageFile } from '@shared/constants'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { useTransferStore, type ConflictPrompt } from '@renderer/stores/useTransferStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import type { ConflictDecision, TransferConflict } from '@shared/types/transfer'
 
 const BTN =
   'inline-flex h-9 items-center justify-center gap-2 rounded-[10px] px-4 text-[13px] font-semibold transition-colors'
-const SECONDARY = cn(
-  BTN,
-  'border border-[var(--bd)] bg-[var(--sf)] text-[var(--tx)] hover:bg-[var(--hv)]'
-)
+
+/** 선택지와 그 순서(D1). 기본 선택은 `newer`, 기억한 결정이 있으면 그것이다(D2·D4). */
+const CHOICES = [
+  { value: 'rename', label: 'conflict.keepBoth' },
+  { value: 'overwrite', label: 'conflict.overwrite' },
+  { value: 'newer', label: 'conflict.newerOnly', hint: 'conflict.newerOnlyHint' },
+  { value: 'skip', label: 'conflict.skip' }
+] as const
+
+/** 폴더는 덮어쓰지 않는다(D32): 덮어쓰기·더 최신 것만은 둘 다 두기로 바꿔 보낸다. */
+function forConflict(c: TransferConflict, d: ConflictDecision): ConflictDecision {
+  return c.folder && (d === 'overwrite' || d === 'newer') ? 'rename' : d
+}
 
 /** 엄격히 늦은 쪽. 같거나 어느 쪽이든 시각을 읽을 수 없으면 없다(D10과 같은 기준). */
 function newerSide(c: TransferConflict): 'incoming' | 'existing' | null {
@@ -37,8 +47,14 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
   const [index, setIndex] = useState(0)
   const [decisions, setDecisions] = useState<Record<string, ConflictDecision>>({})
   const [applyAll, setApplyAll] = useState(true)
+  // persist는 저장된 값을 그대로 합친다. 결정이 아닌 값(손으로 고침·나중 버전의 이름)은 기억이 없는 것으로 본다
+  const [saved] = useState(() => {
+    const value = useSettingsStore.getState().conflictChoice
+    return CHOICES.find((c) => c.value === value)?.value ?? null
+  })
+  const [choice, setChoice] = useState<ConflictDecision>(saved ?? 'newer')
+  const [remember, setRemember] = useState(saved !== null)
   const dialog = useRef<HTMLDivElement>(null)
-  const firstButton = useRef<HTMLButtonElement>(null)
   const conflict = conflicts[index]
   const rest = conflicts.length - index - 1
   const side = prompt.direction === 'download' || prompt.direction === 'copy' ? 'local' : 'remote'
@@ -46,6 +62,8 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
   const relay = prompt.direction === 'relay'
   const sameSide = prompt.direction === 'move' || prompt.direction === 'copy' || relay
   const newer = newerSide(conflict)
+  // 폴더 충돌에서는 기억한 값이 덮어쓰기·더 최신 것만이어도 둘 다 두기를 미리 고른다(D3).
+  const selected = forConflict(conflict, choice)
 
   // 닫히면 연 곳으로 포커스를 돌려준다. 그곳이 사라졌으면 활성 패널의 목록(split-view §4 14행),
   // 없으면 첫 목록으로.
@@ -58,13 +76,16 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
           document.querySelector<HTMLElement>('[role="listbox"]'))
       )?.focus()
   }, [])
-  useEffect(() => firstButton.current?.focus(), [index])
+  useEffect(
+    () => dialog.current?.querySelector<HTMLElement>('input[type="radio"]:checked')?.focus(),
+    [index]
+  )
 
   const resolve = useTransferStore((s) => s.resolveConflicts)
   const decide = (d: ConflictDecision): void => {
     const chosen = applyAll ? conflicts.slice(index) : [conflict]
     const next = { ...decisions }
-    for (const c of chosen) next[c.target] = d
+    for (const c of chosen) next[c.target] = forConflict(c, d)
     if (index + chosen.length >= conflicts.length) resolve(prompt.id, next)
     else {
       setDecisions(next)
@@ -72,6 +93,12 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
     }
   }
   useEscapeKey(() => decide('skip'))
+  const setConflictChoice = useSettingsStore((s) => s.setConflictChoice)
+  // 확인 때 기억하기가 켜져 있으면 고른 결정을 기억한다. 꺼져 있으면 전에 기억한 값을 그대로 둔다(D4).
+  const confirm = (): void => {
+    if (remember) setConflictChoice(choice)
+    decide(selected)
+  }
 
   const card = (kind: 'existing' | 'incoming'): React.JSX.Element => {
     const facts = conflict[kind]
@@ -127,9 +154,24 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
         aria-labelledby="conflict-sheet-title"
         onKeyDown={(e) => {
           e.stopPropagation()
+          // 라디오·체크박스에서 누른 Enter는 고른 결정을 적용한다. 단추는 제 동작을 한다.
+          if (
+            e.key === 'Enter' &&
+            !e.nativeEvent.isComposing &&
+            e.target instanceof HTMLInputElement
+          ) {
+            e.preventDefault()
+            confirm()
+            return
+          }
           // 결정 전에 뒤의 탐색기로 포커스가 빠지지 않게 시트 안에 가둔다.
           if (e.key !== 'Tab') return
-          const items = [...(dialog.current?.querySelectorAll<HTMLElement>('button, input') ?? [])]
+          // 라디오 묶음은 Tab으로 고른 것 하나만 지나간다(방향키로 옮긴다).
+          const items = [
+            ...(dialog.current?.querySelectorAll<HTMLElement>(
+              'button, input:not([type="radio"]), input[type="radio"]:checked'
+            ) ?? [])
+          ]
           const at = items.indexOf(document.activeElement as HTMLElement)
           const next = at === -1 ? 0 : (at + (e.shiftKey ? -1 : 1) + items.length) % items.length
           e.preventDefault()
@@ -167,6 +209,39 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
           {card('existing')}
           {card('incoming')}
         </div>
+        <div
+          role="radiogroup"
+          aria-label={t('conflict.choiceLabel')}
+          className="mx-5 mt-3 grid grid-cols-2 gap-2"
+        >
+          {/* 폴더는 덮어쓰지 않는다: 둘 다 두기·건너뛰기만(D32) */}
+          {CHOICES.filter(
+            (c) => !conflict.folder || c.value === 'rename' || c.value === 'skip'
+          ).map((c) => (
+            <label
+              key={c.value}
+              title={'hint' in c ? t(c.hint) : undefined}
+              className={cn(
+                'flex h-9 cursor-pointer items-center gap-2 rounded-[10px] border px-3 text-[13px] font-semibold transition-colors',
+                selected === c.value
+                  ? 'border-[var(--ac)] bg-[var(--acw)] text-[var(--ac)]'
+                  : 'border-[var(--bd)] bg-[var(--sf)] text-[var(--tx)] hover:bg-[var(--hv)]'
+              )}
+            >
+              <input
+                type="radio"
+                name="conflict-choice"
+                value={c.value}
+                checked={selected === c.value}
+                onChange={() => setChoice(c.value)}
+                // 이미 골라진 라디오는 onChange가 오지 않는다. 폴더가 미리 고른 둘 다 두기를 눌러도 사람이 고른 것이다
+                onClick={() => setChoice(c.value)}
+                className="h-4 w-4 accent-[var(--ac)]"
+              />
+              {t(c.label)}
+            </label>
+          ))}
+        </div>
         {rest > 0 && (
           <label className="mx-5 mt-3 flex cursor-pointer items-center gap-2 text-[13px]">
             <input
@@ -178,33 +253,22 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
             {t('conflict.applyToRest', { count: rest })}
           </label>
         )}
-        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-[var(--bd)] bg-[var(--bg)] p-4">
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--bd)] bg-[var(--bg)] p-4">
+          <label className="flex cursor-pointer items-center gap-2 text-[13px]">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="h-4 w-4 accent-[var(--ac)]"
+            />
+            {t('conflict.rememberChoice')}
+          </label>
           <button
-            ref={firstButton}
             type="button"
-            onClick={() => decide('rename')}
+            onClick={confirm}
             className={cn(BTN, 'bg-[var(--ac)] text-[var(--acx)] hover:brightness-110')}
           >
-            {t('conflict.keepBoth')}
-          </button>
-          {/* 폴더는 덮어쓰지 않는다: 둘 다 두기·건너뛰기만(D32) */}
-          {!conflict.folder && (
-            <>
-              <button type="button" onClick={() => decide('overwrite')} className={SECONDARY}>
-                {t('conflict.overwrite')}
-              </button>
-              <button
-                type="button"
-                onClick={() => decide('newer')}
-                className={SECONDARY}
-                title={t('conflict.newerOnlyHint')}
-              >
-                {t('conflict.newerOnly')}
-              </button>
-            </>
-          )}
-          <button type="button" onClick={() => decide('skip')} className={SECONDARY}>
-            {t('conflict.skip')}
+            {t('conflict.confirm')}
           </button>
         </div>
       </div>

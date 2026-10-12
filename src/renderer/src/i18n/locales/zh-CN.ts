@@ -419,6 +419,9 @@ export const zhCN = {
   'conflict.newerOnly': '仅较新的',
   'conflict.newerOnlyHint': '仅当要发送的项目较新时才覆盖，否则跳过',
   'conflict.skip': '跳过',
+  'conflict.choiceLabel': '如何处理此项目',
+  'conflict.rememberChoice': '记住这次的选择',
+  'conflict.confirm': '确认',
 
   'lightbox.label': '预览：{{name}}',
   'lightbox.previous': '上一个 (←)',

@@ -507,6 +507,9 @@ export const ru = {
   'conflict.newerOnly': 'Только если новее',
   'conflict.newerOnlyHint': 'Заменять, только если отправляемый элемент новее, иначе пропустить',
   'conflict.skip': 'Пропустить',
+  'conflict.choiceLabel': 'Что сделать с этим элементом',
+  'conflict.rememberChoice': 'Запомнить это решение',
+  'conflict.confirm': 'Подтвердить',
 
   'lightbox.label': 'Просмотр: {{name}}',
   'lightbox.previous': 'Назад (←)',
