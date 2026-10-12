@@ -386,7 +386,7 @@ describe('ConflictSheet', () => {
     expect(secondDecisions()).toEqual({ 'C:\\dl\\b.jpg': 'overwrite' })
   })
 
-  it('remembers nothing when the toggle is off at Confirm and keeps the value remembered before', async () => {
+  it('forgets the remembered decision when the toggle is off at Confirm, so the next sheet opens on newer-only with the toggle off', async () => {
     // covers: Test-1088
     const user = userEvent.setup()
     useSettingsStore.setState({ conflictChoice: 'skip' })
@@ -406,7 +406,22 @@ describe('ConflictSheet', () => {
     await decide(user, 'Overwrite', sheet)
     await pending
     expect(secondDecisions()).toEqual({ 'C:\\dl\\a.jpg': 'overwrite' })
-    expect(useSettingsStore.getState().conflictChoice).toBe('skip')
+    expect(useSettingsStore.getState().conflictChoice).toBeNull()
+
+    mockInvoke.mockClear()
+    answerConflicts([conflict('b.jpg')])
+    const next = await startSend()
+    const again = screen.getByRole('alertdialog')
+    expect(
+      (within(again).getByRole('radio', { name: 'Newer only' }) as HTMLInputElement).checked
+    ).toBe(true)
+    expect(
+      (within(again).getByRole('checkbox', { name: 'Remember this decision' }) as HTMLInputElement)
+        .checked
+    ).toBe(false)
+    await decide(user, 'Skip', again)
+    await next.pending
+    expect(secondDecisions()).toEqual({ 'C:\\dl\\b.jpg': 'skip' })
   })
 
   it('offers only keep-both and skip for a folder, preselecting keep-both over a remembered overwrite or newer, and never overwrites a folder through apply-to-rest', async () => {

@@ -94,9 +94,9 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
   }
   useEscapeKey(() => decide('skip'))
   const setConflictChoice = useSettingsStore((s) => s.setConflictChoice)
-  // 확인 때 기억하기가 켜져 있으면 고른 결정을 기억한다. 꺼져 있으면 전에 기억한 값을 그대로 둔다(D4).
+  // 확인 때 기억하기가 켜져 있으면 고른 결정을 기억하고, 꺼져 있으면 전에 기억한 값도 잊는다(D4).
   const confirm = (): void => {
-    if (remember) setConflictChoice(choice)
+    setConflictChoice(remember ? choice : null)
     decide(selected)
   }
 
