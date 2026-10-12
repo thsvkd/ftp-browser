@@ -179,7 +179,16 @@ export function setupExplorer(
   useThumbnailStore.setState({ thumbnails: {}, errors: {} })
   useLocalThumbnailStore.setState({ thumbnails: {}, errors: {} })
   useGalleryStore.setState({ remoteFolderPreviews: {}, localFolderPreviews: {} })
-  useTransferStore.setState({ jobs: [], batchMeta: {}, pendingSends: [], conflictQueue: [] })
+  useTransferStore.setState({
+    jobs: [],
+    batchMeta: {},
+    pendingSends: [],
+    conflictQueue: [],
+    panel: { open: false, collapsed: false, rows: [] },
+    panelMuted: [],
+    panelHeld: [],
+    panelSending: 0
+  })
   useConfirmStore.setState({ request: null })
   useDnd.setState({ items: null, over: null, thumbs: [] })
   return h

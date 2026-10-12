@@ -17,7 +17,7 @@ function App(): React.JSX.Element {
     <>
       <AppShell />
       <ConfirmDialog />
-      <Toaster position="bottom-right" theme="system" richColors closeButton />
+      <Toaster position="bottom-left" theme="system" richColors closeButton />
     </>
   )
 }

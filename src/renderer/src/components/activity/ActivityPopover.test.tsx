@@ -146,9 +146,9 @@ describe('ActivityPopover transfers', () => {
     const photos = group('photos')
     expect(within(photos).getByRole('img', { name: 'Copy between servers' })).toBeTruthy()
     expect(photos.querySelector('.lucide-arrow-left-right')).toBeTruthy()
-    expect(
-      within(photos).getByText(`${formatBytes(1000)} / ${formatBytes(8000)}`, { exact: false })
-    ).toBeTruthy()
+    // 압축 기록(transfer-panel.md P4b)은 도는 묶음에 바이트 대신 퍼센트를 보인다: 받는 쪽 바이트 1000 / 8000
+    const bar = within(photos).getByRole('progressbar', { name: 'photos progress' })
+    expect(bar.getAttribute('aria-valuenow')).toBe('13')
     expect(within(photos).getByText(`${A}: Connection timed out.`)).toBeTruthy()
     await userEvent.setup().click(within(photos).getByRole('button', { name: 'Retry b.jpg' }))
     expect(invokeCalls(mockInvoke, 'transfer:retry')).toEqual([[['b.jpg']]])
@@ -373,5 +373,96 @@ describe('ActivityPopover finishing state', () => {
     expect(within(group('batch')).getByText('Completed')).toBeTruthy()
     expect(within(group('single.jpg')).getByText('Completed')).toBeTruthy()
     expect(screen.queryByText('Finishing…')).toBeNull()
+  })
+})
+
+describe('ActivityPopover compact history', () => {
+  it('shows one dense row per batch with destination, size, file count and the latest time', () => {
+    // covers: Test-1116
+    useTransferStore.setState({
+      batchMeta: {
+        b1: { label: 'photos', to: DL },
+        b2: { label: 'movies', to: DL }
+      },
+      jobs: [
+        job('a.jpg', {
+          batchId: 'b1',
+          status: 'completed',
+          transferredBytes: 100,
+          completedAt: '2026-03-01T09:00:00.000Z'
+        }),
+        job('b.jpg', {
+          batchId: 'b1',
+          status: 'completed',
+          transferredBytes: 100,
+          completedAt: '2026-03-01T09:30:00.000Z'
+        }),
+        job('c.jpg', {
+          batchId: 'b1',
+          status: 'completed',
+          transferredBytes: 100,
+          completedAt: '2026-03-01T09:10:00.000Z'
+        }),
+        job('m.mov', { batchId: 'b2', status: 'active', totalBytes: 1000, transferredBytes: 400 })
+      ]
+    })
+    renderPopover()
+
+    const photos = group('photos')
+    expect(within(photos).getByText('→ This PC › C:\\dl')).toBeTruthy()
+    expect(within(photos).getByText(formatBytes(300), { exact: false })).toBeTruthy()
+    expect(within(photos).getByText('3 files', { exact: false })).toBeTruthy()
+    expect(photos.querySelector('time')?.getAttribute('datetime')).toBe('2026-03-01T09:30:00.000Z')
+    expect(within(photos).queryByRole('progressbar')).toBeNull()
+
+    const movies = group('movies')
+    expect(within(movies).getByRole('progressbar', { name: 'movies progress' })).toBeTruthy()
+    expect(within(movies).getByText(/40%/)).toBeTruthy()
+  })
+
+  it('keeps row actions in the DOM and the Tab order, hidden only by opacity', async () => {
+    // covers: Test-1117
+    useTransferStore.setState({
+      batchMeta: { b1: { label: 'photos', to: DL } },
+      jobs: [job('a.jpg', { batchId: 'b1', status: 'completed', transferredBytes: 100 })]
+    })
+    renderPopover()
+    const user = userEvent.setup()
+
+    const button = within(group('photos')).getByRole('button', { name: 'Show in tab' })
+    for (let i = 0; i < 6 && document.activeElement !== button; i++) await user.tab()
+    expect(document.activeElement).toBe(button)
+
+    // jsdom에는 Tailwind CSS가 없어 계산된 display는 의미가 없다: hidden 속성과 클래스로 본다.
+    expect(button.closest('[hidden]')).toBeNull()
+    for (let el: HTMLElement | null = button; el; el = el.parentElement) {
+      expect(el.classList.contains('hidden')).toBe(false)
+    }
+  })
+
+  it('shows a single failed file reason in place of the destination, a cancelled icon, and no overall bar', () => {
+    // covers: Test-1118
+    useTransferStore.setState({
+      batchMeta: { b1: { label: 'stopped', to: DL } },
+      jobs: [
+        job('bad.jpg', { status: 'failed', error: 'Connection timed out' }),
+        job('x.jpg', { batchId: 'b1', status: 'cancelled' }),
+        job('run.jpg', { status: 'active', transferredBytes: 10 })
+      ]
+    })
+    renderPopover()
+
+    const failed = group('bad.jpg')
+    const reason = within(failed).getByText('Connection timed out')
+    expect(reason.getAttribute('title')).toBe('Connection timed out')
+    expect(within(failed).queryByText('→ This PC › C:\\dl')).toBeNull()
+    expect(within(failed).getByText('Failed').classList.contains('text-[var(--dg)]')).toBe(true)
+
+    const cancelled = group('stopped')
+    expect(within(cancelled).getByText('Cancelled')).toBeTruthy()
+    expect(cancelled.querySelector('[data-status="cancelled"]')).toBeTruthy()
+    expect(cancelled.querySelector('[data-status="completed"]')).toBeNull()
+
+    expect(screen.queryByRole('progressbar', { name: 'Overall transfer progress' })).toBeNull()
   })
 })

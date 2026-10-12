@@ -664,8 +664,8 @@ describe('Explorer — drag-and-drop upload progress in the destination tab', ()
     expect(ringOn('sub')).toBe('active')
   })
 
-  it('flies a card from the drop point to the activity pill for a cross-side drop only', async () => {
-    // covers: Test-1100
+  it('does not fly a card to the activity pill when a cross-side drop starts a transfer', async () => {
+    // covers: Test-1119
     const animate = vi.fn(() => ({ onfinish: null }) as unknown as Animation)
     Element.prototype.animate = animate
     const pill = document.createElement('button')
@@ -680,38 +680,16 @@ describe('Explorer — drag-and-drop upload progress in the destination tab', ()
       h.api.getPathForFile.mockReturnValue('C:\\in\\x.jpg')
       fireEvent.drop(listbox(), { dataTransfer: dt([new File(['x'], 'x.jpg')]) })
       await flush()
-      expect(animate).toHaveBeenCalledTimes(1)
+      expect(invokeCalls(h.invoke, 'transfer:send')).toHaveLength(1)
 
-      // 로컬 탭에서 끌어 온 항목: 업로드
+      // 로컬 탭에서 끌어 온 항목을 원격 폴더 타일에: 업로드
       act(() =>
         useDnd.setState({ items: [fromLocalEntry(local(LDIR, 'y.jpg'))], over: null, thumbs: [] })
       )
       fireEvent.drop(option('sub'), { dataTransfer: dt() })
       await flush()
-      expect(animate).toHaveBeenCalledTimes(2)
-
-      // 같은 쪽(원격 이동)과 거부된 놓기(연결 안 된 서버의 항목)는 날리지 않는다
-      act(() =>
-        useDnd.setState({
-          items: [fromFtpEntry(ftp('z.jpg'), '/elsewhere', server())],
-          over: null,
-          thumbs: []
-        })
-      )
-      fireEvent.drop(listbox(), { dataTransfer: dt() })
-      await flush()
-      expect(invokeCalls(h.invoke, 'ftp:rename')).toHaveLength(1)
-      act(() =>
-        useDnd.setState({
-          items: [fromFtpEntry(ftp('w.jpg'), '/elsewhere', 'other@example.com:21')],
-          over: null,
-          thumbs: []
-        })
-      )
-      fireEvent.drop(listbox(), { dataTransfer: dt() })
-      await flush()
-      expect(toastError).toHaveBeenCalledWith(en['send.invalidNotConnected'])
-      expect(animate).toHaveBeenCalledTimes(2)
+      expect(invokeCalls(h.invoke, 'transfer:send')).toHaveLength(2)
+      expect(animate).not.toHaveBeenCalled()
     } finally {
       pill.remove()
       delete (Element.prototype as Partial<Element>).animate
