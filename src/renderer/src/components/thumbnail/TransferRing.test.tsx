@@ -111,4 +111,87 @@ describe('TransferRing', () => {
       cleanup()
     }
   })
+
+  it('marks a remote folder that receives an upload under it', () => {
+    // covers: Test-1093
+    useTransferStore.setState({
+      jobs: [
+        job('a.bin', {
+          direction: 'upload',
+          localPath: '/Users/me/folder/sub/a.bin',
+          remotePath: '/dest/folder/sub/a.bin',
+          status: 'active',
+          transferredBytes: 40
+        })
+      ]
+    })
+    render(
+      <TransferRing entry={{ side: 'remote', path: '/dest/folder', server: 'me@nas.local:21' }} />
+    )
+    expect(ring()?.getAttribute('data-transfer-ring')).toBe('active')
+    expect(ring()?.getAttribute('aria-label')).toContain('40%')
+    cleanup()
+
+    // 다른 서버의 같은 경로는 다른 폴더다
+    render(
+      <TransferRing
+        entry={{ side: 'remote', path: '/dest/folder', server: 'you@b.example:2121' }}
+      />
+    )
+    expect(ring()).toBeNull()
+  })
+
+  it('marks a local folder that receives a download under it, but not a sibling with the same prefix', () => {
+    // covers: Test-1094
+    useTransferStore.setState({
+      jobs: [
+        job('a.jpg', {
+          localPath: 'C:\\dl\\x\\a.jpg',
+          remotePath: '/photos/x/a.jpg',
+          status: 'active',
+          transferredBytes: 40
+        })
+      ]
+    })
+    render(<TransferRing entry={{ side: 'local', path: 'C:\\dl' }} />)
+    expect(screen.getByRole('img', { name: 'In progress 40%' })).toBeTruthy()
+    cleanup()
+
+    act(() =>
+      useTransferStore.setState({
+        jobs: [job('a.jpg', { localPath: 'C:\\dl2\\a.jpg', status: 'active' })]
+      })
+    )
+    render(<TransferRing entry={{ side: 'local', path: 'C:\\dl' }} />)
+    expect(ring()).toBeNull()
+  })
+
+  it('shows no ring on the destination side once the jobs are done or cancelled', () => {
+    // covers: Test-1095
+    useTransferStore.setState({
+      jobs: [
+        job('a.bin', {
+          direction: 'upload',
+          localPath: '/Users/me/a.bin',
+          remotePath: '/dest/folder/a.bin',
+          status: 'completed',
+          transferredBytes: 100
+        }),
+        job('b.bin', {
+          direction: 'upload',
+          localPath: '/Users/me/b.bin',
+          remotePath: '/dest/folder/b.bin',
+          status: 'cancelled'
+        }),
+        job('c.jpg', { localPath: 'C:\\dl\\x\\c.jpg', status: 'completed' })
+      ]
+    })
+    render(
+      <TransferRing entry={{ side: 'remote', path: '/dest/folder', server: 'me@nas.local:21' }} />
+    )
+    expect(ring()).toBeNull()
+    cleanup()
+    render(<TransferRing entry={{ side: 'local', path: 'C:\\dl' }} />)
+    expect(ring()).toBeNull()
+  })
 })

@@ -127,14 +127,19 @@ export function useDropTarget(
         if (!dragged && !hasFiles(e)) return
         e.preventDefault()
         e.stopPropagation()
+        // 놓은 자리의 카드(끄는 첫 썸네일). 다른 쪽 전송이면 활동 알약으로 날아간다
+        const from = {
+          rect: new DOMRect(e.clientX - 30, e.clientY - 22, 60, 44),
+          src: useDnd.getState().thumbs[0] || null
+        }
         endDrag()
         if (!dragged) {
           const files = Array.from(e.dataTransfer.files)
-          void (dest === 'shelf' ? shelveOsFiles(files) : dropOsFiles(files, dest))
+          void (dest === 'shelf' ? shelveOsFiles(files) : dropOsFiles(files, dest, from))
         } else if (dest === 'shelf') {
           if (!useShelfStore.getState().add(dragged)) toast(t('toast.alreadyOnShelf'))
         } else {
-          void sendItems(dragged, dest)
+          void sendItems(dragged, dest, from)
         }
       }
     }

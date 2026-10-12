@@ -7,9 +7,10 @@ import type { TransferJob } from '@shared/types/transfer'
 const LIVE = new Set<TransferJob['status']>(['pending', 'active', 'failed'])
 
 /**
- * 이 항목이 출처인 진행 중 전송의 상태 요약 `"상태:퍼센트"`. 폴더는 그 아래 작업을 합친다. 원격
- * 항목은 경로와 서버가 모두 맞는 다운로드와, 보내는 쪽이 그 서버·경로인 서버 간 복사만 센다(MC32: 다른
- * 서버의 같은 경로는 다른 파일이고, 받는 쪽에는 고리를 그리지 않는다).
+ * 이 항목이 출처이거나 목적지를 담은 폴더인 진행 중 전송의 상태 요약 `"상태:퍼센트"`. 폴더는 그 아래 작업을 합친다.
+ * 끌어 놓기가 끝나면 사람은 목적지 탭을 보므로, 받는 폴더(그 아래로 가는 업로드·다운로드)에도 고리를 단다. 원격
+ * 항목은 서버가 맞는 업로드·다운로드와, 보내는 쪽이 그 서버·경로인 서버 간 복사만 센다(MC32: 다른 서버의 같은
+ * 경로는 다른 파일이고, 서버 간 복사의 받는 쪽에는 고리를 그리지 않는다).
  * 문자열을 구독하므로 진행률이 실제로 바뀔 때만 다시 그린다.
  */
 function summary(
@@ -17,15 +18,20 @@ function summary(
   entry: Pick<ExplorerEntry, 'side' | 'path' | 'server'>
 ): string {
   const seps = entry.side === 'local' ? ['\\', '/'] : ['/']
+  const under = (p: string): boolean => seps.some((s) => p.startsWith(entry.path + s))
   const mine = jobs.filter((j) => {
     if (!LIVE.has(j.status)) return false
-    const src =
+    const relay = j.direction === 'relay'
+    const path =
       entry.side === 'local'
-        ? j.direction === 'upload' && j.localPath
-        : j.direction === 'download'
-          ? j.server === entry.server && j.remotePath
-          : j.direction === 'relay' && j.sourceServer === entry.server && j.sourcePath
-    return !!src && (src === entry.path || seps.some((s) => src.startsWith(entry.path + s)))
+        ? j.localPath
+        : relay
+          ? j.sourceServer === entry.server && j.sourcePath
+          : j.server === entry.server && j.remotePath
+    const fromHere =
+      relay || (entry.side === 'local' ? j.direction === 'upload' : j.direction === 'download')
+    // 출처는 그 항목 자신이나 아래, 목적지는 아래만(덮어쓰이는 파일 타일에는 달지 않는다)
+    return !!path && ((fromHere && path === entry.path) || under(path))
   })
   if (!mine.length) return ''
   const state = mine.some((j) => j.status === 'failed')

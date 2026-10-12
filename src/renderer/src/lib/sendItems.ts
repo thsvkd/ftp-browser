@@ -17,7 +17,7 @@ import {
   type ExplorerEntry,
   type Loc
 } from './explorerEntry'
-import { flyTo } from './flyTo'
+import { flyTo, type FlySource } from './flyTo'
 import { pathCrumbs } from './pathCrumbs'
 import { currentPlatform } from './platform'
 import { moveRemoteFiles } from './remoteDrop'
@@ -222,13 +222,26 @@ export async function runPlan(plan: SendPlan, dest: Loc): Promise<boolean> {
   return started.length === plan.transfer.length + plan.sameSide.length + plan.relay.length
 }
 
-/** 항목들을 `dest`로 보낸다. 막히면 사유를 토스트로 알리고 false. */
-export async function sendItems(items: readonly ExplorerEntry[], dest: Loc): Promise<boolean> {
+/** 끌어 놓은 자리(`from`)에서 활동 알약으로 카드를 날린다. 끝나면 사람은 목적지를 보고 있어, 진행이 어디 있는지 알린다. */
+function flyToActivity(from: FlySource | undefined): void {
+  if (from) flyTo([from], document.querySelector('[data-activity-target]'))
+}
+
+/**
+ * 항목들을 `dest`로 보낸다. 막히면 사유를 토스트로 알리고 false.
+ * `from`(끌어 놓은 자리)이 있으면 다른 쪽 전송이 있을 때 활동 알약으로 카드를 날린다.
+ */
+export async function sendItems(
+  items: readonly ExplorerEntry[],
+  dest: Loc,
+  from?: FlySource
+): Promise<boolean> {
   const plan = planSend(items, dest, new Set(connectedKeys()))
   if (plan.invalid) {
     toast.error(t(plan.invalid))
     return false
   }
+  if (plan.direction || plan.relay.length) flyToActivity(from)
   return runPlan(plan, dest)
 }
 
@@ -272,8 +285,15 @@ async function dropShelfOnce(dest: Loc): Promise<boolean> {
   return ok
 }
 
-/** OS에서 끌어 온 파일: 원격 위치면 업로드, 로컬 위치면 복사(지금 로컬 패널과 같다). */
-export async function dropOsFiles(files: readonly File[], dest: Loc): Promise<boolean> {
+/**
+ * OS에서 끌어 온 파일: 원격 위치면 업로드, 로컬 위치면 복사(지금 로컬 패널과 같다).
+ * 업로드면 놓은 자리(`from`)에서 활동 알약으로 카드를 날린다.
+ */
+export async function dropOsFiles(
+  files: readonly File[],
+  dest: Loc,
+  from?: FlySource
+): Promise<boolean> {
   // ponytail: File은 폴더인지 알려 주지 않는다. 크기 0·형식 없음은 폴더일 수 있어 폴더로 본다(충돌 시
   // 둘 다 두기·건너뛰기만, D32). 빈 파일도 그렇게 묻는다. 틀리면 부모 폴더를 local:list로 읽는다
   const items = files.flatMap((f): SameSideItem[] => {
@@ -291,6 +311,7 @@ export async function dropOsFiles(files: readonly File[], dest: Loc): Promise<bo
     toast.error(t('send.invalidNotConnected'))
     return false
   }
+  flyToActivity(from)
   return transfer('upload', server, paths, dest)
 }
 
