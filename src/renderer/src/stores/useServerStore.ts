@@ -57,14 +57,10 @@ let attemptKey: ConnKey | null = null
 export const connectingKey = (): ConnKey | null =>
   useServerStore.getState().connecting ? attemptKey : null
 
-/** The folder last listed on this server, or '/' when there is none (or it can't be read). */
-async function lastVisitedPath(server: { host: string; port: number }): Promise<string> {
+/** The folder last listed on this connection, or '/' when there is none (or it can't be read). */
+async function lastVisitedPath(key: ConnKey): Promise<string> {
   try {
-    const result = await window.api.invoke<IpcResult<RecentPath[]>>(
-      'ftp:getRecentPaths',
-      server.host,
-      server.port
-    )
+    const result = await window.api.invoke<IpcResult<RecentPath[]>>('ftp:getRecentPaths', key)
     return (result.success && result.data[0]?.path) || '/'
   } catch (err) {
     console.warn('[useServerStore] Failed to load the last folder:', err)
@@ -168,7 +164,7 @@ export const useServerStore = create<ServerStore>((set, get) => ({
     attemptKey = key
 
     // 시작 폴더를 따로 정하지 않았으면 이 서버에서 마지막으로 있던 폴더로 연다.
-    const startPath = path ?? (draft.path.trim() || (await lastVisitedPath(server)))
+    const startPath = path ?? (draft.path.trim() || (await lastVisitedPath(key)))
     if (attempt !== connectAttempt) return false
 
     // 저장된 서버를 저장된 계정으로 연결할 때만 id를 보낸다. 그래야 main이 그 서버의

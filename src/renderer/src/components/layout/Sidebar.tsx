@@ -231,24 +231,24 @@ function ServerRow({
   )
 }
 
-/** 한 서버의 행과, 연결됐으면 그 서버의 최근 폴더 4개(`ftp:getRecentPaths(host, port)`). */
+/** 한 서버의 행과, 연결됐으면 그 연결의 최근 폴더 4개(`ftp:getRecentPaths(key)`). */
 function ServerEntry({ row }: { row: ServerRowData }): React.JSX.Element {
   const status = useFtpStore((s) => s.connections[row.key]?.status ?? 'disconnected')
   const connected = status === 'connected'
   const [recent, setRecent] = useState<string[]>([])
 
   useEffect(() => {
-    setRecent([])
     if (!connected) return
     let current = true
     window.api
-      .invoke<IpcResult<RecentPath[]>>('ftp:getRecentPaths', row.host, row.port)
+      .invoke<IpcResult<RecentPath[]>>('ftp:getRecentPaths', row.key)
       .then((r) => current && r.success && setRecent(r.data.slice(0, 4).map((p) => p.path)))
       .catch(() => undefined)
+    // 끊기거나 키가 바뀌면 그 연결의 폴더를 지운다
     return () => {
       current = false
+      setRecent([])
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- host·port는 키에 들어 있다
   }, [connected, row.key])
 
   const root: Loc | null = connected ? { side: 'remote', path: '/', server: row.key } : null

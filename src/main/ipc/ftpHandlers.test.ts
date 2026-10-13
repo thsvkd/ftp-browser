@@ -40,16 +40,18 @@ import { OperationManager } from '../operation/OperationManager'
 
 let cipher: FakeCipher
 
+const readMigration = (file: string): string =>
+  fs.readFileSync(path.join(__dirname, '../db/migrations', file), 'utf-8')
+
 beforeEach(() => {
   state.handlers.clear()
   state.db = new Database(':memory:')
-  const migrations = path.join(__dirname, '../db/migrations')
   for (const file of [
     '001_initial.sql',
     '002_server_max_transfers.sql',
     '003_server_password_cipher.sql'
   ]) {
-    state.db.exec(fs.readFileSync(path.join(migrations, file), 'utf-8'))
+    state.db.exec(readMigration(file))
   }
   state.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_servers_host_port ON servers(host, port)')
   state.connect = vi.fn(async () => ({ success: true }))
@@ -349,6 +351,7 @@ describe('ftp:saveServer — a saved password stays with its address', () => {
       last_visited TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(server_host, server_port, path)
     )`)
+    state.db.exec(readMigration('005_remote_recent_paths.sql'))
     const { id } = await save({ ...NAS, host: 'NAS.local', password: 'saved-Secret-734' })
     const rows = (): unknown[] => state.db.prepare('SELECT * FROM servers ORDER BY id').all()
     const before = rows()
@@ -474,6 +477,7 @@ describe('remote channels with two connections', () => {
       last_visited TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(server_host, server_port, path)
     )`)
+    state.db.exec(readMigration('005_remote_recent_paths.sql'))
     registry = new ConnectionRegistry((key) => fakeSession(key))
     operations = new OperationManager()
     send = vi.fn()
@@ -567,13 +571,13 @@ describe('remote channels with two connections', () => {
     })
   })
 
-  it("records a successful listing as a recent path of that key's host and port", async () => {
+  it("records a successful listing as a recent path of that key's host, port and user", async () => {
     // covers: Test-970
     await invoke('ftp:list', B, '/x')
 
     expect(
-      state.db.prepare('SELECT server_host, server_port, path FROM server_recent_paths').all()
-    ).toEqual([{ server_host: 'b.example', server_port: 2121, path: '/x' }])
+      state.db.prepare('SELECT host, port, username, path FROM remote_recent_paths').all()
+    ).toEqual([{ host: 'b.example', port: 2121, username: 'you', path: '/x' }])
   })
 
   it('connects a second server without dropping the first and tags status events', async () => {
@@ -625,5 +629,51 @@ describe('remote channels with two connections', () => {
       .map(([, event]) => event as RemoteChangedEvent)
     expect(changes).toEqual([{ kind: 'delete', remotePath: '/x/b.txt', server: B }])
     expect(operations.getAll()).toEqual([expect.objectContaining({ kind: 'delete', server: B })])
+  })
+})
+
+describe('ftp:getRecentPaths by connection key', () => {
+  const RA = 'ra@127.0.0.1:2121'
+  const RB2 = 'rb2@127.0.0.1:2121'
+  let registry: ConnectionRegistry
+
+  beforeEach(async () => {
+    state.db.exec(readMigration('005_remote_recent_paths.sql'))
+    registry = new ConnectionRegistry((key) => fakeSession(key))
+    registerFtpHandlers(
+      { isDestroyed: () => false, webContents: { send: vi.fn() } } as unknown as BrowserWindow,
+      new OperationManager(),
+      createPasswordVault(state.db, cipher),
+      registry
+    )
+    for (const key of [RA, RB2]) {
+      expect(await invoke('ftp:connect', payloadOf(key))).toEqual({
+        success: true,
+        data: undefined
+      })
+      remoteOf(registry.get(key)).addDir('/inbox')
+    }
+  })
+
+  it("reads only that user's recent folders, connected or not, and refuses a non-key", async () => {
+    // covers: Test-1150
+    const paths = async (...args: unknown[]): Promise<unknown> => {
+      const result = await invoke<Array<{ path: string }>>('ftp:getRecentPaths', ...args)
+      return result.success ? { success: true, paths: result.data.map((p) => p.path) } : result
+    }
+    expect(await invoke('ftp:list', RB2, '/inbox')).toMatchObject({ success: true })
+
+    expect(await paths(RB2)).toEqual({ success: true, paths: ['/inbox'] })
+    expect(await paths(RA)).toEqual({ success: true, paths: [] })
+
+    await invoke('ftp:disconnect', RB2)
+    expect(await paths(RB2)).toEqual({ success: true, paths: ['/inbox'] })
+
+    for (const args of [['127.0.0.1', 2121], [42]]) {
+      expect(await invoke('ftp:getRecentPaths', ...args)).toEqual({
+        success: false,
+        error: 'Invalid connection key.'
+      })
+    }
   })
 })

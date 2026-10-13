@@ -305,3 +305,25 @@ describe('ServerManagerDialog — saved password', () => {
     expect(invokeCalls(mockInvoke, 'ftp:saveServer')).toHaveLength(1)
   })
 })
+
+describe('ServerManagerDialog — recent folders', () => {
+  it("asks the recent folders of the selected server's own account key", async () => {
+    // covers: Test-1153
+    saved = [LOCKED]
+    useServerStore.setState({ servers: [LOCKED] })
+    const { unmount } = render(<ServerManagerDialog initial={toDraft(LOCKED)} onClose={vi.fn()} />)
+    await waitFor(() =>
+      expect(invokeCalls(mockInvoke, 'ftp:getRecentPaths')).toEqual([['me@nas.local:21']])
+    )
+    unmount()
+
+    // 사용자 이름이 빈 저장 서버는 익명 키로 묻는다
+    mockInvoke.mockClear()
+    saved = [NAS]
+    useServerStore.setState({ servers: [NAS] })
+    render(<ServerManagerDialog initial={toDraft(NAS)} onClose={vi.fn()} />)
+    await waitFor(() =>
+      expect(invokeCalls(mockInvoke, 'ftp:getRecentPaths')).toEqual([['anonymous@nas.local:21']])
+    )
+  })
+})

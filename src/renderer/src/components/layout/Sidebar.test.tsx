@@ -162,7 +162,7 @@ describe('Sidebar — servers', () => {
     render(<Sidebar />)
     await flush()
 
-    expect(invokeCalls(h.invoke, 'ftp:getRecentPaths')).toEqual([[OFFICE.host, OFFICE.port]])
+    expect(invokeCalls(h.invoke, 'ftp:getRecentPaths')).toEqual([['kim@ftp.office.lan:2121']])
     const office = place(/^Office/)
     expect(office.querySelector('[data-status="connected"]')).toBeTruthy()
     expect(place(/^NAS/).querySelector('[data-status="disconnected"]')).toBeTruthy()
@@ -234,12 +234,12 @@ describe('Sidebar — several connections', () => {
     setConnection('x@x.example:21', 'connected')
     setConnection('w@w.example:2121', 'connected')
     const recent: Record<string, string[]> = {
-      [OFFICE.host]: ['/o1', '/o2', '/o3', '/o4', '/o5'],
-      [NAS.host]: ['/n1', '/n2', '/n3', '/n4', '/n5']
+      [OFFICE_KEY]: ['/o1', '/o2', '/o3', '/o4', '/o5'],
+      [NAS_KEY]: ['/n1', '/n2', '/n3', '/n4', '/n5']
     }
-    h.handlers['ftp:getRecentPaths'] = (host) => ({
+    h.handlers['ftp:getRecentPaths'] = (key) => ({
       success: true,
-      data: (recent[host as string] ?? []).map((path) => ({ path, lastVisited: '' }))
+      data: (recent[key as string] ?? []).map((path) => ({ path, lastVisited: '' }))
     })
     useTabsStore.getState().openTab(localLoc(HOME))
     render(<Sidebar />)
@@ -251,10 +251,7 @@ describe('Sidebar — several connections', () => {
     expect(place(/^Archive/).querySelector('[data-status="error"]')).toBeTruthy()
     expect(place(/^Archive/).textContent).toContain(en['sidebar.serverLost'])
     expect(invokeCalls(h.invoke, 'ftp:getRecentPaths')).toEqual(
-      expect.arrayContaining([
-        [OFFICE.host, OFFICE.port],
-        [NAS.host, NAS.port]
-      ])
+      expect.arrayContaining([[OFFICE_KEY], [NAS_KEY]])
     )
     for (const name of ['o1', 'o2', 'o3', 'o4', 'n1', 'n2', 'n3', 'n4'])
       expect(place(name)).toBeTruthy()
@@ -340,5 +337,47 @@ describe('Sidebar — several connections', () => {
 
     act(() => setConnection('anonymous@h.lan:21', 'connected'))
     expect(rows()[0][0]).toBe('h.lan')
+  })
+
+  it("lists under each server row only that account's recent folders", async () => {
+    // covers: Test-1151
+    const RA = 'ra@127.0.0.1:2121'
+    const RB2 = 'rb2@127.0.0.1:2121'
+    const LAB: FtpServer = {
+      id: 7,
+      name: '',
+      host: '127.0.0.1',
+      port: 2121,
+      username: 'ra',
+      hasPassword: true,
+      secure: false
+    }
+    useServerStore.setState({ servers: [LAB] })
+    setConnection(RA, 'connected')
+    setConnection(RB2, 'connected')
+    const recent: Record<string, string[]> = { [RA]: ['/photos'], [RB2]: ['/inbox'] }
+    h.handlers['ftp:getRecentPaths'] = (key) => ({
+      success: true,
+      data: (recent[key as string] ?? []).map((path) => ({ path, lastVisited: '' }))
+    })
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
+
+    expect(invokeCalls(h.invoke, 'ftp:getRecentPaths')).toEqual(
+      expect.arrayContaining([[RA], [RB2]])
+    )
+    expect(invokeCalls(h.invoke, 'ftp:getRecentPaths')).toHaveLength(2)
+    // 서버 행과 그 아래 들여쓴 최근 폴더의 순서: 저장 안 된 RB2 행이 위
+    const order = within(nav())
+      .getAllByRole('button')
+      .map((b) =>
+        b.querySelector('[data-status]') ? `row ${b.getAttribute('title')}` : (b.textContent ?? '')
+      )
+      .filter((name) => name.startsWith('row ') || name === 'photos' || name === 'inbox')
+    expect(order).toEqual([`row ${RB2}`, 'inbox', `row ${RA}`, 'photos'])
+
+    fireEvent.click(place('inbox'))
+    expect(activeTab().loc).toEqual({ side: 'remote', path: '/inbox', server: RB2 })
   })
 })

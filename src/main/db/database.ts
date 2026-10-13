@@ -225,7 +225,55 @@ export function initDatabase(): Database.Database {
   }
   db.exec(remoteFolderPreviewsSql)
 
+  migrateRemoteRecentPaths(db)
+
   return db
+}
+
+/**
+ * 005: 연결 키(host·port·사용자)마다 최근 경로(same-host-accounts SH8). server_recent_paths의
+ * UNIQUE(server_host, server_port, path)는 바꿀 수 없어 새 테이블을 쓴다. 옛 테이블과 행은 지우지 않는다
+ * (더 읽지 않을 뿐).
+ */
+function migrateRemoteRecentPaths(database: Database.Database): void {
+  let remoteRecentPathsSql: string
+  try {
+    remoteRecentPathsSql = fs.readFileSync(
+      path.join(__dirname, 'migrations', '005_remote_recent_paths.sql'),
+      'utf-8'
+    )
+  } catch {
+    remoteRecentPathsSql = `
+      CREATE TABLE IF NOT EXISTS remote_recent_paths (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host TEXT NOT NULL,
+        port INTEGER NOT NULL,
+        username TEXT NOT NULL,
+        path TEXT NOT NULL,
+        last_visited TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(host, port, username, path)
+      );
+      CREATE INDEX IF NOT EXISTS idx_remote_recent_paths_conn
+        ON remote_recent_paths(host, port, username);
+    `
+  }
+  // 테이블이 처음 생길 때 한 번만, 옛 행을 같은 host·port 저장 행의 사용자(익명은 키처럼
+  // 'anonymous')로 옮긴다(SH9). 매번 돌리면 서버를 지워 없앤 경로나 계정을 바꾸기 전의 경로가
+  // 옛 테이블에서 되살아난다. 생성과 복사를 한 트랜잭션으로 묶어, 중간에 꺼지면 다음 시작에 다시 한다.
+  const existed = database
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'remote_recent_paths'")
+    .get()
+  database.transaction(() => {
+    database.exec(remoteRecentPathsSql)
+    if (existed) return
+    database.exec(`
+      INSERT OR IGNORE INTO remote_recent_paths (host, port, username, path, last_visited)
+        SELECT p.server_host, p.server_port, COALESCE(NULLIF(s.username, ''), 'anonymous'),
+               p.path, p.last_visited
+        FROM server_recent_paths p
+        JOIN servers s ON lower(s.host) = lower(p.server_host) AND s.port = p.server_port
+    `)
+  })()
 }
 
 export function getDatabase(): Database.Database {

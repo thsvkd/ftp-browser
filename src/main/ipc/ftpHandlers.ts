@@ -15,6 +15,7 @@ import {
   KEEP_PASSWORD,
   listServers,
   recordConnection,
+  recordRecentPath,
   saveServer,
   ServerSaveError
 } from '../db/servers'
@@ -191,17 +192,18 @@ export function registerFtpHandlers(
     }
   })
 
-  ipcMain.handle(
-    'ftp:getRecentPaths',
-    (_event, host: string, port: number): IpcResult<RecentPath[]> => {
-      try {
-        return { success: true, data: getRecentPaths(getDatabase(), host, port) }
-      } catch (err) {
-        console.warn('[ftpHandlers] Failed to load recent paths:', err)
-        return { success: true, data: [] }
-      }
+  // 연결 여부와 무관하게 그 연결 키의 기록만 읽는다(same-host-accounts SH10)
+  ipcMain.handle('ftp:getRecentPaths', (_event, conn: unknown): IpcResult<RecentPath[]> => {
+    if (typeof conn !== 'string' || parseConnKey(conn) === null) {
+      return { success: false, error: 'Invalid connection key.' }
     }
-  )
+    try {
+      return { success: true, data: getRecentPaths(getDatabase(), conn) }
+    } catch (err) {
+      console.warn('[ftpHandlers] Failed to load recent paths:', err)
+      return { success: true, data: [] }
+    }
+  })
 
   ipcMain.handle('ftp:disconnect', async (_event, conn: unknown): Promise<IpcResult<void>> => {
     try {
@@ -222,30 +224,10 @@ export function registerFtpHandlers(
         const session = registry.require(conn)
         const result = await session.manager.list(remotePath)
 
-        // 그 연결의 서버에 최근 경로로 남긴다
+        // 그 연결(사용자까지)의 최근 경로로 남긴다
         if (session.manager.isConnected()) {
           try {
-            const db = getDatabase()
-            const { host, port } = parseConnKey(session.key)!
-            // 밀리초까지 찍는다. 다시 연결할 때 가장 최근 경로에서 여는데, 1초 안에
-            // 폴더를 여러 번 옮기면 초 단위로는 어느 것이 마지막인지 가릴 수 없다.
-            db.prepare(
-              `INSERT INTO server_recent_paths (server_host, server_port, path, last_visited)
-               VALUES (?, ?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now'))
-               ON CONFLICT(server_host, server_port, path)
-               DO UPDATE SET last_visited = excluded.last_visited`
-            ).run(host, port, remotePath)
-
-            // Keep only last 20 paths per server
-            db.prepare(
-              `DELETE FROM server_recent_paths
-               WHERE server_host = ? AND server_port = ?
-               AND id NOT IN (
-                 SELECT id FROM server_recent_paths
-                 WHERE server_host = ? AND server_port = ?
-                 ORDER BY last_visited DESC LIMIT 20
-               )`
-            ).run(host, port, host, port)
+            recordRecentPath(getDatabase(), session.key, remotePath)
           } catch (dbErr) {
             // Non-critical: listing still succeeds even if recent-path save fails
             console.warn('[ftpHandlers] Failed to save recent path:', dbErr)

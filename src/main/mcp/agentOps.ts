@@ -155,7 +155,7 @@ export async function connectSaved(
     }
   }
   const { manager } = deps.connections.get(key)!
-  let opened = requested ?? getRecentPaths(deps.db, host, port)[0]?.path ?? '/'
+  let opened = requested ?? getRecentPaths(deps.db, key)[0]?.path ?? '/'
   try {
     await manager.list(opened)
   } catch (err) {
