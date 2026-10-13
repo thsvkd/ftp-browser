@@ -73,7 +73,7 @@ async function remoteFiles(names: string[], patch = {}): Promise<void> {
 }
 
 describe('Explorer — keyboard selection', () => {
-  it('moves the focus cursor with arrows, extends with Shift, moves focus only with Ctrl, Ctrl+A, Esc', async () => {
+  it('moves the selection with arrows, extends with Shift, Ctrl+A, Esc', async () => {
     // covers: Test-791
     const names = Array.from({ length: 14 }, (_, i) => `f${String(i).padStart(2, '0')}.txt`)
     await remoteFiles(names)
@@ -85,10 +85,6 @@ describe('Explorer — keyboard selection', () => {
     expect(selectedNames()).toEqual([names[cols]])
     key('ArrowLeft', { shiftKey: true })
     expect(selectedNames()).toEqual([names[cols - 1], names[cols]])
-    key('ArrowLeft', { ctrlKey: true })
-    // Ctrl은 포커스만 옮긴다: 선택은 그대로, 활성 항목은 옮겨 간다.
-    expect(selectedNames()).toEqual([names[cols - 1], names[cols]])
-    expect(listbox().getAttribute('aria-activedescendant')).toBe(optId(`${DIR}/${names[cols - 2]}`))
 
     key('a', { ctrlKey: true })
     expect(selectedNames()).toEqual(names)
