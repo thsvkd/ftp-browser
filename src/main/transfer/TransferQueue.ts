@@ -16,7 +16,12 @@ import {
   SEGMENT_MIN,
   type SegmentRange
 } from './segmentedDownload'
-import { classifyError, isRetryableError, socketErrorDetail } from '../utils/errorClassifier'
+import {
+  classifyError,
+  isLimitReply,
+  isRetryableError,
+  socketErrorDetail
+} from '../utils/errorClassifier'
 import { markSparse } from '../utils/sparseFile'
 import type { ConnKey } from '@shared/connKey'
 import type {
@@ -95,8 +100,11 @@ interface StreamProbe {
 /** 빌린 슬롯. 큐의 `running`에 들어 있고 `done`이 돌려준다(multi-connection MC24, §8-3). */
 export interface BorrowedClient {
   client: Client
-  /** 끝났다. err가 없으면 release, 있으면 discard. 그 뒤 running을 줄이고 pump한다. 두 번째부터는 무시한다 */
-  done(err?: unknown): void
+  /**
+   * 끝났다. err가 없으면 release, 있으면 discard. 그 뒤 running을 줄이고 pump한다. err가 한도 응답(425·421)이고
+   * 풀이 그것으로 limit를 배웠으면(클라이언트는 풀이 이미 버렸다) true다. 두 번째부터는 무시하고 false다
+   */
+  done(err?: unknown): boolean
 }
 
 /** 줄 선 빌림 하나. 받거나 거절되거나 abort되면 settled다. */
@@ -394,11 +402,15 @@ export class TransferQueue extends EventEmitter {
     request.resolve({
       client,
       done: (err?: unknown) => {
-        if (returned) return
+        if (returned) return false
         returned = true
-        if (err === undefined) this.pool.release(client)
-        else this.pool.discard(client)
+        const learned =
+          err !== undefined && isLimitReply(err) && this.pool.shrinkAfterLimitReply(client, err)
+        // 배웠으면 풀이 이미 버렸다
+        if (!learned && err === undefined) this.pool.release(client)
+        else if (!learned) this.pool.discard(client)
         this.finishRun()
+        return learned
       }
     })
   }
@@ -571,6 +583,18 @@ export class TransferQueue extends EventEmitter {
         // 재시도 횟수를 쓰지 않고 맨 앞에서 바로 다시 보낸다. 표준 경로의 실패는 평소대로 재시도/실패한다.
         this.pool.fastBroken = true
         this.pool.discard(client)
+        job.status = 'pending'
+        job.transferredBytes = 0
+        this.markDirty(job)
+        this.pushFront(item)
+      } else if (
+        !isCancelled(job) &&
+        client &&
+        isLimitReply(err) &&
+        this.pool.shrinkAfterLimitReply(client, err)
+      ) {
+        // 서버가 연결 수 때문에 거절했고(425·421) 다른 풀 연결이 있어 풀이 limit를 배웠다(클라이언트도 버렸다).
+        // 풀 LIMIT처럼 재시도 횟수를 쓰지 않고 맨 앞에서 줄어든 슬롯을 기다린다
         job.status = 'pending'
         job.transferredBytes = 0
         this.markDirty(job)

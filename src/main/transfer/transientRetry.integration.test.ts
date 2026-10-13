@@ -29,7 +29,7 @@ describe('transient disconnects are retried against a mock FTP server', () => {
   let dir: string
   let updates: TransferJob[]
 
-  async function setup(options: MockFtpServerOptions): Promise<void> {
+  async function setup(options: MockFtpServerOptions, maxTransfers = 16): Promise<void> {
     server = await startMockFtpServer({ file: FILE, ...options })
     const manager = {
       createSecondaryClient: async () => {
@@ -38,7 +38,7 @@ describe('transient disconnects are retried against a mock FTP server', () => {
         await client.access({ host: '127.0.0.1', port: server.port, user: 'u', password: 'p' })
         return client
       },
-      getMaxTransfers: () => 16,
+      getMaxTransfers: () => maxTransfers,
       on: vi.fn(),
       off: vi.fn(),
       emit: vi.fn(),
@@ -107,6 +107,53 @@ describe('transient disconnects are retried against a mock FTP server', () => {
 
     expect(updates.map((j) => j.error)).toContain(
       'Retry 1/3: Server sent FIN packet unexpectedly, closing connection.'
+    )
+    expect(job.retryCount).toBe(1)
+    expect(sha256(fs.readFileSync(localPath))).toBe(sha256(FILE))
+    expect(server.log.filter((line) => line.startsWith('< RETR'))).toHaveLength(2)
+  }, 20_000)
+
+  it('should learn the data channel limit from a 425 and finish every file without a retry', async () => {
+    // covers: Test-1196
+    // 파일당 약 0.5초: 첫 시험 로그인 대기(2초) 안에 모두 끝나 limit가 2로 남는다
+    await setup({ maxDataChannels: 2, retrPace: { bytes: 64 * 1024, ms: 150 } }, 3)
+    const ids = queue.enqueueBatch(
+      'download',
+      [0, 1, 2].map((i) => ({
+        localPath: path.join(dir, `file${i}.bin`),
+        remotePath: `/file${i}.bin`,
+        fileName: `file${i}.bin`,
+        totalBytes: FILE.length
+      }))
+    )
+    await vi.waitFor(
+      () => {
+        for (const id of ids) {
+          const job = queue.getAll().find((j) => j.id === id)!
+          if (job.status === 'failed') throw new Error(job.error)
+          expect(job.status).toBe('completed')
+        }
+      },
+      { timeout: 10_000, interval: 10 }
+    )
+
+    for (const i of [0, 1, 2]) {
+      expect(sha256(fs.readFileSync(path.join(dir, `file${i}.bin`)))).toBe(sha256(FILE))
+    }
+    expect(updates.every((j) => j.retryCount === undefined)).toBe(true)
+    expect(updates.some((j) => j.error?.startsWith('Retry'))).toBe(false)
+    expect(server.log.filter((line) => line.startsWith('> 425')).length).toBeGreaterThanOrEqual(1)
+    expect(pool.limit).toBe(2)
+  }, 20_000)
+
+  it('should retry a mid-session 421 on a lone connection and finish the file', async () => {
+    // covers: Test-1197
+    await setup({ reply421OnRetr: 1 })
+
+    const { job, localPath } = await download()
+
+    expect(updates.map((j) => j.error)).toContain(
+      'Retry 1/3: 421 Service not available, closing control connection.'
     )
     expect(job.retryCount).toBe(1)
     expect(sha256(fs.readFileSync(localPath))).toBe(sha256(FILE))

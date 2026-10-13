@@ -1038,6 +1038,113 @@ describe('TransferClientPool', () => {
     )
   })
 
+  describe('limit replies on a transfer (425·421)', () => {
+    const refused = (): FTPError =>
+      new FTPError({ code: 425, message: "425 Too many connections. Can't open data channel." })
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(0)
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      manager.getMaxTransfers.mockReturnValue(4)
+      manager.emit('connectionStatus', { status: 'connected' })
+    })
+
+    afterEach(() => {
+      vi.mocked(console.warn).mockRestore()
+    })
+
+    it('drops the client, lowers the limit without a cap and keeps doubling the probe wait while probes succeed', async () => {
+      // covers: Test-1190
+      const open = [
+        await acquireClient(),
+        await acquireClient(),
+        await acquireClient(),
+        await acquireClient()
+      ]
+      expect(pool.shrinkAfterLimitReply(asClient(open[0]), refused())).toBe(true)
+      expect(open[0].close).toHaveBeenCalled()
+      expect(pool.inUseCount).toBe(3)
+      expect(pool.limit).toBe(3)
+      expect(pool.slots).toBe(3)
+      expect(console.warn).toHaveBeenCalledWith(
+        '[TransferClientPool] Server refused a transfer for its connection limit, lowering the limit:',
+        expect.any(FTPError)
+      )
+
+      await vi.advanceTimersByTimeAsync(PROBE_COOLDOWN_MS - 1)
+      expect(pool.slots).toBe(3)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(pool.slots).toBe(4)
+
+      // 시험 로그인이 되어 limit가 돌아와도 대기는 처음 값으로 돌아가지 않는다
+      let probe = await acquireClient()
+      expect(pool.limit).toBe(4)
+      expect(pool.shrinkAfterLimitReply(asClient(probe), refused())).toBe(true)
+      expect(pool.limit).toBe(3)
+      await vi.advanceTimersByTimeAsync(2 * PROBE_COOLDOWN_MS - 1)
+      expect(pool.slots).toBe(3)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(pool.slots).toBe(4)
+
+      const waits: number[] = []
+      for (let i = 0; i < 5; i++) {
+        probe = await acquireClient()
+        expect(pool.limit).toBe(4)
+        expect(pool.shrinkAfterLimitReply(asClient(probe), refused())).toBe(true)
+        const wait = pool.probeDelay()
+        waits.push(wait)
+        await vi.advanceTimersByTimeAsync(wait)
+      }
+      expect(waits).toEqual([
+        4 * PROBE_COOLDOWN_MS,
+        8 * PROBE_COOLDOWN_MS,
+        16 * PROBE_COOLDOWN_MS,
+        MAX_PROBE_COOLDOWN_MS,
+        MAX_PROBE_COOLDOWN_MS
+      ])
+
+      // 재접속하면 다음 줄임 뒤의 대기는 다시 처음 값이다
+      manager.emit('connectionStatus', { status: 'connecting' })
+      manager.emit('connectionStatus', { status: 'connected' })
+      const [first, second] = [await acquireClient(), await acquireClient()]
+      expect(pool.shrinkAfterLimitReply(asClient(first), refused())).toBe(true)
+      expect(pool.limit).toBe(1)
+      expect(pool.probeDelay()).toBe(PROBE_COOLDOWN_MS)
+
+      // limitCap이 없으므로 시험 로그인이 거듭 되면 설정한 수(4)까지 돌아온다
+      await vi.advanceTimersByTimeAsync(PROBE_COOLDOWN_MS)
+      for (const limit of [2, 3, 4]) {
+        await acquireClient()
+        expect(pool.limit).toBe(limit)
+      }
+      expect(pool.slots).toBe(4)
+      expect(second.close).not.toHaveBeenCalled()
+    })
+
+    it('leaves a lone client and the limit alone, but counts a login in flight as another connection', async () => {
+      // covers: Test-1191
+      const lone = await acquireClient()
+      expect(pool.shrinkAfterLimitReply(asClient(lone), refused())).toBe(false)
+      expect(lone.close).not.toHaveBeenCalled()
+      expect(pool.inUseCount).toBe(1)
+      expect(pool.limit).toBe(4)
+      expect(pool.slots).toBe(4)
+
+      let finish: (c: FakeClient) => void = () => {}
+      manager.createSecondaryClient.mockImplementationOnce(
+        () => new Promise<FakeClient>((resolve) => (finish = resolve))
+      )
+      const inFlight = pool.acquire()
+      expect(pool.connectingCount).toBe(1)
+      expect(pool.shrinkAfterLimitReply(asClient(lone), refused())).toBe(true)
+      expect(lone.close).toHaveBeenCalled()
+      expect(pool.limit).toBe(1)
+      finish(createFakeClient())
+      await inFlight
+    })
+  })
+
   describe('runOnMainClient', () => {
     it('runs the task on the main client through the manager', async () => {
       const main = createFakeClient()

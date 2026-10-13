@@ -37,6 +37,16 @@ export interface MockFtpServerOptions {
   rejectPasv?: number
   /** 처음 N번의 RETR에서 150과 첫 조각만 보낸 뒤 226 없이 제어 연결을 end()한다(FIN). 서버는 계속 듣는다. */
   finDuringRetr?: number
+  /**
+   * 열려 있는 수동 데이터 서버(PASV부터 그 전송이 끝날 때까지)가 이 수 이상이면 PASV에 425로 답한다. 데이터
+   * 연결까지 연결 수로 세는 한도 서버를 흉내 낸다.
+   */
+  maxDataChannels?: number
+  /**
+   * 처음 N번의 RETR에서 데이터를 보내지 않고 421을 보낸 뒤 제어 연결을 end()하고, 그다음에 수동 데이터 서버를
+   * 닫는다(받은 데이터 연결은 끊는다). basic-ftp는 한 전송의 첫 오류만 남기므로 421이 먼저 가야 한다.
+   */
+  reply421OnRetr?: number
 }
 
 export interface MockFtpServer {
@@ -79,6 +89,7 @@ export function startMockFtpServer(options: MockFtpServerOptions): Promise<MockF
   const dataServers = new Set<net.Server>()
   let pasvRejectsLeft = options.rejectPasv ?? 0
   let finsLeft = options.finDuringRetr ?? 0
+  let retr421Left = options.reply421OnRetr ?? 0
 
   const track = (socket: net.Socket): void => {
     sockets.add(socket)
@@ -144,6 +155,15 @@ export function startMockFtpServer(options: MockFtpServerOptions): Promise<MockF
       const offset = ignoreRest ? 0 : rest
       rest = 0
       if (!current) return send('425 Use PASV first')
+      if (retr421Left > 0) {
+        retr421Left--
+        send('421 Service not available, closing control connection.')
+        io.end()
+        void current.socket.then((s) => s.destroy())
+        current.server.close()
+        dataServers.delete(current.server)
+        return
+      }
       const data = secureData(await current.socket)
       const closeData = (): void => {
         current.server.close()
@@ -295,6 +315,12 @@ export function startMockFtpServer(options: MockFtpServerOptions): Promise<MockF
         case 'PASV':
           if (pasvRejectsLeft > 0) {
             pasvRejectsLeft--
+            return send("425 Too many connections. Can't open data channel.")
+          }
+          if (
+            options.maxDataChannels !== undefined &&
+            dataServers.size >= options.maxDataChannels
+          ) {
             return send("425 Too many connections. Can't open data channel.")
           }
           return openPassive()

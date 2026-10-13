@@ -94,6 +94,8 @@ interface MockPool {
   release: ReturnType<typeof vi.fn>
   discard: ReturnType<typeof vi.fn>
   releaseAfterError: ReturnType<typeof vi.fn>
+  /** 한도 응답(425·421)으로 limit를 배웠는지. 기본값은 배우지 않는다(혼자인 연결). */
+  shrinkAfterLimitReply: ReturnType<typeof vi.fn>
   armIdleClose: ReturnType<typeof vi.fn>
   /** acquire가 새로 로그인한 클라이언트를 줬는지. 기본값은 매번 새 로그인이다. */
   takeFreshLogin: ReturnType<typeof vi.fn>
@@ -122,6 +124,7 @@ function createMockPool(limit = 3): MockPool {
     release: vi.fn(),
     discard: vi.fn(),
     releaseAfterError: vi.fn(),
+    shrinkAfterLimitReply: vi.fn(() => false),
     armIdleClose: vi.fn(),
     takeFreshLogin: vi.fn(() => true),
     get slots() {
@@ -1330,6 +1333,103 @@ describe('TransferQueue', () => {
       expect(download).toHaveBeenCalledTimes(2)
       expect(queue.getAll()[0].status).toBe('completed')
       expect(unlink).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('limit replies (425·421)', () => {
+    const e3 = (): FTPError =>
+      new FTPError({ code: 425, message: "425 Too many connections. Can't open data channel." })
+    const e4 = (): Error =>
+      new Error(
+        "None of the available transfer strategies work. Last error response was 'FTPError: 425 Too many connections. Can't open data channel.'"
+      )
+    const e6 = (): FTPError =>
+      new FTPError({
+        code: 421,
+        message: '421 Service not available, closing control connection.'
+      })
+
+    it('should hand a job refused for the connection limit back without a retry once the pool learns the limit', async () => {
+      // covers: Test-1192
+      for (const refusal of [e3, e4, e6]) {
+        vi.clearAllMocks()
+        mockFileOps = createMockFileOps()
+        pool = createMockPool(2)
+        queue = new TransferQueue(mockFileOps, asPool(pool))
+        pool.shrinkAfterLimitReply.mockImplementation(() => {
+          // 실제 풀처럼 다른 연결 수로 limit를 줄인다
+          pool.limit = 1
+          return true
+        })
+        const err = refusal()
+        const hold = deferred()
+        const download = mockFileOps.download as ReturnType<typeof vi.fn>
+        let attempts = 0
+        download.mockImplementation(async (remote: string) => {
+          if (remote === '/remote/0.jpg') return hold.promise
+          attempts++
+          if (attempts === 1) throw err
+        })
+
+        queue.enqueueBatch('download', items(2))
+        await settle()
+
+        const refused = queue.getAll()[1]
+        expect(refused).toMatchObject({ status: 'pending', transferredBytes: 0 })
+        expect(refused.retryCount).toBeUndefined()
+        expect(refused.error).toBeUndefined()
+        expect(pool.shrinkAfterLimitReply).toHaveBeenCalledWith(pool.clients[1], err)
+        expect(pool.releaseAfterError).not.toHaveBeenCalledWith(pool.clients[1], err)
+        expect(pool.discard).not.toHaveBeenCalledWith(pool.clients[1])
+        await vi.advanceTimersByTimeAsync(2000)
+        expect(attempts).toBe(1)
+        expect(queue.getAll()[1].status).toBe('pending')
+
+        hold.resolve()
+        await settle()
+        expect(attempts).toBe(2)
+        expect(queue.getAll().map((job) => job.status)).toEqual(['completed', 'completed'])
+      }
+    })
+
+    it('should retry a mid-session 421 three times like a reset when the pool learns nothing', async () => {
+      // covers: Test-1193
+      const download = mockFileOps.download as ReturnType<typeof vi.fn>
+      const errors: Error[] = []
+      download.mockImplementation(async () => {
+        const err = e6()
+        errors.push(err)
+        throw err
+      })
+
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 100)
+      await settle()
+      expect(download).toHaveBeenCalledTimes(1)
+      expect(queue.getAll()[0].error).toBe(
+        'Retry 1/3: 421 Service not available, closing control connection.'
+      )
+      for (const attempt of [2, 3, 4]) {
+        await vi.advanceTimersByTimeAsync(1999)
+        expect(download).toHaveBeenCalledTimes(attempt - 1)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(download).toHaveBeenCalledTimes(attempt)
+        if (attempt < 4) {
+          expect(queue.getAll()[0].error).toBe(
+            `Retry ${attempt}/3: 421 Service not available, closing control connection.`
+          )
+        }
+      }
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(download).toHaveBeenCalledTimes(4)
+      expect(queue.getAll()[0]).toMatchObject({
+        status: 'failed',
+        error: '421 Service not available, closing control connection.'
+      })
+      expect(pool.releaseAfterError).toHaveBeenCalledTimes(4)
+      for (const [i, err] of errors.entries()) {
+        expect(pool.releaseAfterError).toHaveBeenNthCalledWith(i + 1, pool.clients[i], err)
+      }
     })
   })
 
@@ -2716,6 +2816,48 @@ describe('TransferQueue', () => {
       await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
     })
 
+    it('should not ask the pool to learn the limit from a fast-flow 425, a range 425 or a main-client 425', async () => {
+      // covers: Test-1194
+      const refused = (): FTPError =>
+        new FTPError({ code: 425, message: "425 Too many connections. Can't open data channel." })
+      // ① 빠른 업로드가 의심하는 425는 fastBroken이 먼저다
+      const fast = refused()
+      fastSuspects.add(fast)
+      const upload = mockFileOps.upload as ReturnType<typeof vi.fn>
+      upload.mockRejectedValueOnce(fast)
+      queue.enqueue('upload', '/local/up.jpg', '/remote/up.jpg', 'up.jpg', 10)
+      await vi.waitFor(() =>
+        expect(queue.getAll().find((job) => job.fileName === 'up.jpg')!.status).toBe('completed')
+      )
+      expect(pool.fastBroken).toBe(true)
+      expect(pool.shrinkAfterLimitReply).not.toHaveBeenCalled()
+
+      // ② 시작 0인 구간의 425는 구간 재시도다
+      server.rejections.set(0, refused())
+      enqueueBig()
+      await vi.waitFor(() => expect(big().error).toMatch(/^Retry 1\/3: 425/))
+      expect(big().status).toBe('active')
+      server.rejections.delete(0)
+      await vi.advanceTimersByTimeAsync(2000)
+      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      expect(pool.shrinkAfterLimitReply).not.toHaveBeenCalled()
+
+      // ③ 메인 클라이언트 대체(acquire가 null)의 425는 지금처럼 재시도다
+      pool.acquire.mockResolvedValue(null)
+      ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockRejectedValueOnce(refused())
+      queue.enqueue('download', '/local/main.jpg', '/remote/main.jpg', 'main.jpg', 10)
+      await vi.waitFor(() =>
+        expect(queue.getAll().find((job) => job.fileName === 'main.jpg')!.error).toMatch(
+          /^Retry 1\/3: 425/
+        )
+      )
+      await vi.advanceTimersByTimeAsync(2000)
+      await vi.waitFor(() =>
+        expect(queue.getAll().find((job) => job.fileName === 'main.jpg')!.status).toBe('completed')
+      )
+      expect(pool.shrinkAfterLimitReply).not.toHaveBeenCalled()
+    })
+
     it('should unlink a failed segmented download exactly once and never unlink after a failed upload', async () => {
       // covers: Test-1188
       holdAll()
@@ -3365,6 +3507,44 @@ describe('TransferQueue', () => {
       second!.done(new Error('boom'))
       expect(pool.discard).toHaveBeenCalledWith(second!.client)
       expect(pool.release).not.toHaveBeenCalledWith(second!.client)
+    })
+
+    it('tells the borrower when a limit reply on the lent client taught the pool its limit', async () => {
+      // covers: Test-1195
+      const e4 = new Error(
+        "None of the available transfer strategies work. Last error response was 'FTPError: 425 Too many connections. Can't open data channel.'"
+      )
+      const e6 = new FTPError({
+        code: 421,
+        message: '421 Service not available, closing control connection.'
+      })
+      pool.shrinkAfterLimitReply.mockReturnValue(true)
+      for (const err of [e4, e6]) {
+        const lease = (await queue.borrow())!
+        expect(lease.done(err)).toBe(true)
+        expect(pool.shrinkAfterLimitReply).toHaveBeenLastCalledWith(lease.client, err)
+        expect(pool.release).not.toHaveBeenCalledWith(lease.client)
+        expect(pool.discard).not.toHaveBeenCalledWith(lease.client)
+        expect(lease.done(err)).toBe(false)
+      }
+
+      // 풀이 배우지 않았으면(혼자인 연결) 지금처럼 버리고 false
+      pool.shrinkAfterLimitReply.mockReturnValue(false)
+      const lone = (await queue.borrow())!
+      expect(lone.done(e4)).toBe(false)
+      expect(pool.discard).toHaveBeenCalledWith(lone.client)
+
+      // 한도 응답이 아닌 오류와 오류 없음은 풀에 묻지 않는다
+      pool.shrinkAfterLimitReply.mockClear()
+      pool.shrinkAfterLimitReply.mockReturnValue(true)
+      const other = (await queue.borrow())!
+      expect(other.done(new Error('boom'))).toBe(false)
+      expect(pool.discard).toHaveBeenCalledWith(other.client)
+      const ok = (await queue.borrow())!
+      expect(ok.done()).toBe(false)
+      expect(pool.release).toHaveBeenCalledWith(ok.client)
+      expect(ok.done()).toBe(false)
+      expect(pool.shrinkAfterLimitReply).not.toHaveBeenCalled()
     })
 
     it('lends null without a secondary connection, rejects on login give-up and leaves the line on abort', async () => {

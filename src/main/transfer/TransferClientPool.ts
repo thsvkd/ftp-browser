@@ -112,6 +112,11 @@ export class TransferClientPool {
   private nextProbeAt = -Infinity
   /** 다음 실패 뒤 시험 로그인을 기다릴 시간 */
   private probeCooldown = PROBE_COOLDOWN_MS
+  /**
+   * 전송의 한도 응답(425·421)으로 limit를 줄였다. 그동안 시험 로그인이 되어도 대기를 처음 값으로 돌리지
+   * 않는다: 로그인이 된다고 데이터 연결이 열리는 것은 아니다. resetLimit이 지운다.
+   */
+  private replyLimited = false
 
   /** 서버가 REST를 무시해 분할 다운로드가 깨진 연결. 재접속 시 초기화된다. */
   segmentedBroken = false
@@ -250,7 +255,7 @@ export class TransferClientPool {
     const held = Math.min(this.ceiling(), this.openCount())
     if (held > this._limit) {
       this._limit = held
-      this.probeCooldown = PROBE_COOLDOWN_MS
+      if (!this.replyLimited) this.probeCooldown = PROBE_COOLDOWN_MS
     }
     return client
   }
@@ -291,6 +296,26 @@ export class TransferClientPool {
   releaseAfterError(client: Client, err: unknown): void {
     if (err instanceof FTPError && !client.closed) this.release(client)
     else this.discard(client)
+  }
+
+  /**
+   * 전송이 한도 응답(425·421)으로 거절됐다(transfer-stability TS8). 그 클라이언트 말고 열려 있거나 연결 중인
+   * 풀 연결이 있으면 그 클라이언트를 버려 서버 슬롯을 돌려주고, limit를 그 수로 줄인 뒤 시험 로그인을 미루고
+   * true다. limitCap은 정하지 않는다: 데이터 연결 수는 금방 바뀌므로 시험 로그인으로 다시 늘 수 있어야 한다.
+   * 혼자 돌던 연결이면 아무것도 하지 않고 false다(호출자가 지금처럼 재시도한다).
+   */
+  shrinkAfterLimitReply(client: Client, err?: unknown): boolean {
+    const others = this.openCount() - (this.inUse.has(client) ? 1 : 0) + this.connecting
+    if (others === 0) return false
+    this.discard(client)
+    this._limit = Math.min(this._limit, others)
+    this.delayProbe()
+    this.replyLimited = true
+    console.warn(
+      '[TransferClientPool] Server refused a transfer for its connection limit, lowering the limit:',
+      err
+    )
+    return true
   }
 
   /** 큐에 실행/대기 작업이 없을 때 호출. POOL_IDLE_CLOSE_MS 뒤 idle 클라이언트를 닫고 limit를 되돌린다. */
@@ -423,6 +448,7 @@ export class TransferClientPool {
     this.limitCap = Infinity
     this.nextProbeAt = -Infinity
     this.probeCooldown = PROBE_COOLDOWN_MS
+    this.replyLimited = false
     this.mainFallback = false
   }
 

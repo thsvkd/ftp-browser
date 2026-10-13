@@ -5,7 +5,7 @@ import type { Readable, Writable } from 'stream'
 import { ConnectionRegistry } from '../ftp/ConnectionRegistry'
 import { fakeSession, payloadOf, remoteOf } from '../ftp/__fixtures__/fakeSessions'
 import { FakeQueue } from '../mcp/__fixtures__/agentHarness'
-import { MAX_RELAY_RUNNING } from './RelayLane'
+import { MAX_RELAY_RUNNING, RelayError } from './RelayLane'
 import { TransferHub } from './TransferHub'
 import type { BorrowedClient, TransferQueue } from './TransferQueue'
 import type { Client } from 'basic-ftp'
@@ -106,6 +106,8 @@ class FakeServer extends FakeQueue {
   inUse = 0
   waiters: Array<() => void> = []
   leases: Array<BorrowedClient & { done: ReturnType<typeof vi.fn> }> = []
+  /** 임대 반납의 오류로 그 풀이 limit를 배웠는지(TS10). 없으면 배우지 않는다(false) */
+  learns?: (err: unknown) => boolean
 
   constructor(
     readonly key: ConnKey,
@@ -124,9 +126,10 @@ class FakeServer extends FakeQueue {
         this.clients.push(client)
         const lease = {
           client: client as unknown as Client,
-          done: vi.fn(() => {
+          done: vi.fn((err?: unknown) => {
             this.inUse--
             this.waiters.shift()?.()
+            return err !== undefined && (this.learns?.(err) ?? false)
           })
         }
         this.leases.push(lease)
@@ -338,6 +341,55 @@ describe('RelayLane', () => {
     expect(jobOf(id).status).toBe('completed')
     expect(servers[B].stored['/in/a.bin'].toString()).toBe('abcd')
     expect(remote(B).deleteFile).not.toHaveBeenCalled()
+  })
+
+  it('hands a job back without a retry when the target pool learns its limit from the refused STOR', async () => {
+    // covers: Test-1195
+    const refused = (): Error =>
+      new Error(
+        "None of the available transfer strategies work. Last error response was 'FTPError: 425 Too many connections. Can't open data channel.'"
+      )
+    file(A, 'a.bin', ['ab', 'cd'])
+    const e4 = refused()
+    servers[B].storError = () => e4
+    servers[B].learns = () => {
+      // 실제 풀처럼 limit를 줄인다: 다음 빌림은 슬롯이 날 때까지 기다린다
+      servers[B].limit = 0
+      return true
+    }
+    const [id] = hub.enqueueRelay(A, B, [item('a.bin', 4)], [])
+    await settle()
+
+    expect(servers[B].leases[0].done).toHaveBeenCalledWith(e4)
+    expect(servers[A].leases[0].done).toHaveBeenCalledWith(expect.any(RelayError))
+    expect(servers[A].leases[0].done.mock.calls[0][0].error).toBe(e4)
+    expect(jobOf(id)).toMatchObject({ status: 'pending', transferredBytes: 0 })
+    expect(jobOf(id).retryCount).toBeUndefined()
+    expect(jobOf(id).error).toBeUndefined()
+    expect(servers[B].waiters).toHaveLength(1)
+    expect(remote(B).deleteFile).not.toHaveBeenCalled()
+
+    // 2000ms 재시도 타이머 없이 슬롯이 나면 바로 다시 돈다
+    servers[B].storError = undefined
+    servers[B].learns = undefined
+    servers[B].limit = Infinity
+    servers[B].waiters.shift()!()
+    await settle()
+    expect(jobOf(id)).toMatchObject({ status: 'completed' })
+    expect(jobOf(id).retryCount).toBeUndefined()
+    expect(servers[B].stored['/in/a.bin'].toString()).toBe('abcd')
+    expect(remote(B).deleteFile).not.toHaveBeenCalled()
+
+    // 풀이 배우지 않으면 지금처럼 재시도 횟수를 쓴다
+    file(A, 'b.bin', ['ab'])
+    servers[B].storError = refused
+    servers[B].learns = () => false
+    const [again] = hub.enqueueRelay(A, B, [item('b.bin', 2)], [])
+    await settle()
+    expect(jobOf(again)).toMatchObject({ status: 'pending', retryCount: 1 })
+    expect(
+      jobOf(again).error!.startsWith(`Retry 1/3: ${B}: None of the available transfer strategies`)
+    ).toBe(true)
   })
 
   it('closes the source when the target refuses the upload and fails at once', async () => {
