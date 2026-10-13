@@ -305,7 +305,7 @@ main[data-region='content']:has(+ div > #rail-pane[data-collapsed='true']) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .side-pane {
+  .side-pane[data-animate='true'] {
     transition: none;
   }
   *,

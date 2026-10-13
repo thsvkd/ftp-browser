@@ -63,6 +63,7 @@ export function useResizableSidebar(
   const priority = useLayoutStore((s) => s.priority)
   const commit = useLayoutStore((s) => s.commit)
   const reset = useLayoutStore((s) => s.reset)
+  const toggle = useLayoutStore((s) => s.toggle)
 
   const [live, setLive] = useState<{ collapsed: boolean; width: number } | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -159,6 +160,11 @@ export function useResizableSidebar(
     if (!action) return
     e.preventDefault()
     e.stopPropagation()
+    // Enter는 기억 폭을 건드리지 않고 접힘만 뒤집는다(D11·D12). 맞춤 폭을 저장하지 않도록 스토어 토글을 쓴다.
+    if (action.kind === 'toggle') {
+      toggle(side)
+      return
+    }
     const base = own.collapsed ? own : { width: storedFit, collapsed: false }
     commit(side, applyPaneKey(side, base, action, dragMax(side, containerWidth, otherFitted)))
   }

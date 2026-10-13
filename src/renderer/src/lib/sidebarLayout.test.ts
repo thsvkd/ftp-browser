@@ -280,6 +280,6 @@ describe('design token contract', () => {
     expect(token('pane-anim')).toBe(`${PANE_ANIM_MS}ms`)
     const reduced =
       /@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? ''
-    expect(reduced).toMatch(/\.side-pane\s*\{[^}]*transition:\s*none/)
+    expect(reduced).toMatch(/\.side-pane\[data-animate='true'\]\s*\{[^}]*transition:\s*none/)
   })
 })

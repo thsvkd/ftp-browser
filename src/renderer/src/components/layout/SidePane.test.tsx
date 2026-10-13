@@ -285,6 +285,17 @@ describe('SidePane — keyboard', () => {
     }
   })
 
+  it('keeps the remembered width when Enter collapses a pane rendered narrower than stored', () => {
+    // covers: Test-908
+    setLayout({ width: 360, collapsed: false }, { width: 480, collapsed: false })
+    render(<Pair width={1024} />)
+    const rendered = panel(LEFT).style.width
+    expect(rendered).not.toBe('360px')
+    leftHandle().focus()
+    fireEvent.keyDown(leftHandle(), { key: 'Enter' })
+    expect(stored().left).toEqual({ width: 360, collapsed: true })
+  })
+
   it('grows the right pane with ArrowLeft', () => {
     // covers: Test-908
     render(<Right />)
