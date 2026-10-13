@@ -281,6 +281,18 @@ export const en = {
   'tabs.closeTooltip': 'Close tab (Ctrl+W)',
   'tabs.duplicate': 'Duplicate this tab',
 
+  'split.splitLeft': 'Split left · {{name}}',
+  'split.splitRight': 'Split right · {{name}}',
+  'split.replace': 'Open here · {{name}}',
+  'split.remaining': 'Remaining: {{name}}',
+  'split.menuSplitRight': 'Split right',
+  'split.unsplit': 'Unsplit',
+  'split.swap': 'Swap sides',
+  'split.pair': 'Split view: {{left}} and {{right}}',
+  'split.divider': 'Resize panes',
+  'split.paneLeft': 'Left pane: {{name}}',
+  'split.paneRight': 'Right pane: {{name}}',
+
   'path.backTooltip': 'Back (Alt+←)',
   'path.forwardTooltip': 'Forward (Alt+→)',
   'path.up': 'Parent folder',
