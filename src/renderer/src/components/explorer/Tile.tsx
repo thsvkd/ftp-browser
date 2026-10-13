@@ -33,8 +33,7 @@ export function Tile(
     >
       <div
         className={cn(
-          'relative overflow-hidden rounded-[10px] bg-[var(--tile)] transition-transform duration-150',
-          p.selected && 'scale-[0.94]',
+          'relative overflow-hidden rounded-[10px] bg-[var(--tile)]',
           p.selected && p.listFocused && 'ring-2 ring-[var(--ac)]',
           dropOver && (drop.valid ? 'ring-[3px] ring-[var(--ac)]' : 'ring-2 ring-[var(--dg)]')
         )}
