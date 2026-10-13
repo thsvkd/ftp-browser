@@ -1,7 +1,9 @@
 import { useMemo } from 'react'
 import { useT, type MessageKey } from '@renderer/i18n'
 import {
+  activeCount,
   createMatcher,
+  filterLabel,
   visibleCategories,
   type EntryMatcher,
   type ResolvedCategory,
@@ -34,4 +36,23 @@ export function useCategoryName(): (c: ResolvedCategory) => string {
 export function useTabMatcher(filter: TabFilter): EntryMatcher | null {
   const categories = useAllCategories()
   return useMemo(() => createMatcher(filter, categories), [filter, categories])
+}
+
+/** 탭 필터의 켜진 개수와 툴팁(켜져 있으면 무엇으로 몇 개를 가렸는지). 필터 버튼과 경로 막대의 ⋯가 쓴다. */
+export function useFilterSummary(
+  filter: TabFilter,
+  hiddenCount: number
+): { count: number; title: string } {
+  const t = useT()
+  const all = useAllCategories()
+  const nameOf = useCategoryName()
+  const count = activeCount(filter, all)
+  const title =
+    count > 0
+      ? t('filter.activeTooltip', {
+          what: filterLabel(filter, all, nameOf, t('filter.noExtension')),
+          n: hiddenCount
+        })
+      : t('filter.buttonTooltip')
+  return { count, title }
 }

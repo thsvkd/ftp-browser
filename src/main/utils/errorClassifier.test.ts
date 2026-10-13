@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { FTPError } from 'basic-ftp'
-import { classifyError, ipcError, isRetryableError, socketErrorDetail } from './errorClassifier'
+import {
+  classifyError,
+  ipcError,
+  isLimitReply,
+  isRetryableError,
+  socketErrorDetail
+} from './errorClassifier'
 import { ErrorCode } from '@shared/types/ipc'
 
 /** basic-ftp FTPError처럼 숫자 code를 가진 Error 생성 */
@@ -283,16 +289,8 @@ describe('isRetryableError', () => {
     expect(classifyError(wrapped)).toEqual({ code: ErrorCode.UNKNOWN, message: wrapped.message })
   })
 
-  it('should not retry a 421, a wrapped non-425 error or a file name that contains 425', () => {
+  it('should not retry a wrapped non-425 error or a file name that contains 425', () => {
     // covers: Test-1131
-    expect(
-      isRetryableError(
-        new FTPError({
-          code: 421,
-          message: '421 Too many connections. Service temporarily unavailable.'
-        })
-      )
-    ).toBe(false)
     expect(
       isRetryableError(
         new Error(
@@ -307,6 +305,44 @@ describe('isRetryableError', () => {
       )
     ).toBe(false)
     expect(isRetryableError(new Error('Cannot read /photos/IMG_0425.jpg'))).toBe(false)
+  })
+})
+
+describe('isLimitReply', () => {
+  it('should see 425 and 421 replies, bare or wrapped, as limit replies and retry a 421', () => {
+    // covers: Test-1189
+    const wrapped = (reply: string): Error =>
+      new Error(
+        `None of the available transfer strategies work. Last error response was '${reply}'`
+      )
+    const refused425 = new FTPError({
+      code: 425,
+      message: "425 Too many connections. Can't open data channel."
+    })
+    const closing421 = new FTPError({
+      code: 421,
+      message: '421 Service not available, closing control connection.'
+    })
+    const wrapped425 = wrapped("FTPError: 425 Too many connections. Can't open data channel.")
+    const wrapped421 = wrapped('FTPError: 421 Service not available, closing control connection.')
+
+    for (const err of [refused425, closing421, wrapped425, wrapped421]) {
+      expect(isLimitReply(err)).toBe(true)
+    }
+    for (const err of [
+      new FTPError({ code: 530, message: '530 Too many connections' }),
+      new FTPError({ code: 550, message: '550 IMG_0421.jpg: No such file' }),
+      new Error('Cannot read /photos/IMG_0425.jpg'),
+      wrapped('Error: connect ECONNREFUSED 127.0.0.1:50000 (data socket)'),
+      new Error('Server sent FIN packet unexpectedly, closing connection.')
+    ]) {
+      expect(isLimitReply(err)).toBe(false)
+    }
+
+    for (const err of [closing421, wrapped421]) {
+      expect(isRetryableError(err)).toBe(true)
+      expect(classifyError(err)).toEqual({ code: ErrorCode.UNKNOWN, message: err.message })
+    }
   })
 })
 

@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { useT } from '@renderer/i18n'
 import type { Loc } from '@renderer/lib/explorerEntry'
-import { SPRING_MS } from '@renderer/lib/explorerLayout'
+import { SPRING_MS, TAB_GHOST_DX, TAB_GHOST_HALF_H } from '@renderer/lib/explorerLayout'
 import { connectedKeys } from '@renderer/lib/connections'
 import { loadPlaces, locLabel, sourceLabel } from '@renderer/lib/sendItems'
 import { cn } from '@renderer/lib/utils'
@@ -26,7 +26,7 @@ import { placeAndFocus, useTabDrag, useTabDragStore } from './useTabDrag'
 interface PillHandlers {
   onPointerDown: (e: React.PointerEvent<HTMLElement>, id: string) => void
   consumeClick: () => boolean
-  onMenu: (id: string, x: number, y: number) => void
+  onMenu: (id: string, x: number, y: number, keyboard: boolean) => void
 }
 
 function TabPill({
@@ -77,7 +77,7 @@ function TabPill({
           e.preventDefault()
           // 문서까지 가면 이미 열린 탭 메뉴가 바깥 우클릭으로 보고 새로 연 메뉴를 닫는다(ItemMenu).
           e.stopPropagation()
-          handlers.onMenu(tab.id, e.clientX, e.clientY)
+          handlers.onMenu(tab.id, e.clientX, e.clientY, false)
         }}
         onAuxClick={(e) => e.button === 1 && closable && closeTab(tab.id)}
         title={
@@ -139,7 +139,7 @@ function TabDragLayer(): React.JSX.Element | null {
         data-testid="tab-drag-ghost"
         aria-hidden
         className="pointer-events-none fixed z-[70] flex h-9 max-w-[240px] items-center gap-2 rounded-full border border-[var(--bd)] bg-[var(--sf)] pl-1.5 pr-3.5 text-[13px] font-semibold text-[var(--tx)] opacity-90 shadow-[var(--shadow)]"
-        style={{ left: x - 20, top: y - 18 }}
+        style={{ left: x - TAB_GHOST_DX, top: y - TAB_GHOST_HALF_H }}
       >
         <SourceBadge side={tab.loc.side} size={24} />
         <span className="truncate">{locLabel(tab.loc)}</span>
@@ -175,6 +175,8 @@ export function TabStrip(): React.JSX.Element {
     y: number
     label: string
     items: MenuItem[]
+    /** 키보드로 열었다: 첫 사용 가능한 항목에 포커스(explorer-ux-polish X12) */
+    focusFirst: boolean
   } | null>(null)
   const drag = useTabDrag(stripRef)
   // 메뉴를 열 때 포커스가 있던 곳. 메뉴가 닫히며 포커스를 잃으면 그리로 돌아간다(키보드로 연 탭 메뉴, P6).
@@ -230,7 +232,7 @@ export function TabStrip(): React.JSX.Element {
     btns?.[(i + tabs.length) % tabs.length]?.focus()
   }
 
-  const openMenu = async (x: number, y: number): Promise<void> => {
+  const openMenu = async (x: number, y: number, keyboard: boolean): Promise<void> => {
     remember()
     const { openTab } = useTabsStore.getState()
     const home = (await loadPlaces())?.home
@@ -242,6 +244,7 @@ export function TabStrip(): React.JSX.Element {
     setMenu({
       x,
       y,
+      focusFirst: keyboard,
       label: t('tabs.new'),
       items: [
         ...locs.map((loc) => ({
@@ -265,7 +268,7 @@ export function TabStrip(): React.JSX.Element {
   }
 
   // 탭 메뉴(P6): 일반 탭은 "오른쪽에 분할", 묶음 반쪽은 "분할 해제"·"좌우 바꾸기"
-  const openTabMenu = (id: string, x: number, y: number): void => {
+  const openTabMenu = (id: string, x: number, y: number, keyboard: boolean): void => {
     const s = useTabsStore.getState()
     const tab = s.tabs.find((v) => v.id === id)
     if (!tab) return
@@ -274,6 +277,7 @@ export function TabStrip(): React.JSX.Element {
     setMenu({
       x,
       y,
+      focusFirst: keyboard,
       label: locLabel(tab.loc),
       items: half
         ? [
@@ -338,7 +342,7 @@ export function TabStrip(): React.JSX.Element {
           if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
             e.preventDefault()
             const r = (e.target as HTMLElement).getBoundingClientRect()
-            openTabMenu(tabs[i].id, r.left, r.bottom + 4)
+            openTabMenu(tabs[i].id, r.left, r.bottom + 4, true)
             return
           }
           if (e.key === 'Delete') {
@@ -378,7 +382,8 @@ export function TabStrip(): React.JSX.Element {
       <button
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect()
-          void openMenu(r.left, r.bottom + 4)
+          // Enter·Space로 누른 버튼의 click은 detail이 0이다(X12).
+          void openMenu(r.left, r.bottom + 4, e.detail === 0)
         }}
         aria-label={t('tabs.new')}
         aria-haspopup="menu"
@@ -388,7 +393,14 @@ export function TabStrip(): React.JSX.Element {
         <Plus className="h-4 w-4" aria-hidden />
       </button>
       {menu && (
-        <ItemMenu x={menu.x} y={menu.y} label={menu.label} items={menu.items} onClose={closeMenu} />
+        <ItemMenu
+          x={menu.x}
+          y={menu.y}
+          label={menu.label}
+          items={menu.items}
+          focusFirst={menu.focusFirst}
+          onClose={closeMenu}
+        />
       )}
       <TabDragLayer />
     </div>

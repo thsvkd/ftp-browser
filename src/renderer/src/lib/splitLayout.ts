@@ -34,6 +34,14 @@ export function overlayRect(rect: Rect, zone: 'left' | 'right', ratio: number | 
     : { ...rect, left: rect.left + leftWidth, width: rect.width - leftWidth }
 }
 
+/**
+ * 오버레이 칩의 세로 자리(explorer-ux-polish X10): 포인터가 rect 아래쪽 절반이면 'top', 위쪽 절반이면
+ * 'bottom'. 칩이 포인터(고스트)의 반대쪽 끝에 놓여 콘텐츠 높이가 148px 이상이면 겹치지 않는다.
+ */
+export function chipSlot(rect: Rect, y: number): 'top' | 'bottom' {
+  return y >= rect.top + rect.height / 2 ? 'top' : 'bottom'
+}
+
 /** F4 히스테리시스: 탭줄 하단 + 16px 아래로 내려가야 분할, 탭줄 하단선 위로 올라와야 순서 변경. */
 export function dragModeFor(
   prev: 'reorder' | 'split',

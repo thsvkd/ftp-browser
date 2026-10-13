@@ -288,6 +288,7 @@ export const ko = {
   'path.editHint': '빈 곳을 누르면 경로를 입력할 수 있습니다 (Ctrl+L)',
   'path.edit': '경로 입력',
   'path.hidden': '숨겨진 경로',
+  'path.moreTools': '도구 더 보기',
 
   'filter.find': '이 폴더에서 찾기',
   'filter.findTooltip': '이 폴더에서 찾기 (Ctrl+F)',

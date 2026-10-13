@@ -46,11 +46,6 @@ describe('resolveTarget — the server argument (rule 1)', () => {
     expect(resolveTarget(h.deps, 'NAS.local')).toBe(A)
     expect(resolveTarget(h.deps, 'ftp.office.lan:2121')).toBe(B)
 
-    // 저장 행의 사용자와 다른 연결만 있으면 그 host:port의 유일한 연결
-    const backup = addServer(h.db, { name: 'Backup', host: 'backup.lan', user: 'admin' })
-    h.connections.add('guest@backup.lan:21')
-    expect(resolveTarget(h.deps, backup)).toBe('guest@backup.lan:21')
-
     // 저장돼 있지만 연결 안 됨
     const media = addServer(h.db, { name: 'Media', host: 'media.lan', user: 'me' })
     const offline = failure('Media')
@@ -76,6 +71,38 @@ describe('resolveTarget — the server argument (rule 1)', () => {
     const missing = failure('nowhere')
     expect(missing.code).toBe('NOT_FOUND')
     expect(missing.message).toMatch(/^No saved server matches "nowhere"\. Saved servers: /)
+  })
+})
+
+describe('resolveTarget — a saved server goes only to the connection of its own user', () => {
+  it('names the keys of other users on that host:port instead of falling back to one of them', () => {
+    // covers: Test-1198
+    const backup = addServer(h.db, { name: 'Backup', host: 'backup.lan', user: 'admin' })
+    h.connections.add('guest@backup.lan:21')
+    h.deps.target.last = A
+
+    const one = failure(backup)
+    expect(one.code).toBe('NOT_CONNECTED')
+    expect(one.message).toBe(
+      `Backup (id ${backup}, backup.lan:21) is not connected as admin. Connected there as other ` +
+        'users: guest@backup.lan:21. Call connect with server ' +
+        `${backup} first, or pass server with one of those keys.`
+    )
+    expect(h.deps.target.last).toBe(A)
+
+    h.connections.add('other@backup.lan:21')
+    const two = failure(backup)
+    expect(two.code).toBe('NOT_CONNECTED')
+    expect(two.message).toBe(
+      `Backup (id ${backup}, backup.lan:21) is not connected as admin. Connected there as other ` +
+        'users: guest@backup.lan:21, other@backup.lan:21. Call connect with server ' +
+        `${backup} first, or pass server with one of those keys.`
+    )
+    expect(h.deps.target.last).toBe(A)
+
+    // 저장 행의 사용자가 연결되면 그것을 고른다
+    h.connections.add('admin@backup.lan:21')
+    expect(resolveTarget(h.deps, backup)).toBe('admin@backup.lan:21')
   })
 })
 

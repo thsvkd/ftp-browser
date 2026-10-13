@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { SPLIT_CHIP_H_PX, SPLIT_CHIP_INSET_PX, TAB_GHOST_HALF_H } from './explorerLayout'
 import {
+  chipSlot,
   clampRatio,
   dragModeFor,
   insertionIndex,
@@ -103,5 +105,33 @@ describe('splitPartner', () => {
     expect(splitPartner(order, 'c', 'c')).toBe('b')
     expect(splitPartner(order, 'a', 'a')).toBe('b')
     expect(splitPartner(['a'], 'a', 'a')).toBeNull()
+  })
+})
+
+describe('chipSlot', () => {
+  it('puts the overlay chips at the vertical end away from the pointer so the drag ghost never covers them', () => {
+    // covers: Test-1170
+    const rect: Rect = { left: 0, top: 100, width: 800, height: 400 }
+    expect(chipSlot(rect, 299)).toBe('bottom')
+    expect(chipSlot(rect, 300)).toBe('top')
+    expect(chipSlot(rect, 100)).toBe('bottom')
+    expect(chipSlot(rect, 500)).toBe('top')
+
+    for (const height of [148, 149, 400]) {
+      const r: Rect = { left: 0, top: 100, width: 800, height }
+      for (let y = r.top; y <= r.top + r.height; y++) {
+        const ghost = [y - TAB_GHOST_HALF_H, y + TAB_GHOST_HALF_H]
+        const chip =
+          chipSlot(r, y) === 'top'
+            ? [r.top + SPLIT_CHIP_INSET_PX, r.top + SPLIT_CHIP_INSET_PX + SPLIT_CHIP_H_PX]
+            : [
+                r.top + r.height - SPLIT_CHIP_INSET_PX - SPLIT_CHIP_H_PX,
+                r.top + r.height - SPLIT_CHIP_INSET_PX
+              ]
+        // 끝점이 닿는 것은 겹침이 아니다.
+        const overlap = ghost[0] < chip[1] && chip[0] < ghost[1]
+        expect(overlap, `height ${height}, y ${y}`).toBe(false)
+      }
+    }
   })
 })

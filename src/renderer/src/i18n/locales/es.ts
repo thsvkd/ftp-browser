@@ -305,6 +305,7 @@ export const es = {
   'path.editHint': 'Haz clic en un espacio vacío para escribir una ruta (Ctrl+L)',
   'path.edit': 'Escribir una ruta',
   'path.hidden': 'Tramos de ruta ocultos',
+  'path.moreTools': 'Más herramientas',
 
   'filter.find': 'Buscar en esta carpeta',
   'filter.findTooltip': 'Buscar en esta carpeta (Ctrl+F)',

@@ -63,7 +63,7 @@
 | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | SH12 | **연결의 저장 행은 사용자까지 같은 행만**(`agentTarget.ts`의 `savedOf`에서 `?? at[0]` 물러서기를 뺀다). 이 함수를 쓰는 세 곳이 함께 바뀐다: `get_status`의 `serverId`·`name`(사용자가 다른 연결에는 두 키가 없다), `AMBIGUOUS` 목록(`describe`), 끊긴 키의 `NOT_CONNECTED` 안내(`refuseDisconnectedKey`: 사용자가 다른 키는 "It is not a saved server; connect to it in FTP Browser first."). `get_status` 설명의 "the saved server serverId and name"을 "serverId and name of the saved server with the same user"로 고친다                                           |
 | SH13 | **`AMBIGUOUS`는 넘길 키를 그대로 보인다.** 항목은 키를 앞에: 저장 행(사용자까지 같음)이 있으면 `<key> (<별칭>, id <N>)`, 별칭이 없으면 `<key> (id <N>)`, 저장 안 된 연결은 `<key>`. 다음 행동(`NEXT.AMBIGUOUS`, `mcpTools.ts:93`)은 `Pass server with one of the user@host:port keys listed.` `resolveTarget`(`N servers are connected: …`)과 `connectionOf`(`N connections match <이름>: …`) 모두 같은 항목 형식이다. 예: `AMBIGUOUS: 2 servers are connected: ra@127.0.0.1:2121 (id 1), rb2@127.0.0.1:2121. Pass server with one of the user@host:port keys listed.` |
-| SH14 | **대상 고르기 규칙(MC18 ①~④)은 바꾸지 않는다.** 저장 서버 id·별칭·호스트로 고르면 지금처럼 사용자가 같은 연결, 없으면 그 host·port의 유일한 연결이다(`connectionOf`, `[사용자]` MC18). 그래서 `ra`가 끊기고 `rb2`만 연결돼 있으면 `server: 1`은 `rb2`로 간다. 이 물러서기를 없앨지는 사람의 결정이다(§13 후속)                                                                                                                                                                                                                                                         |
+| SH14 | [transfer-stability.md TS15가 대체] **대상 고르기 규칙(MC18 ①~④)은 바꾸지 않는다.** 저장 서버 id·별칭·호스트로 고르면 지금처럼 사용자가 같은 연결, 없으면 그 host·port의 유일한 연결이다(`connectionOf`, `[사용자]` MC18). 그래서 `ra`가 끊기고 `rb2`만 연결돼 있으면 `server: 1`은 `rb2`로 간다. 이 물러서기를 없앨지는 사람의 결정이다(§13 후속)                                                                                                                                                                                                                     |
 | SH15 | **`docs/handoff/agent-access.md` 갱신**(S3에서): §2 표 `get_status` 행에 "serverId·name은 사용자까지 같은 저장 서버일 때만", "대상 연결" 문단의 `AMBIGUOUS` 괄호를 "(연결마다 키·별칭·id + `Pass server with one of the user@host:port keys listed.`)"로. 도구 수(12)·스키마·`INSTRUCTIONS`·`ftpb`는 바뀌지 않는다                                                                                                                                                                                                                                                     |
 
 ### 2.1 대체되는 결정
@@ -236,7 +236,7 @@ jsdom·가짜 클라이언트로는 다음을 볼 수 없다(§12): preload를 �
 - **새 테이블에 없으면 옛 테이블로 물러서 읽기** — `rb2`의 첫 연결이 다시 `ra`의 폴더에서 시작한다(O4 그대로). 기각.
 - **옛 행을 모든 사용자에게 복사 / 옛 행 지우기** — 앞의 것은 O4 그대로, 뒤의 것은 추가만 허용 규칙 위반. 기각(SH9).
 - **`ftp:getRecentPaths(host, port, user)` 3인자** — 모든 호출부가 이미 키를 갖고, 원격 채널의 인자가 키라는 MC3과 맞춘다. 기각(SH10).
-- **MC18 ①의 host·port 유일 연결 물러서기 없애기** — `[사용자]` 결정(MC18)이다. 이 문서는 표시와 안내만 고친다. 후속(SH14).
+- [transfer-stability.md TS15가 대체] **MC18 ①의 host·port 유일 연결 물러서기 없애기** — `[사용자]` 결정(MC18)이다. 이 문서는 표시와 안내만 고친다. 후속(SH14).
 
 ---
 
@@ -297,7 +297,7 @@ jsdom·가짜 클라이언트로는 다음을 볼 수 없다(§12): preload를 �
 - **옛 기록의 주인 추정**(SH9): 다른 계정으로 연 경로가 저장 계정의 기록으로 옮겨질 수 있다. 그 폴더가 없으면 `/`로 물러선다.
 - **`server: <저장 id>`는 여전히 다른 사용자 연결로 갈 수 있다**(SH14). `get_status`가 그 연결에 `serverId`를 붙이지 않으므로 에이전트가 보는 정보와는 어긋나지 않지만, id를 넘긴 에이전트는 `rb2`를 받을 수 있다.
 
-**후속 과제(이번 범위 밖)**: 같은 host·port의 계정마다 저장 서버를 두기(`idx_servers_host_port` 재설계), MC18 ①의 host·port 유일 연결 물러서기를 없앨지(사람 결정), 옛 `server_recent_paths` 테이블 정리, 에이전트 `list_directory`가 최근 경로를 기록할지(지금은 GUI의 `ftp:list`만 기록한다).
+**후속 과제(이번 범위 밖)**: 같은 host·port의 계정마다 저장 서버를 두기(`idx_servers_host_port` 재설계), [transfer-stability.md TS15가 대체] MC18 ①의 host·port 유일 연결 물러서기를 없앨지(사람 결정), 옛 `server_recent_paths` 테이블 정리, 에이전트 `list_directory`가 최근 경로를 기록할지(지금은 GUI의 `ftp:list`만 기록한다).
 
 ---
 

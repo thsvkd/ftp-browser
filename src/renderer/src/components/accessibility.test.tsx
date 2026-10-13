@@ -141,6 +141,8 @@ describe('GUI accessibility — icon-only buttons', () => {
 })
 
 describe('GUI accessibility — regression guard', () => {
+  // 버튼 ~1000개의 접근 가능한 이름을 jsdom에서 계산하는 CPU 작업이다. 경쟁 조건이 아니라
+  // 부하가 걸린 기기에서 기본 5초를 넘겨 간헐적으로 실패했으므로 시간 예산만 넉넉히 준다.
   it('leaves no button without an accessible name on the main window, activity and settings', async () => {
     // covers: Test-261
     shell.local['C:\\work'] = [local('C:\\work', 'docs', { dir: true }), local('C:\\work', 'b.jpg')]
@@ -175,7 +177,7 @@ describe('GUI accessibility — regression guard', () => {
     expect(await screen.findByRole('button', { name: en['settings.clearCache'] })).toBeTruthy()
 
     expect(unnamedButtons()).toEqual([])
-  })
+  }, 20_000)
 })
 
 // ---------- 새 탐색기(Shelf) ----------

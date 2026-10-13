@@ -305,6 +305,7 @@ export const fr = {
   'path.editHint': 'Cliquez dans l’espace vide pour saisir un chemin (Ctrl+L)',
   'path.edit': 'Saisir un chemin',
   'path.hidden': 'Segments de chemin masqués',
+  'path.moreTools': 'Plus d’outils',
 
   'filter.find': 'Rechercher dans ce dossier',
   'filter.findTooltip': 'Rechercher dans ce dossier (Ctrl+F)',

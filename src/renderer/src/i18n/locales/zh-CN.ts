@@ -279,6 +279,7 @@ export const zhCN = {
   'path.editHint': '点击空白处可输入路径 (Ctrl+L)',
   'path.edit': '输入路径',
   'path.hidden': '已折叠的路径',
+  'path.moreTools': '更多工具',
 
   'filter.find': '在此文件夹中查找',
   'filter.findTooltip': '在此文件夹中查找 (Ctrl+F)',

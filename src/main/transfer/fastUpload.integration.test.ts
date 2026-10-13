@@ -18,8 +18,9 @@ function sha256(data: Buffer): string {
   return createHash('sha256').update(data).digest('hex')
 }
 
-// 서버가 150을 늦게 보내야 빠른 경로가 150 전에 쓴 데이터("! early data")를 서버 쪽에서 볼 수 있다
-const LATE_150 = { delay150Ms: 30 }
+// 서버가 150을 늦게 보내야 빠른 경로가 150 전에 쓴 데이터("! early data")를 서버 쪽에서 볼 수 있다.
+// 빠른 경로를 탈 두 번째 업로드(b.bin)는 첫 데이터까지 150을 미뤄, 머신이 바빠도 시간 창을 놓치지 않는다.
+const LATE_150: MockFtpServerOptions = { delay150Ms: 30, hold150UntilData: ['/b.bin'] }
 
 describe('fast uploads through the transfer queue against a mock FTP server', () => {
   let server: MockFtpServer

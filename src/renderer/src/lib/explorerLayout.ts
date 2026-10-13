@@ -39,3 +39,9 @@ export const SPLIT_FADE_MS = 150
 export const SPLIT_SWITCH_MS = 100
 /** 새 분할 구분선이 자리 잡는 시간(CSS는 `--pane-anim`) */
 export const SPLIT_SETTLE_MS = 200
+/** 끄는 탭 고스트의 자리: left = x − DX, top = y − HALF_H(높이 36, `h-9`) */
+export const TAB_GHOST_DX = 20
+export const TAB_GHOST_HALF_H = 18
+/** 오버레이 칩이 영역 위·아래 끝에서 들어오는 거리와 칩 높이 상한(explorer-ux-polish X10) */
+export const SPLIT_CHIP_INSET_PX = 24
+export const SPLIT_CHIP_H_PX = 32

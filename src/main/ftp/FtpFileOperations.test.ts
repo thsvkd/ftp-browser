@@ -243,6 +243,83 @@ describe('FtpFileOperations', () => {
       expect(fs.readFileSync(localPath).equals(data)).toBe(true)
     })
 
+    it('should call onOpen once after opening the local file and before the first byte, and never when opening fails', async () => {
+      // covers: Test-1186
+      const localPath = path.join(tmp, 'file.jpg')
+      const onOpen = vi.fn()
+      const seenAtTransfer: number[] = []
+      const data = Buffer.alloc(5000, 9)
+      const targets = serve(mockClient, data)
+      const serveData = mockClient.downloadTo.getMockImplementation() as (
+        target: Writable
+      ) => Promise<void>
+      mockClient.downloadTo.mockImplementation(async (target: Writable) => {
+        seenAtTransfer.push(onOpen.mock.calls.length)
+        expect(fs.existsSync(localPath)).toBe(true)
+        expect(fs.statSync(localPath).size).toBe(0)
+        return serveData(target)
+      })
+
+      await ops.download('/remote/file.jpg', localPath, undefined, undefined, undefined, onOpen)
+      expect(onOpen).toHaveBeenCalledTimes(1)
+      expect(seenAtTransfer).toEqual([1])
+      expect(targets).toHaveLength(1)
+      expect(fs.readFileSync(localPath).equals(data)).toBe(true)
+
+      // 배타적 claim인데 이미 있는 파일: 'wx'가 EEXIST로 실패한다
+      const exclusive = vi.fn()
+      await expect(
+        ops.download(
+          '/remote/file.jpg',
+          localPath,
+          undefined,
+          undefined,
+          { created: false },
+          exclusive
+        )
+      ).rejects.toMatchObject({ code: 'EEXIST' })
+      expect(exclusive).not.toHaveBeenCalled()
+
+      // 없는 폴더: ENOENT
+      const missing = vi.fn()
+      await expect(
+        ops.download(
+          '/remote/file.jpg',
+          path.join(tmp, 'no-such-dir', 'file.jpg'),
+          undefined,
+          undefined,
+          undefined,
+          missing
+        )
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(missing).not.toHaveBeenCalled()
+      expect(mockClient.downloadTo).toHaveBeenCalledTimes(1)
+
+      // 아무것도 받지 못한 실패는 연 빈 파일을 지우고 onRemoved를 1번 부른다. 받다 끊긴 파일은 두고 부르지 않는다
+      const removed = vi.fn()
+      const download = (): Promise<void> =>
+        ops.download(
+          '/remote/file.jpg',
+          localPath,
+          undefined,
+          undefined,
+          undefined,
+          vi.fn(),
+          removed
+        )
+      mockClient.downloadTo.mockRejectedValueOnce(new Error('550 No such file'))
+      await expect(download()).rejects.toThrow('550')
+      expect(fs.existsSync(localPath)).toBe(false)
+      expect(removed).toHaveBeenCalledTimes(1)
+      mockClient.downloadTo.mockImplementationOnce(async (target: Writable) => {
+        await new Promise<void>((resolve) => target.write(Buffer.alloc(100, 1), () => resolve()))
+        throw new Error('reset')
+      })
+      await expect(download()).rejects.toThrow('reset')
+      expect(fs.statSync(localPath).size).toBe(100)
+      expect(removed).toHaveBeenCalledTimes(1)
+    })
+
     it('should clean up progress tracking on error', async () => {
       mockClient.downloadTo.mockRejectedValueOnce(new Error('Download failed'))
 

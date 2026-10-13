@@ -69,6 +69,8 @@ afterEach(() => {
   cleanup()
   vi.useRealTimers()
   h.restore()
+  // 저장 서버를 넣는 테스트가 다음 테스트의 자동 연결에 새지 않게 처음 상태로 되돌린다
+  useServerStore.setState(useServerStore.getInitialState(), true)
 })
 
 const key = (k: string, init: Partial<KeyboardEventInit> = {}): void => {
