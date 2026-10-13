@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from 'react'
 import { useResizableSidebar } from '@renderer/hooks/useResizableSidebar'
+import { useTabsStore } from '@renderer/stores/useTabsStore'
 import type { PaneSide } from '@renderer/lib/sidebarLayout'
 import { ResizeHandle } from './ResizeHandle'
 
@@ -20,10 +21,14 @@ export function SidePane({ side, id, containerWidth, children }: SidePaneProps):
   const paneRef = useRef<HTMLDivElement>(null)
 
   // 접히는 순간 포커스가 패널 안에 있었으면 본문 목록으로 옮긴다. 크롬의 inert 보정은 비동기다.
+  // 분할 보기에서는 활성 패널의 목록이다(없으면 첫 목록). 아니면 접기만으로 활성 패널이 바뀐다.
   useLayoutEffect(() => {
     const pane = paneRef.current
     if (!r.collapsed || !pane?.contains(document.activeElement)) return
-    document.querySelector<HTMLElement>('[id^="explorer-list-"]')?.focus()
+    ;(
+      document.getElementById(`explorer-list-${useTabsStore.getState().activeId}`) ??
+      document.querySelector<HTMLElement>('[id^="explorer-list-"]')
+    )?.focus()
   }, [r.collapsed])
 
   return (
