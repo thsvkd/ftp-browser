@@ -294,6 +294,30 @@ describe('FtpFileOperations', () => {
       ).rejects.toMatchObject({ code: 'ENOENT' })
       expect(missing).not.toHaveBeenCalled()
       expect(mockClient.downloadTo).toHaveBeenCalledTimes(1)
+
+      // 아무것도 받지 못한 실패는 연 빈 파일을 지우고 onRemoved를 1번 부른다. 받다 끊긴 파일은 두고 부르지 않는다
+      const removed = vi.fn()
+      const download = (): Promise<void> =>
+        ops.download(
+          '/remote/file.jpg',
+          localPath,
+          undefined,
+          undefined,
+          undefined,
+          vi.fn(),
+          removed
+        )
+      mockClient.downloadTo.mockRejectedValueOnce(new Error('550 No such file'))
+      await expect(download()).rejects.toThrow('550')
+      expect(fs.existsSync(localPath)).toBe(false)
+      expect(removed).toHaveBeenCalledTimes(1)
+      mockClient.downloadTo.mockImplementationOnce(async (target: Writable) => {
+        await new Promise<void>((resolve) => target.write(Buffer.alloc(100, 1), () => resolve()))
+        throw new Error('reset')
+      })
+      await expect(download()).rejects.toThrow('reset')
+      expect(fs.statSync(localPath).size).toBe(100)
+      expect(removed).toHaveBeenCalledTimes(1)
     })
 
     it('should clean up progress tracking on error', async () => {

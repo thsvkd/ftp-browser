@@ -526,6 +526,7 @@ describe('TransferQueue', () => {
           expect.any(Function),
           pool.clients[0],
           undefined,
+          expect.any(Function),
           expect.any(Function)
         )
       })
@@ -1165,7 +1166,8 @@ describe('TransferQueue', () => {
       onProgress: unknown,
       client: unknown,
       claim: { created: boolean } | undefined,
-      onOpen: OnOpen | undefined
+      onOpen: OnOpen | undefined,
+      onRemoved?: () => void
     ) => Promise<void>
 
     function mockDownload(impl: Download): ReturnType<typeof vi.fn> {
@@ -1263,6 +1265,21 @@ describe('TransferQueue', () => {
       queue.enqueue('download', '/local/b.jpg', '/remote/b.jpg', 'b.jpg', 10)
       await vi.advanceTimersByTimeAsync(LOGIN_HOLD_TOTAL)
       expect(queue.getAll()[1].status).toBe('failed')
+      expect(unlink).not.toHaveBeenCalled()
+
+      // ③ 첫 시도가 연 빈 파일을 download가 스스로 지웠다(onRemoved). 재시도 대기 중 그 경로에 생긴 파일은
+      // 이 작업이 연 것이 아니므로 로그인 실패 연쇄로 실패해도 지우지 않는다
+      pool.acquire.mockResolvedValueOnce(createFakeClient())
+      mockDownload(async (_r, _l, _p, _c, _claim, onOpen, onRemoved) => {
+        onOpen!()
+        onRemoved!()
+        throw reset()
+      })
+      queue.enqueue('download', '/local/c.jpg', '/remote/c.jpg', 'c.jpg', 10)
+      await settle()
+      expect(queue.getAll()[2]).toMatchObject({ status: 'pending', retryCount: 1 })
+      await vi.advanceTimersByTimeAsync(2000 + LOGIN_HOLD_TOTAL)
+      expect(queue.getAll()[2].status).toBe('failed')
       expect(unlink).not.toHaveBeenCalled()
       vi.mocked(console.warn).mockRestore()
     })
@@ -2671,6 +2688,7 @@ describe('TransferQueue', () => {
         expect.any(Function),
         client,
         undefined,
+        expect.any(Function),
         expect.any(Function)
       )
     })

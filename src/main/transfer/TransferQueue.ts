@@ -629,7 +629,8 @@ export class TransferQueue extends EventEmitter {
         onProgress,
         client ?? undefined,
         this.claims.get(job),
-        () => this.opened.add(job)
+        () => this.opened.add(job),
+        () => this.opened.delete(job)
       )
     } else {
       if (item.dirs) {

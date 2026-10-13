@@ -49,11 +49,22 @@ describe('transient disconnects are retried against a mock FTP server', () => {
     queue.on('queue:updated', (update: TransferUpdate) => updates.push(...update.upserts))
   }
 
-  /** 파일 하나를 넣고 실패로 끝날 때까지 기다린다(재시도 3회, 실제 대기 6초). */
-  async function downloadUntilFailed(localPath: string): Promise<TransferJob> {
+  /**
+   * 파일 하나를 넣는다. 앞 시도 셋은 FIN으로 끊기고(재시도 3회, 실제 대기 6초) 넷째 시도가 받은 바이트를 로컬
+   * 파일에 쓰면 서버를 닫아 그 시도를 끊는다. 받다 만 바이트가 디스크에 있는 채로 실패로 끝날 때까지 기다린다.
+   */
+  async function downloadCutAfterBytes(localPath: string): Promise<TransferJob> {
     const id = queue.enqueue('download', localPath, '/file.bin', 'file.bin', FILE.length)
+    await vi.waitFor(
+      () => {
+        expect(server.log.filter((line) => line.startsWith('< RETR'))).toHaveLength(4)
+        expect(fs.statSync(localPath).size).toBeGreaterThan(0)
+      },
+      { timeout: 15_000, interval: 10 }
+    )
+    await server.close()
     await vi.waitFor(() => expect(queue.getAll().find((j) => j.id === id)!.status).toBe('failed'), {
-      timeout: 15_000,
+      timeout: 5_000,
       interval: 10
     })
     return queue.getAll().find((j) => j.id === id)!
@@ -160,12 +171,13 @@ describe('transient disconnects are retried against a mock FTP server', () => {
     expect(server.log.filter((line) => line.startsWith('< RETR'))).toHaveLength(2)
   }, 20_000)
 
-  it('should leave no partial local file after a download cut by a FIN on every attempt fails', async () => {
+  it('should leave no partial local file after a download cut on every attempt fails', async () => {
     // covers: Test-1187
-    await setup({ finDuringRetr: 4 })
+    // 마지막 시도는 바이트를 받은 뒤 끊겨야 한다: FIN 시도는 0바이트라 downloadToFile이 이미 지운다
+    await setup({ finDuringRetr: 3, retrPace: { bytes: 16 * 1024, ms: 150 } })
     const localPath = path.join(dir, 'file.bin')
 
-    const job = await downloadUntilFailed(localPath)
+    const job = await downloadCutAfterBytes(localPath)
 
     expect(job.retryCount).toBe(3)
     expect(server.log.filter((line) => line.startsWith('< RETR'))).toHaveLength(4)
@@ -174,12 +186,12 @@ describe('transient disconnects are retried against a mock FTP server', () => {
 
   it('should leave no file after a failed GUI download that overwrote an existing file', async () => {
     // covers: Test-1187
-    await setup({ finDuringRetr: 4 })
+    await setup({ finDuringRetr: 3, retrPace: { bytes: 16 * 1024, ms: 150 } })
     const localPath = path.join(dir, 'file.bin')
     // 충돌 시트에서 덮어쓰기를 고른 기존 파일: 첫 시도가 'w'로 열며 이미 잘랐다
     fs.writeFileSync(localPath, 'existing file the user chose to overwrite')
 
-    const job = await downloadUntilFailed(localPath)
+    const job = await downloadCutAfterBytes(localPath)
 
     expect(job.retryCount).toBe(3)
     await vi.waitFor(() => expect(fs.existsSync(localPath)).toBe(false))
