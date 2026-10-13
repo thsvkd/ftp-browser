@@ -14,7 +14,7 @@ main·IPC·preload는 바꾸지 않는다.
 
 - 전송은 된다. Finder 끌어 놓기(`dnd.ts` → `dropOsFiles`)와 로컬 탭에서 끌어 온 항목(`dnd.ts` → `sendItems` → `runParts`)은
   메뉴·선반 보내기와 같은 `useTransferStore.send` → `transfer:send`로 간다. main은 한 배치로 큐에 넣고
-  `transfer:updated`로 바이트 진행을 보낸다(Test-1101이 고정).
+  `transfer:updated`로 바이트 진행을 보낸다(묶음과 업로드는 Test-1101이 고정).
 - 항목별 진행 표시인 `TransferRing`은 전송의 **출처**만 표시한다(로컬 항목 ↔ 업로드의 `localPath`, 원격 항목 ↔ 다운로드의 `remotePath`).
   끌어 놓기가 끝나면 사람은 **목적지**를 보고 있다. Finder 항목은 앱 안에 출처 타일이 없고, 로컬 탭에서 끌면
   `TabStrip`이 커서 아래 탭으로 바꾸어 출처 타일은 숨은 탭에 있다. 목적지 원격 탭의 폴더 타일은 업로드를 받아도 고리가 없다.
@@ -61,7 +61,7 @@ main·IPC·preload는 바꾸지 않는다.
 | Test-1098 | `components/activity/ActivityPill.test.tsx`        | 작업 없이 `pendingSends=[{id:'send1',label:'folder'}]`면 스피너와 이름 "Activity, Preparing folder…"(title은 "Preparing folder…"), 비면 다시 유휴 "Activity"                                                                                                          |
 | Test-1099 | 같은 파일                                          | `pendingSends`와 실행 중 작업이 함께 있으면 퍼센트 고리·이름이 남고 스피너는 없다                                                                                                                                                                                     |
 | Test-1100 | ~~`components/explorer/Explorer.test.tsx`~~        | **대체됨**(`transfer-panel.md` P5, Test-1119): 끌어 놓기는 더 이상 카드를 날리지 않는다. 테스트와 `covers:` 태그는 지운다                                                                                                                                             |
-| Test-1101 | `src/main/transfer/sendUpload.integration.test.ts` | 모의 FTP 서버(`storPace`)에 `transfer:send` 업로드 [폴더, 파일] → 모든 id가 한 `batchId`, `server.stored`에 두 원격 경로, `0 < transferredBytes < totalBytes`인 갱신이 있다                                                                                           |
+| Test-1101 | `src/main/transfer/sendUpload.integration.test.ts` | 모의 FTP 서버에 `transfer:send` 업로드 [폴더, 파일] → 모든 id가 한 `batchId`로 완료되고 `server.stored`에 두 원격 경로가 있다. 중간 진행 단언은 뺐다(24MiB를 느리게 올려야 해 CI의 병렬 테스트를 굶겼다. 진행 갱신은 `TransferQueue.test.ts`가 고정)                  |
 | Test-1102 | R3(손으로, 실제 앱)                                | 큰 파일이 든 Finder 폴더를 원격 탭에 끌어 놓는다: 계획 중 알약이 돌고, 이어 퍼센트, 목적지 폴더 타일에 고리, 팝오버 진행 막대가 움직인다. 로컬 탭을 원격 탭 머리에 끌어 반복                                                                                          |
 
 ## 4. 코드 포인터

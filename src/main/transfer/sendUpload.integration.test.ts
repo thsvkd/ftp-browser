@@ -44,14 +44,15 @@ describe('transfer:send upload of dropped items against a mock FTP server', () =
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
-  it('sends a folder and a file as one batch and reports byte progress', async () => {
+  it('sends a folder and a file as one batch that the server stores', async () => {
     // covers: Test-1101
-    // 느린 업링크: 서버가 5ms마다 64KiB씩만 읽는다. 양 끝 소켓 버퍼(Linux는 합쳐 10MB까지)가 다 받아 내지 못할 만큼 크게 보낸다
-    server = await startMockFtpServer({ storPace: { bytes: 64 * 1024, ms: 5 } })
+    // 중간 진행까지 보려면 소켓 버퍼를 넘는 큰 파일을 느리게 올려야 해, CI에서 병렬 테스트를 굶겼다.
+    // 바이트 진행 갱신은 TransferQueue.test.ts가 맡고, 여기서는 묶음과 실제 업로드만 본다
+    server = await startMockFtpServer({})
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'send-upload-int-'))
     onStatus = []
     fs.mkdirSync(path.join(dir, 'folder'))
-    fs.writeFileSync(path.join(dir, 'folder', 'big.bin'), Buffer.alloc(24 * 1024 * 1024, 7))
+    fs.writeFileSync(path.join(dir, 'folder', 'big.bin'), Buffer.alloc(256 * 1024, 7))
     fs.writeFileSync(path.join(dir, 'loose.bin'), Buffer.alloc(64 * 1024, 1))
     const manager = {
       isConnected: () => true,
@@ -101,12 +102,9 @@ describe('transfer:send upload of dropped items against a mock FTP server', () =
         const done = upserts().filter((j) => j.status === 'completed')
         expect(new Set(done.map((j) => j.id)).size).toBe(2)
       },
-      { timeout: 20_000, interval: 20 }
+      { timeout: 10_000, interval: 20 }
     )
     expect(new Set(upserts().map((j) => j.batchId))).toEqual(new Set([res.data.batchId]))
     expect([...server.stored.keys()].sort()).toEqual(['/dest/folder/big.bin', '/dest/loose.bin'])
-    expect(upserts().some((j) => j.transferredBytes > 0 && j.transferredBytes < j.totalBytes)).toBe(
-      true
-    )
-  }, 30_000)
+  })
 })
