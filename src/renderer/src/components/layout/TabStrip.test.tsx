@@ -144,3 +144,47 @@ describe('TabStrip — spring while dragging', () => {
     expect(activeTab().loc.path).toBe('/photos/sub')
   })
 })
+
+describe('TabStrip — the new-tab menu opened by a real click', () => {
+  // act 밖의 네이티브 click. jsdom에는 리스너 사이 마이크로태스크 체크포인트가 없어 이 테스트는
+  // 고치기 전에도 통과한다(회귀 방어, explorer-menu-and-focus §8 함정 1). RED 증거는 R3 (a).
+  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  let saved: boolean | undefined
+  beforeEach(() => {
+    h = setupExplorer()
+    useTabsStore.getState().openTab(localLoc('C:\\work'))
+    saved = env.IS_REACT_ACT_ENVIRONMENT
+    env.IS_REACT_ACT_ENVIRONMENT = false
+  })
+  afterEach(() => {
+    env.IS_REACT_ACT_ENVIRONMENT = saved
+  })
+  const nativeClick = (el: Element): void => {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+  }
+  /** 비동기 openMenu(`await loadPlaces()`)와 그 뒤의 렌더가 끝나도록 매크로태스크 몇 번을 넘긴다. */
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0))
+  }
+
+  it('keeps the + menu open, closes it on an outside click and duplicates the tab from it', async () => {
+    // covers: Test-850
+    render(<TabStrip />)
+    const plus = screen.getByRole('button', { name: en['tabs.new'] })
+    nativeClick(plus)
+    await settle()
+    expect(screen.getByRole('menu', { name: en['tabs.new'] })).toBeTruthy()
+
+    nativeClick(document.body)
+    await settle()
+    expect(screen.queryByRole('menu')).toBeNull()
+
+    nativeClick(plus)
+    await settle()
+    const menu = screen.getByRole('menu', { name: en['tabs.new'] })
+    nativeClick(within(menu).getByRole('menuitem', { name: new RegExp(en['tabs.duplicate']) }))
+    await settle()
+    expect(paths()).toEqual(['C:\\work', 'C:\\work'])
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+})

@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushSync } from 'react-dom'
 import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
@@ -157,5 +158,52 @@ describe('PathBar — dropping on a crumb', () => {
     fireEvent.drop(root, { dataTransfer: dt() })
     await flush()
     expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([['/a/b/c/x.jpg', '/x.jpg']])
+  })
+})
+
+// ---------- 메뉴를 연 click이 그 메뉴를 닫지 않는다(explorer-menu-and-focus M1) ----------
+
+describe('PathBar — menus opened by a real click stay open', () => {
+  // act 밖의 네이티브 click(§8 함정 1). 브라우저는 사용자 click의 리스너가 하나 끝날 때마다
+  // 마이크로태스크 체크포인트를 돌아 React가 미뤄 둔 동기 렌더·effect가 전파 도중에 끝난다.
+  // jsdom의 dispatchEvent에는 그 체크포인트가 없어서, React 루트(본문 안 컨테이너)와 document
+  // 사이인 body의 버블 리스너에서 flushSync()로 같은 시점을 만든다. 호출처 코드는 그대로다(M2).
+  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  let saved: boolean | undefined
+  const checkpoint = (): void => flushSync(() => undefined)
+  beforeEach(() => {
+    saved = env.IS_REACT_ACT_ENVIRONMENT
+    env.IS_REACT_ACT_ENVIRONMENT = false
+    document.body.addEventListener('click', checkpoint)
+  })
+  afterEach(() => {
+    document.body.removeEventListener('click', checkpoint)
+    env.IS_REACT_ACT_ENVIRONMENT = saved
+  })
+  const nativeClick = (el: Element): void => {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+  }
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+
+  it('keeps the sort menu open after clicking the sort button', async () => {
+    // covers: Test-848
+    nativeClick(screen.getByRole('button', { name: en['sort.label'] }))
+    await settle()
+    const sort = screen.getByRole('menu', { name: en['sort.label'] })
+    expect(within(sort).getByRole('menuitem', { name: en['file.size'] })).toBeTruthy()
+
+    nativeClick(document.body)
+    await settle()
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('keeps the hidden-crumbs menu open after clicking "…" and navigates from it', async () => {
+    // covers: Test-849
+    nativeClick(within(pathNav()).getByRole('button', { name: en['path.hidden'] }))
+    await settle()
+    const hidden = screen.getByRole('menu', { name: en['path.hidden'] })
+    nativeClick(within(hidden).getByRole('menuitem', { name: 'a' }))
+    await settle()
+    expect(activeTab().loc.path).toBe('/a')
   })
 })
