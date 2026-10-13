@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent } from '@testing-library/react'
 import { useDnd } from '@renderer/components/explorer/dnd'
@@ -66,7 +66,7 @@ describe('installDropGuard', () => {
   it('is what main.tsx installs, once, with no raw document drag listeners left', () => {
     // covers: Test-883
     // main.tsx는 부트스트랩이라 import하면 앱이 렌더된다. 소스 문자열로만 고정한다.
-    const source = readFileSync(join(process.cwd(), 'src/renderer/src/main.tsx'), 'utf8')
+    const source = readFileSync(resolve(__dirname, '../main.tsx'), 'utf8')
 
     expect(source.match(/installDropGuard\(document\)/g)).toHaveLength(1)
     expect(source).not.toContain("addEventListener('dragover'")

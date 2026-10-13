@@ -373,34 +373,46 @@ describe('Shelf — OS drops', () => {
     useTabsStore.getState().openTab(remoteLoc('/dst'))
     render(<Shelf />)
 
-    const folder = osFile('docs', 'C:\\in\\docs')
-    // 실제 폴더 항목은 크기가 0이 아니다. 합계에 더하면 안 된다
-    statOf(local('C:\\in', 'docs', { dir: true, size: 4096 }))
-    fireEvent.drop(target(), { dataTransfer: dt(['Files'], [folder]) })
-    await waitFor(() => expect(shelfNames()).toEqual(['docs']))
+    const folder = new File(['x'], 'docs')
+    const photo = new File(['x'], 'a.jpg')
+    const paths: Record<string, string> = { docs: 'C:\\in\\docs', 'a.jpg': 'C:\\in\\a.jpg' }
+    h.api.getPathForFile.mockImplementation((f: File) => paths[f.name] ?? '')
+    // 실제 폴더 항목은 크기가 0이 아니다. 합계에는 파일(100 B)만 더해져야 한다
+    statOf(
+      local('C:\\in', 'docs', { dir: true, size: 4096 }),
+      local('C:\\in', 'a.jpg', { size: 100 })
+    )
+    fireEvent.drop(target(), { dataTransfer: dt(['Files'], [folder, photo]) })
+    await waitFor(() => expect(shelfNames()).toEqual(['docs', 'a.jpg']))
     expect(row('docs').getAttribute('aria-label')).toBe(
       `docs, ${en['sidebar.thisPc']}, ${en['send.folderContents']}`
     )
-    expect(screen.getByText('0 B')).toBeTruthy()
+    expect(screen.getByText('100 B')).toBeTruthy()
     expect(screen.queryByText('4 KB')).toBeNull()
 
-    // 원격 탭: 폴더 경로 하나를 업로드로 보내고, 성공하면 선반이 빈다
-    fireEvent.click(screen.getByRole('button', { name: /^Upload 1 to dst\s*→/ }))
+    // 원격 탭: 폴더와 파일 경로를 업로드로 보내고, 성공하면 선반이 빈다
+    fireEvent.click(screen.getByRole('button', { name: /^Upload 2 to dst\s*→/ }))
     await waitFor(() => expect(shelfNames()).toEqual([]))
     expect(invokeCalls(h.invoke, 'transfer:send')).toEqual([
-      [{ direction: 'upload', sources: ['C:\\in\\docs'], destDir: '/dst' }]
+      [
+        {
+          direction: 'upload',
+          sources: ['C:\\in\\docs', 'C:\\in\\a.jpg'],
+          destDir: '/dst'
+        }
+      ]
     ])
 
     // 로컬 탭: local:copyFiles로 복사한다
-    fireEvent.drop(target(), { dataTransfer: dt(['Files'], [folder]) })
-    await waitFor(() => expect(shelfNames()).toEqual(['docs']))
+    fireEvent.drop(target(), { dataTransfer: dt(['Files'], [folder, photo]) })
+    await waitFor(() => expect(shelfNames()).toEqual(['docs', 'a.jpg']))
     act(() => {
       useTabsStore.getState().openTab(localLoc('C:\\dl'))
     })
-    fireEvent.click(await screen.findByRole('button', { name: /^Copy 1 to dl\s*→/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Copy 2 to dl\s*→/ }))
     await waitFor(() => expect(shelfNames()).toEqual([]))
     expect(invokeCalls(h.invoke, 'local:copyFiles')).toEqual([
-      [['C:\\in\\docs'], 'C:\\dl', ['docs']]
+      [['C:\\in\\docs', 'C:\\in\\a.jpg'], 'C:\\dl', ['docs', 'a.jpg']]
     ])
   })
 })
