@@ -18,7 +18,6 @@ import { McpService } from './mcp/McpService'
 import { createMcpToolServer, type McpToolDeps } from './mcp/mcpTools'
 import { createJobTracker } from './mcp/jobTracker'
 import { createThumbnailPreviewer } from './mcp/thumbnailPreviews'
-import { CurrentConnection } from './mcp/currentConnection'
 import { ConnectionRegistry, createSession } from './ftp/ConnectionRegistry'
 import { RemoteFolderPreviewCache } from './ftp/RemoteFolderPreviewCache'
 import { TransferHub } from './transfer/TransferHub'
@@ -154,18 +153,17 @@ app.whenReady().then(() => {
   registerAppHandlers()
 
   // 에이전트(내장 MCP 서버, ftpb)는 GUI와 같은 연결·전송 큐·파일 작업·썸네일 캐시를 쓴다(기본 꺼짐).
-  // 도구는 아직 연결 하나만 본다(CurrentConnection, S5에서 대상 연결 고르기로 바뀐다).
-  const current = new CurrentConnection(registry, hub)
+  // 도구마다 대상 연결을 고른다(server 인자, 마지막 사용 연결, 유일한 연결 — multi-connection MC18).
   const agentDeps: McpToolDeps = {
     version: app.getVersion(),
     db,
-    ftp: current,
-    fileOps: current,
-    queue: current,
+    connections: registry,
+    transfers: hub,
+    target: {},
     operations: operationManager,
     localFs,
     passwords,
-    previews: createThumbnailPreviewer(current, generator, cacheManager),
+    previews: createThumbnailPreviewer(registry, generator, cacheManager),
     jobs: createJobTracker(hub, operationManager),
     onSession: (event) => {
       if (!win.isDestroyed()) win.webContents.send('agent:session', event)

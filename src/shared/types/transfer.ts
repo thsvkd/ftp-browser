@@ -16,6 +16,8 @@ export interface TransferJob {
   batchId?: string
   /** 이 작업이 도는 연결(multi-connection MC7). 큐가 만들 때 넣는다. */
   server: ConnKey
+  /** 서버 간 전송만: 보내는 쪽 연결(multi-connection MC7). 그 밖에는 없다 */
+  sourceServer?: ConnKey
   direction: TransferDirection
   localPath: string
   remotePath: string

@@ -149,9 +149,13 @@ before running it; approval is left to the agent tool (Claude Code, Codex…).
 - `mcpTools.ts`: the 12 tools in one `TOOLS` list. `risk` (read · write · upload · delete) builds both
   the `[RISK: …]` first description line and the annotations. Tools call the app services
   (`AgentDeps`) through `agentOps.ts` (connect, rename, delete, download/upload planning);
-  `jobTracker.ts` remembers finished jobs for `wait_for_jobs`; `thumbnailPreviews.ts` is the single
-  preview queue. Errors are `CODE: message next-step` isError results. A new tool goes into `TOOLS`,
-  the §2 table of the spec and Test-450 (`TOOL_COUNT` in `McpService.test.ts`).
+  `jobTracker.ts` remembers finished jobs for `wait_for_jobs`; `thumbnailPreviews.ts` keeps one
+  preview queue per connection. Errors are `CODE: message next-step` isError results. A new tool
+  goes into `TOOLS`, the §2 table of the spec and Test-450 (`TOOL_COUNT` in `McpService.test.ts`).
+- Target connection (`agentTarget.ts`, multi-connection MC18): the remote tools and `disconnect`
+  take an optional `server`; without it they use the connection the agent last connected or named
+  while still connected, else the only one; none is `NOT_CONNECTED`, two or more `AMBIGUOUS`.
+  `connect` adds a connection and never logs in again to one already connected.
 - GUI sync: `ftp:remoteChanged` (every FTP mutation, `ftpHandlers.ts`) and `agent:session`
   (connect/disconnect) feed `useAgentSync`.
 - `ftpb` (`src/main/cli/`): a dependency-free MCP client of the same endpoint (one POST per request

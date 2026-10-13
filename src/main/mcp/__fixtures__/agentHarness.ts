@@ -7,10 +7,11 @@ import { vi } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createMcpHandler } from '@modelcontextprotocol/server'
 import { isImageFile } from '@shared/constants'
-import { connKey } from '@shared/connKey'
+import { connKey, parseConnKey, type ConnKey } from '@shared/connKey'
 import type {
   ConnectionStatus,
   FtpConnectPayload,
+  FtpConnectionState,
   FtpFileEntry,
   FtpListResult
 } from '@shared/types/ftp'
@@ -110,6 +111,12 @@ export class FakeRemote extends EventEmitter {
   getPort = (): number => this.port
   getUser = (): string => this.user
   getConnKey = (): string => connKey(this.host, this.port, this.user)
+  /** 연결이 끊긴 상태로 둔다(`disconnect` 호출 기록은 남기지 않는다) */
+  setOffline(): this {
+    this.connected = false
+    this.status = 'disconnected'
+    return this
+  }
 
   mkdir = vi.fn(async (dir: string) => {
     if (!this.ignoreMkd) {
@@ -162,6 +169,12 @@ export class FakeRemote extends EventEmitter {
 /** TransferQueue의 공개 API만 흉내 낸다. 상태는 finish로 바꾸고 queue:updated를 낸다. */
 export class FakeQueue extends EventEmitter {
   jobs: TransferJob[] = []
+
+  /** 작업의 `server`. 실제 큐처럼 생성자 옵션으로 받는다. */
+  constructor(private server: ConnKey = FAKE_SERVER) {
+    super()
+  }
+
   // 실제 큐처럼 여러 항목이거나 forceBatch면 묶음 id를 붙인다. remoteDirs·options는 mock.calls로 본다.
   enqueueBatch = vi.fn(
     (direction: TransferDirection, items: TransferEnqueueItem[], forceBatch = false): string[] => {
@@ -169,7 +182,7 @@ export class FakeQueue extends EventEmitter {
       const added = items.map((item) => ({
         id: randomUUID(),
         batchId,
-        server: FAKE_SERVER,
+        server: this.server,
         direction,
         ...item,
         transferredBytes: 0,
@@ -184,7 +197,7 @@ export class FakeQueue extends EventEmitter {
   add(fields: Partial<TransferJob> = {}): TransferJob {
     const job: TransferJob = {
       id: randomUUID(),
-      server: FAKE_SERVER,
+      server: this.server,
       direction: 'download',
       localPath: '/tmp/x',
       remotePath: '/x',
@@ -211,40 +224,108 @@ export class FakeQueue extends EventEmitter {
   }
 }
 
+/** 세션 큐들을 이어 붙여 보이는 TransferHub 가짜. 큐들의 `queue:updated`를 다시 낸다. */
+export class FakeHub extends EventEmitter {
+  private queues: FakeQueue[] = []
+
+  add(queue: FakeQueue): void {
+    this.queues.push(queue)
+    queue.on('queue:updated', (update: TransferUpdate) => this.emit('queue:updated', update))
+  }
+  getAll = (): TransferJob[] => this.queues.flatMap((queue) => queue.getAll())
+}
+
+/**
+ * ConnectionRegistry 가짜. 키마다 `FakeRemote`(매니저·파일 작업) 하나와 `FakeQueue` 하나가 세션이다.
+ * `connect`는 그 키의 세션을 만들고(처음엔 끊김) 늘 그 `FakeRemote.connect`로 로그인한다. 이미 연결된
+ * 세션에 다시 로그인하지 않는 것은 실제 레지스트리와 agentOps가 한다.
+ */
+export class FakeConnections {
+  remotes = new Map<ConnKey, FakeRemote>()
+  queues = new Map<ConnKey, FakeQueue>()
+
+  constructor(private hub: FakeHub) {}
+
+  connect = vi.fn(async (payload: FtpConnectPayload) => {
+    const key = connKey(payload.host, payload.port, payload.user)
+    if (!this.remotes.has(key)) this.add(key).setOffline()
+    return { server: key, ...(await this.remotes.get(key)!.connect(payload)) }
+  })
+  disconnect = vi.fn(async (key: ConnKey) => {
+    await this.remotes.get(key)?.disconnect()
+  })
+
+  get(
+    key: ConnKey
+  ): { key: ConnKey; manager: FakeRemote; fileOps: FakeRemote; queue: FakeQueue } | undefined {
+    const remote = this.remotes.get(key)
+    return remote && { key, manager: remote, fileOps: remote, queue: this.queues.get(key)! }
+  }
+  connectedKeys(): ConnKey[] {
+    return [...this.remotes].filter(([, remote]) => remote.isConnected()).map(([key]) => key)
+  }
+  states(): FtpConnectionState[] {
+    return [...this.remotes].map(([server, remote]) => {
+      const { host, port, user } = parseConnKey(server)!
+      return { server, status: remote.getStatus(), host, port, user }
+    })
+  }
+
+  /** 연결된 세션 하나를 더한다(키의 host·port·user를 갖는다). */
+  add(key: ConnKey): FakeRemote {
+    const { host, port, user } = parseConnKey(key)!
+    const remote = new FakeRemote()
+    Object.assign(remote, { host, port, user })
+    const queue = new FakeQueue(key)
+    this.remotes.set(key, remote)
+    this.queues.set(key, queue)
+    this.hub.add(queue)
+    return remote
+  }
+}
+
 export interface Harness {
   deps: McpToolDeps
   db: Database.Database
+  /** 기본 세션(`me@nas.local:21`, 연결됨)의 원격과 큐 */
   remote: FakeRemote
   queue: FakeQueue
+  connections: FakeConnections
+  hub: FakeHub
   operations: OperationManager
   sessions: ReturnType<typeof vi.fn>
 }
 
-/** 도구 deps를 가짜 FTP·큐와 실제 OperationManager·DB·비밀번호 금고로 채운다. */
+/**
+ * 도구 deps를 가짜 연결·큐와 실제 OperationManager·DB·비밀번호 금고로 채운다. 기본은 연결된 세션
+ * 하나(multi-connection 규칙 ③으로 인자 없는 도구가 그 연결을 쓴다). 세션은 `connections.add`로 더한다.
+ */
 export function createHarness(overrides: Partial<McpToolDeps> = {}): Harness {
   const db = createTestDb()
-  const remote = new FakeRemote()
-  const queue = new FakeQueue()
+  const hub = new FakeHub()
+  const connections = new FakeConnections(hub)
+  const remote = connections.add(FAKE_SERVER)
+  const queue = connections.queues.get(FAKE_SERVER)!
   const operations = new OperationManager()
   const sessions = vi.fn()
   const deps: McpToolDeps = {
     version: '0.0.0-test',
     db,
-    ftp: remote,
-    fileOps: remote,
-    queue,
+    connections,
+    transfers: hub,
+    target: {},
     operations,
     localFs: { collectFiles: vi.fn(async () => []) },
     passwords: createPasswordVault(db, new FakeCipher()),
     onSession: sessions,
-    previews: vi.fn(async (requests) =>
+    previews: vi.fn(async (_conn: ConnKey, requests) =>
       requests.map(() => ({ ok: true as const, data: 'AAAA', width: 40, height: 30 }))
     ),
-    jobs: createJobTracker(queue, operations),
+    jobs: createJobTracker(hub, operations),
     platform: 'linux',
     ...overrides
   }
-  return { deps, db, remote, queue, operations, sessions }
+  return { deps, db, remote, queue, connections, hub, operations, sessions }
 }
 
 /** 저장된 서버 하나를 넣고 id를 돌려준다. 비밀번호는 평문 열에 둔다(금고가 그대로 읽는다). */

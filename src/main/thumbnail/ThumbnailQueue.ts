@@ -26,7 +26,7 @@ export interface ThumbnailResult {
   fromCache: boolean
 }
 
-/** 썸네일을 받는 연결. 세션의 매니저, 또는 MCP 미리보기의 지금 연결(S1 currentConnection) */
+/** 썸네일을 받는 연결(세션의 매니저) */
 export type ThumbnailSource = Pick<
   FtpConnectionManager,
   'getHost' | 'getPort' | 'getConnKey' | 'createSecondaryClient' | 'runOnMainClient'

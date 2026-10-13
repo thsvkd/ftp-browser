@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'fs/promises'
+import os from 'os'
+import path from 'path'
 import type { Client } from '@modelcontextprotocol/client'
 import { AgentError } from './agentOps'
 import {
@@ -109,7 +112,7 @@ describe('read tools', () => {
     const result = await call(client, 'get_status')
 
     expect(dataOf(result)).toMatchObject({
-      connection: { status: 'connected', serverId: id, host: 'nas.local', port: 21, user: 'me' }
+      connections: [{ status: 'connected', serverId: id, host: 'nas.local', port: 21, user: 'me' }]
     })
     expect(JSON.stringify(result)).not.toMatch(/password|hunter2/i)
   })
@@ -129,7 +132,7 @@ describe('read tools', () => {
     const offline = dataOf(await call(client, 'get_status'))
 
     expect(connected.jobs).toEqual({ pending: 1, active: 2, completed: 1, failed: 1, cancelled: 0 })
-    expect(offline.connection).toEqual({ status: 'disconnected' })
+    expect(offline.connections).toEqual([expect.objectContaining({ status: 'disconnected' })])
   })
 
   it('list_directory sorts folders first by name and pages through every entry once', async () => {
@@ -229,7 +232,7 @@ describe('read tools', () => {
     expect(previews[0]).toMatchObject({ width: 40, height: 30, size: 100 })
     expect(previews[4].error).toMatch(/^FTP_PERMISSION_DENIED: /)
     // 크기·수정시각은 부모 목록에서 얻어 앱 썸네일 파이프라인에 넘긴다
-    expect(h.deps.previews).toHaveBeenCalledWith([
+    expect(h.deps.previews).toHaveBeenCalledWith('me@nas.local:21', [
       { remotePath: '/p/a.jpg', fileSize: 100, modifiedAt: at },
       { remotePath: '/p/b.png', fileSize: 7, modifiedAt: at }
     ])
@@ -368,6 +371,8 @@ describe('errors and safety', () => {
       ['upload', { localPaths: ['/no/such/file'], remoteDir: '/p' }],
       ['disconnect', {}]
     ] as const) {
+      // 연결된 서버에는 다시 로그인하지 않으므로 connect는 끊긴 상태에서 부른다
+      if (name === 'connect') h.remote.setOffline()
       seen.push(JSON.stringify(await call(client, name, args)))
     }
 
@@ -438,5 +443,169 @@ describe('errors and safety', () => {
     expect(result.isError).toBe(true)
     expect(textOf(result)).toMatch(/timeoutSec/)
     expect(wait).not.toHaveBeenCalled()
+  })
+})
+
+describe('several connections', () => {
+  const A = 'me@nas.local:21'
+  const B = 'kim@ftp.office.lan:2121'
+  const PASS_SERVER = 'Pass server when more than one server is connected'
+
+  it('list_directory without server fails with AMBIGUOUS naming each connection when two are connected', async () => {
+    // covers: Test-1004
+    h.connections.add(B)
+    const office = addServer(h.db, {
+      name: 'Office',
+      host: 'ftp.office.lan',
+      port: 2121,
+      user: 'kim'
+    })
+
+    const result = await call(client, 'list_directory', { path: '/' })
+
+    expect(result.isError).toBe(true)
+    expect(textOf(result)).toBe(
+      `AMBIGUOUS: 2 servers are connected: nas.local (${A}), Office (id ${office}, ${B}). ` +
+        'Pass server with an id, name or host from list_servers.'
+    )
+    expect(h.remote.list).not.toHaveBeenCalled()
+    expect(h.connections.remotes.get(B)!.list).not.toHaveBeenCalled()
+  })
+
+  it('get_status lists every connection with its saved server and the job totals, never a password', async () => {
+    // covers: Test-1007
+    const b = h.connections.add(B)
+    const nas = addServer(h.db, { name: 'NAS', host: 'nas.local', password: 'hunter2' })
+    const office = addServer(h.db, {
+      name: 'Office',
+      host: 'ftp.office.lan',
+      port: 2121,
+      user: 'kim',
+      password: 'hunter3'
+    })
+    b.setOffline()
+    h.deps.target.last = A
+    h.queue.add({ status: 'active' })
+    h.connections.queues.get(B)!.add({ status: 'failed' })
+    h.operations.create('delete', { itemCount: 1, server: B }, 'files', 1)
+
+    const result = await call(client, 'get_status')
+
+    expect(dataOf(result)).toEqual({
+      connections: [
+        {
+          server: A,
+          serverId: nas,
+          name: 'NAS',
+          host: 'nas.local',
+          port: 21,
+          user: 'me',
+          status: 'connected',
+          lastUsed: true
+        },
+        {
+          server: B,
+          serverId: office,
+          name: 'Office',
+          host: 'ftp.office.lan',
+          port: 2121,
+          user: 'kim',
+          status: 'disconnected',
+          lastUsed: false
+        }
+      ],
+      jobs: { pending: 0, active: 2, completed: 0, failed: 1, cancelled: 0 }
+    })
+    expect(JSON.stringify(result)).not.toMatch(/password|hunter/i)
+  })
+
+  it('takes an optional server on every remote tool and disconnect, with the connect schema', async () => {
+    // covers: Test-1008
+    const { tools } = await client.listTools()
+    const serverOf = (name: string): Record<string, unknown> => {
+      const schema = tools.find((t) => t.name === name)!.inputSchema
+      return (schema.properties as Record<string, Record<string, unknown>>).server
+    }
+    const withoutDescription = (schema: Record<string, unknown>): unknown => {
+      const rest = { ...schema }
+      delete rest.description
+      return rest
+    }
+    const connect = serverOf('connect')
+
+    expect(tools).toHaveLength(12)
+    expect(connect.anyOf).toEqual([
+      expect.objectContaining({ type: 'integer' }),
+      expect.objectContaining({ type: 'string' })
+    ])
+    for (const name of [
+      'list_directory',
+      'get_image_previews',
+      'create_directory',
+      'rename',
+      'download',
+      'upload',
+      'delete',
+      'disconnect'
+    ]) {
+      const tool = tools.find((t) => t.name === name)!
+      expect(withoutDescription(serverOf(name)), name).toEqual(withoutDescription(connect))
+      expect(tool.inputSchema.required ?? [], name).not.toContain('server')
+      expect(serverOf(name).description, name).toContain(PASS_SERVER)
+    }
+    expect(client.getInstructions()).toContain(PASS_SERVER)
+    expect(client.getInstructions()).not.toContain('its one FTP connection')
+  })
+
+  it('runs every remote tool on the server it names, never on the other connection', async () => {
+    // covers: Test-1009
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-tools-'))
+    try {
+      const b = h.connections.add(B)
+      const bQueue = h.connections.queues.get(B)!
+      const created = vi.spyOn(h.operations, 'create')
+      h.remote.addDir('/p').addFile('/p/a.jpg', 10).addFile('/x.txt')
+      b.addDir('/p').addFile('/p/a.jpg', 20, '2026-01-01T00:00:00.000Z').addFile('/x.txt')
+      await fs.writeFile(path.join(tmp, 'up.txt'), 'up')
+
+      const listed = dataOf<ListPage>(
+        await call(client, 'list_directory', { path: '/p', server: B })
+      )
+      await call(client, 'get_image_previews', { paths: ['/p/a.jpg'], server: B })
+      dataOf(
+        await call(client, 'download', { remotePaths: ['/p/a.jpg'], localDir: tmp, server: B })
+      )
+      dataOf(
+        await call(client, 'upload', {
+          localPaths: [path.join(tmp, 'up.txt')],
+          remoteDir: '/p',
+          server: B
+        })
+      )
+      dataOf(await call(client, 'delete', { paths: ['/x.txt'], server: B }))
+
+      expect(listed.entries.map((e) => e.name)).toEqual(['a.jpg'])
+      expect(h.deps.previews).toHaveBeenCalledWith(B, [
+        { remotePath: '/p/a.jpg', fileSize: 20, modifiedAt: '2026-01-01T00:00:00.000Z' }
+      ])
+      expect(bQueue.jobs.map((j) => [j.direction, j.server, j.totalBytes])).toEqual([
+        ['download', B, 20],
+        ['upload', B, 2]
+      ])
+      expect(h.queue.enqueueBatch).not.toHaveBeenCalled()
+      expect(created).toHaveBeenCalledWith(
+        'delete',
+        expect.objectContaining({ server: B }),
+        'files',
+        1
+      )
+      expect(b.deleteFile).toHaveBeenCalledWith('/x.txt')
+      expect(h.remote.nodes.has('/x.txt')).toBe(true)
+      for (const fn of [h.remote.list, h.remote.deleteFile, h.remote.mkdir]) {
+        expect(fn).not.toHaveBeenCalled()
+      }
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true })
+    }
   })
 })

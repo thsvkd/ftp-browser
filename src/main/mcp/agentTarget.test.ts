@@ -1,0 +1,105 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { AgentError } from './agentOps'
+import { resolveTarget } from './agentTarget'
+import { addServer, createHarness, type Harness } from './__fixtures__/agentHarness'
+
+const A = 'me@nas.local:21'
+const B = 'kim@ftp.office.lan:2121'
+
+let h: Harness
+
+beforeEach(() => {
+  h = createHarness()
+})
+
+afterEach(() => {
+  h.db.close()
+})
+
+/** resolveTarget가 던진 AgentError(코드·문구) */
+function failure(server?: number | string): AgentError {
+  try {
+    resolveTarget(h.deps, server)
+  } catch (err) {
+    if (err instanceof AgentError) return err
+    throw err
+  }
+  throw new Error('resolveTarget did not fail')
+}
+
+describe('resolveTarget — the server argument (rule 1)', () => {
+  it('picks a connection by its key, a saved id, alias or host, and names a saved server that is not connected', () => {
+    // covers: Test-1002
+    h.connections.add(B)
+    const office = addServer(h.db, {
+      name: 'Office',
+      host: 'ftp.office.lan',
+      port: 2121,
+      user: 'kim'
+    })
+    const nas = addServer(h.db, { name: 'NAS', host: 'nas.local', user: 'me' })
+
+    expect(resolveTarget(h.deps, 'KIM@FTP.Office.lan:2121')).toBe(B)
+    expect(resolveTarget(h.deps, office)).toBe(B)
+    expect(resolveTarget(h.deps, String(nas))).toBe(A)
+    expect(resolveTarget(h.deps, 'office')).toBe(B)
+    expect(resolveTarget(h.deps, 'NAS.local')).toBe(A)
+    expect(resolveTarget(h.deps, 'ftp.office.lan:2121')).toBe(B)
+
+    // 저장 행의 사용자와 다른 연결만 있으면 그 host:port의 유일한 연결
+    const backup = addServer(h.db, { name: 'Backup', host: 'backup.lan', user: 'admin' })
+    h.connections.add('guest@backup.lan:21')
+    expect(resolveTarget(h.deps, backup)).toBe('guest@backup.lan:21')
+
+    // 저장돼 있지만 연결 안 됨
+    const media = addServer(h.db, { name: 'Media', host: 'media.lan', user: 'me' })
+    const offline = failure('Media')
+    expect(offline.code).toBe('NOT_CONNECTED')
+    expect(offline.message).toContain('Media')
+    expect(offline.message).toMatch(new RegExp(`Call connect with server ${media}`))
+
+    // 모르는 이름은 지금 NOT_FOUND 문구
+    const missing = failure('nowhere')
+    expect(missing.code).toBe('NOT_FOUND')
+    expect(missing.message).toMatch(/^No saved server matches "nowhere"\. Saved servers: /)
+  })
+})
+
+describe('resolveTarget — the last used connection (rule 2)', () => {
+  it('defaults to the connection the agent last connected or picked, while it stays connected', () => {
+    // covers: Test-1003
+    h.connections.add(B)
+    addServer(h.db, { name: 'NAS', host: 'nas.local', user: 'me' })
+    h.deps.target.last = B
+
+    expect(resolveTarget(h.deps)).toBe(B)
+
+    expect(resolveTarget(h.deps, 'NAS')).toBe(A)
+    expect(resolveTarget(h.deps)).toBe(A)
+    expect(h.deps.target.last).toBe(A)
+
+    // 마지막 사용 연결이 끊기면 무시하고 규칙 3(연결 하나면 그것)으로
+    h.remote.setOffline()
+    expect(resolveTarget(h.deps)).toBe(B)
+  })
+})
+
+describe('resolveTarget — no argument and no last connection (rules 3 and 4)', () => {
+  it('uses the only connection, and fails with NOT_CONNECTED or AMBIGUOUS otherwise', () => {
+    // covers: Test-1004
+    expect(resolveTarget(h.deps)).toBe(A)
+
+    h.remote.setOffline()
+    const none = failure()
+    expect(none.code).toBe('NOT_CONNECTED')
+    expect(none.message).toBe('FTP Browser is not connected to an FTP server.')
+
+    h.remote.connected = true
+    h.remote.status = 'connected'
+    h.connections.add(B)
+    const id = addServer(h.db, { name: 'Office', host: 'ftp.office.lan', port: 2121, user: 'kim' })
+    const both = failure()
+    expect(both.code).toBe('AMBIGUOUS')
+    expect(both.message).toBe(`2 servers are connected: nas.local (${A}), Office (id ${id}, ${B}).`)
+  })
+})

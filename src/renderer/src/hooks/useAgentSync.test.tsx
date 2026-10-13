@@ -292,3 +292,53 @@ describe('useAgentSync — agent sessions', () => {
     expect(tabPath(id)).toBe('/photos')
   })
 })
+
+describe('useAgentSync — several connections', () => {
+  it('applies remote changes and agent sessions to their own server only', async () => {
+    // covers: Test-1029
+    vi.useFakeTimers()
+    const B = OFFICE_KEY
+    const onB = (path: string): Loc => ({ side: 'remote', path, server: B })
+    useFtpStore.getState().adoptSession({
+      server: B,
+      status: 'connected',
+      host: 'ftp.office.lan',
+      port: 2121,
+      user: 'kim'
+    })
+    renderHook(() => useAgentSync())
+    const tabA = openRemote('/x')
+    const tabB = useTabsStore.getState().openTab(onB('/x'))
+    const local = useTabsStore.getState().openTab({ side: 'local', path: '/x' })
+    useListingStore.getState().put(remote('/'), [])
+    useListingStore.getState().put(onB('/'), [])
+
+    emit('ftp:remoteChanged', { server: B, kind: 'delete', remotePath: '/x' })
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(tabPath(tabB)).toBe('/')
+    expect(tabPath(tabA)).toBe('/x')
+    expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([[B, '/']])
+
+    // 에이전트 해제·연결은 B 항목만 바꾸고, B의 탭을 그 폴더로(활성 탭은 그대로)
+    emit('agent:session', { server: B, status: 'disconnected' })
+    expect(useFtpStore.getState().connections[B].status).toBe('disconnected')
+    expect(useFtpStore.getState().connections[SERVER].status).toBe('connected')
+
+    emit('agent:session', {
+      server: B,
+      status: 'connected',
+      host: 'ftp.office.lan',
+      port: 2121,
+      user: 'kim',
+      path: '/media'
+    })
+    const { connections } = useFtpStore.getState()
+    expect(connections[B]).toMatchObject({ status: 'connected', host: 'ftp.office.lan' })
+    expect(connections[SERVER]).toMatchObject({ status: 'connected', host: 'nas.local' })
+    expect(tabPath(tabB)).toBe('/media')
+    expect(tabPath(tabA)).toBe('/x')
+    expect(useTabsStore.getState().activeId).toBe(local)
+    await vi.advanceTimersByTimeAsync(0)
+  })
+})

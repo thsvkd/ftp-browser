@@ -7,11 +7,14 @@ import type { ThumbnailGenerator } from '../thumbnail/ThumbnailGenerator'
 import { createThumbnailPreviewer } from './thumbnailPreviews'
 import type { PreviewRequest } from './mcpTools'
 
+const KEY = 'me@ftp.example.com:21'
+const OTHER = 'kim@other.example.com:21'
+
 /**
  * 보조 FTP 연결 가짜. 열린 연결 수와 동시 다운로드 수의 최댓값을 센다.
  * `hold`가 켜져 있으면 다운로드가 `release()`까지 멈추고, close는 진행 중 다운로드를 실패시킨다.
  */
-function fakeFtp(): {
+function fakeFtp(key = KEY): {
   ftp: FtpConnectionManager
   stats: { created: number; open: number; maxOpen: number; active: number; maxActive: number }
   hold: { on: boolean; release: () => void }
@@ -26,7 +29,7 @@ function fakeFtp(): {
   const ftp = Object.assign(emitter, {
     getHost: () => 'ftp.example.com',
     getPort: () => 21,
-    getConnKey: () => 'me@ftp.example.com:21',
+    getConnKey: () => key,
     runOnMainClient: vi.fn(),
     createSecondaryClient: vi.fn(async () => {
       stats.created++
@@ -61,6 +64,18 @@ function fakeFtp(): {
   return { ftp: ftp as unknown as FtpConnectionManager, stats, hold }
 }
 
+/** ConnectionRegistry 가짜: 키마다 세션 하나, 연결 상태는 `server`를 붙여 낸다. */
+function fakeRegistry(...ftps: FtpConnectionManager[]): EventEmitter & {
+  get(key: string): { manager: FtpConnectionManager } | undefined
+} {
+  return Object.assign(new EventEmitter(), {
+    get: (key: string) => {
+      const manager = ftps.find((ftp) => ftp.getConnKey() === key)
+      return manager && { manager }
+    }
+  })
+}
+
 const generator = {
   getFormat: async () => 'jpeg',
   generate: async () => ({ buffer: Buffer.from('jpeg'), width: 4, height: 3 })
@@ -84,11 +99,11 @@ describe('MCP image previews', () => {
   it('uses one secondary connection at most, even for concurrent calls', async () => {
     // covers: Test-464
     const { ftp, stats } = fakeFtp()
-    const previews = createThumbnailPreviewer(ftp, generator, cache)
+    const previews = createThumbnailPreviewer(fakeRegistry(ftp), generator, cache)
 
     const [first, second] = await Promise.all([
-      previews(images('a', 3)),
-      previews([...images('b', 3), images('b', 1)[0]])
+      previews(KEY, images('a', 3)),
+      previews(KEY, [...images('b', 3), images('b', 1)[0]])
     ])
 
     expect(first.every((outcome) => outcome.ok)).toBe(true)
@@ -104,13 +119,14 @@ describe('MCP image previews', () => {
   it('fails the waiting previews and drops the connection when the FTP connection changes', async () => {
     // covers: Test-474
     const { ftp, stats, hold } = fakeFtp()
-    const previews = createThumbnailPreviewer(ftp, generator, cache)
+    const registry = fakeRegistry(ftp)
+    const previews = createThumbnailPreviewer(registry, generator, cache)
     hold.on = true
 
-    const running = previews(images('old', 2))
-    const queued = previews(images('old2', 1))
+    const running = previews(KEY, images('old', 2))
+    const queued = previews(KEY, images('old2', 1))
     await vi.waitFor(() => expect(stats.active).toBe(1))
-    ftp.emit('connectionStatus', { status: 'connecting', host: 'other.example.com' })
+    registry.emit('connectionStatus', { server: KEY, status: 'connecting' })
 
     for (const outcomes of [await running, await queued]) {
       for (const outcome of outcomes) {
@@ -121,8 +137,37 @@ describe('MCP image previews', () => {
 
     hold.on = false
     hold.release()
-    const fresh = await previews(images('new', 1))
+    const fresh = await previews(KEY, images('new', 1))
     expect(fresh).toEqual([{ ok: true, data: expect.any(String), width: 4, height: 3 }])
     expect(stats.created).toBe(2)
+  })
+})
+
+describe('MCP image previews on several connections', () => {
+  it('fails only the previews of the connection whose state changed, one secondary connection per session', async () => {
+    // covers: Test-1010
+    const a = fakeFtp(KEY)
+    const b = fakeFtp(OTHER)
+    const registry = fakeRegistry(a.ftp, b.ftp)
+    const previews = createThumbnailPreviewer(registry, generator, cache)
+    a.hold.on = true
+    b.hold.on = true
+
+    const onA = previews(KEY, images('a', 2))
+    const onB = previews(OTHER, images('b', 3))
+    await vi.waitFor(() => expect([a.stats.active, b.stats.active]).toEqual([1, 1]))
+    registry.emit('connectionStatus', { server: KEY, status: 'connecting' })
+    b.hold.on = false
+    b.hold.release()
+
+    expect(await onA).toEqual([
+      { ok: false, error: expect.stringMatching(/connection changed/i) },
+      { ok: false, error: expect.stringMatching(/connection changed/i) }
+    ])
+    expect(await onB).toEqual(
+      Array.from({ length: 3 }, () => ({ ok: true, data: expect.any(String), width: 4, height: 3 }))
+    )
+    expect([a.stats.maxOpen, b.stats.maxOpen]).toEqual([1, 1])
+    expect(b.stats.created).toBe(1)
   })
 })
