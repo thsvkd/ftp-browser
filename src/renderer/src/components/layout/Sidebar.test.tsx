@@ -202,6 +202,7 @@ describe('Sidebar — several connections', () => {
     useServerStore.setState({ servers: [OFFICE, NAS, ARCHIVE] })
     setConnection(OFFICE_KEY, 'connected')
     setConnection(NAS_KEY, 'connected')
+    setConnection('arc@archive.lan:21', 'error')
     setConnection('x@x.example:21', 'connected')
     setConnection('w@w.example:2121', 'connected')
     const recent: Record<string, string[]> = {
@@ -218,7 +219,9 @@ describe('Sidebar — several connections', () => {
 
     expect(place(/^Office/).querySelector('[data-status="connected"]')).toBeTruthy()
     expect(place(/^NAS/).querySelector('[data-status="connected"]')).toBeTruthy()
-    expect(place(/^Archive/).querySelector('[data-status="disconnected"]')).toBeTruthy()
+    // 끊긴(error) C는 연결 안 됨이 아니라 끊김 표시와 다시 연결 안내
+    expect(place(/^Archive/).querySelector('[data-status="error"]')).toBeTruthy()
+    expect(place(/^Archive/).textContent).toContain(en['sidebar.serverLost'])
     expect(invokeCalls(h.invoke, 'ftp:getRecentPaths')).toEqual(
       expect.arrayContaining([
         [OFFICE.host, OFFICE.port],
