@@ -7,7 +7,12 @@ import { ipcError } from '../utils/errorClassifier'
 import { MIME_MAP } from './previewHandlers'
 import { isImageFile, MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
 import { isSafeLocalName } from '@shared/entryName'
-import type { LocalListResult, LocalPlaces, UploadFileEntry } from '@shared/types/local'
+import type {
+  LocalFileEntry,
+  LocalListResult,
+  LocalPlaces,
+  UploadFileEntry
+} from '@shared/types/local'
 import type { DeleteTarget } from '@shared/types/operation'
 import type { IpcResult } from '@shared/types/ipc'
 
@@ -83,6 +88,12 @@ export function registerLocalFsHandlers(
 
   ipcMain.handle('local:getHome', (): IpcResult<string> => {
     return { success: true, data: localFs.getHomePath() }
+  })
+
+  // 인자는 신뢰하지 않으므로 unknown으로 받는다. statEntries가 던지지 않아 try/catch는 두지 않는다.
+  ipcMain.handle('local:stat', async (_e, paths: unknown): Promise<IpcResult<LocalFileEntry[]>> => {
+    if (!Array.isArray(paths)) return { success: false, error: 'paths must be an array' }
+    return { success: true, data: await localFs.statEntries(paths) }
   })
 
   ipcMain.handle('local:getPlaces', async (): Promise<IpcResult<LocalPlaces>> => {

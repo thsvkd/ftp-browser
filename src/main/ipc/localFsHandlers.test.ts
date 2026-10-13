@@ -271,4 +271,25 @@ describe('localFsHandlers', () => {
           expect(isSafeCopyName(name, platform)).toBe(false)
     })
   })
+
+  describe('local:stat', () => {
+    it('stats paths into LocalFileEntry items, skipping unreadable ones, and rejects non-arrays as a value', async () => {
+      // covers: Test-872
+      const file = path.join(tmpDir, 'a.txt')
+      await fs.writeFile(file, 'hello')
+
+      const result = (await handler('local:stat')(null, [file, path.join(tmpDir, 'nope')])) as {
+        success: true
+        data: Array<{ path: string; name: string; type: string; size: number }>
+      }
+
+      expect(result.success).toBe(true)
+      expect(result.data).toHaveLength(1)
+      expect(result.data[0]).toMatchObject({ path: file, name: 'a.txt', type: 'file', size: 5 })
+      expect(await handler('local:stat')(null, 'x')).toEqual({
+        success: false,
+        error: 'paths must be an array'
+      })
+    })
+  })
 })

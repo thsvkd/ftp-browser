@@ -29,6 +29,7 @@ const INVOKE_CHANNELS = [
   'local:rename',
   'local:mkdir',
   'local:getPlaces',
+  'local:stat',
   'local:preview',
   // App
   'app:setTheme',

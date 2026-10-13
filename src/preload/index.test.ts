@@ -147,6 +147,17 @@ describe('preload api', () => {
     }
   })
 
+  it('should allow stating dropped paths', async () => {
+    // covers: Test-873
+    // 렌더러 테스트는 window.api를 목으로 바꾸므로 허용 목록 누락은 여기서만 잡힌다.
+    const api = await loadExposedApi()
+    const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>
+
+    await invoke('local:stat', ['C:\\a'])
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('local:stat', ['C:\\a'])
+  })
+
   it('should allow choosing the app theme', async () => {
     // covers: Test-844
     const api = await loadExposedApi()
