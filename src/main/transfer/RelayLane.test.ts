@@ -295,6 +295,26 @@ describe('RelayLane', () => {
     expect(servers[B].stored['/in/a.bin'].toString()).toBe('abcd')
   })
 
+  it('removes the truncated target file when a retry after a source FIN finds no second connection', async () => {
+    // covers: Test-1140
+    const fin = (): Error => new Error('Server sent FIN packet unexpectedly, closing connection.')
+    remote(B).addDir('/in').addFile('/in/a.bin')
+    file(A, 'a.bin', ['ab', 'cd'], fin)
+    const [id] = hub.enqueueRelay(A, B, [item('a.bin', 4)], [])
+    await settle()
+
+    expect(jobOf(id)).toMatchObject({ status: 'pending', retryCount: 1 })
+    expect(remote(B).deleteFile).not.toHaveBeenCalled()
+
+    servers[A].lendNull = true
+    await vi.advanceTimersByTimeAsync(2000)
+    await settle()
+
+    expect(jobOf(id)).toMatchObject({ status: 'failed', partialRemoved: true })
+    expect(jobOf(id).error).toMatch(/allows only one connection/)
+    expect(remote(B).deleteFile.mock.calls).toEqual([['/in/a.bin']])
+  })
+
   it('retries a target 425 without deleting the partial file between attempts', async () => {
     // covers: Test-1137
     const refused = (): Error =>

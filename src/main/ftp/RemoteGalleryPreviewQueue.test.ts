@@ -223,7 +223,7 @@ describe('RemoteGalleryPreviewQueue — transient FTP errors are not retried aut
     expect(h.listing.filter((path) => path === '/a')).toHaveLength(1)
   })
 
-  it('tries the secondary login once and resolves every folder with null after a 421', async () => {
+  it('caps refused secondary logins at the queue concurrency and resolves every folder with null after a 421', async () => {
     // covers: Test-1139
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const h = createHarness({
@@ -233,16 +233,20 @@ describe('RemoteGalleryPreviewQueue — transient FTP errors are not retried aut
       })
     })
 
-    // 첫 로그인이 거절되고 큐가 보조 연결을 포기한 뒤에 나머지가 들어온다. 처음 한 번에 몰려 들어온 폴더는
-    // 그 거절을 알기 전에 각자 로그인하므로(동시 수만큼), 반복이 없다는 것은 포기 뒤의 요청으로 본다.
-    const results = [h.queue.request('/a', 'left')]
+    // 한꺼번에 들어온 폴더는 첫 거절을 알기 전에 각자 로그인하므로(동시 수까지) 상한은 동시 수다.
+    // 큐가 보조 연결을 포기한 뒤에는 시간이 지나도 다시 로그인하지 않는다.
+    const results = [
+      h.queue.request('/a', 'left'),
+      h.queue.request('/b', 'left'),
+      h.queue.request('/c', 'left')
+    ]
     await flush()
-    results.push(h.queue.request('/b', 'left'), h.queue.request('/c', 'left'))
-    await flush()
+    const afterGivingUp = h.counts.created
     await vi.advanceTimersByTimeAsync(10_000)
     await flush()
 
     await expect(Promise.all(results)).resolves.toEqual([null, null, null])
-    expect(h.counts.created).toBe(1)
+    expect(afterGivingUp).toBeLessThanOrEqual(2)
+    expect(h.counts.created).toBe(afterGivingUp)
   })
 })

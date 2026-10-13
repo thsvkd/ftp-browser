@@ -275,11 +275,13 @@ export class RelayLane extends EventEmitter {
       if (borrowed === true || isCancelled(job)) return
       if (borrowed.single) {
         // 메인 클라이언트로 긴 전송을 돌리면 그 서버의 탐색이 멈추고 취소도 못 한다(MC28). 재시도하지 않는다
-        return this.fail(
+        this.fail(
           job,
           `${borrowed.key} allows only one connection, so a server-to-server copy can't run. ` +
             'Download the files, then upload them.'
         )
+        // 앞선 시도(FIN 재시도)가 받는 쪽에 잘린 파일을 남겼으면 지운다. 보낸 적이 없으면 아무것도 하지 않는다
+        return this.cleanUpPartial(job)
       }
       return this.retryOrFail(job, borrowed.key, borrowed.err)
     }

@@ -54,6 +54,7 @@ interface Harness {
   /** 다운로드가 시작된 원격 경로(시작 순서) */
   started: string[]
   counts: { created: number; closed: number }
+  runOnMainClient: ReturnType<typeof vi.fn>
   onReady: ReturnType<typeof vi.fn>
   onError: ReturnType<typeof vi.fn>
   drain: () => Promise<void>
@@ -168,6 +169,7 @@ function createHarness(
     queue,
     started,
     counts,
+    runOnMainClient: ftp.runOnMainClient,
     onReady,
     onError,
     drain,
@@ -454,7 +456,7 @@ describe('ThumbnailQueue — transient FTP errors are not retried automatically'
     expect(h.started.filter((path) => path === remotePath(0))).toHaveLength(2)
   })
 
-  it('tries the secondary login once and serves every thumbnail through the main client after a 421', async () => {
+  it('caps refused secondary logins at the queue concurrency and serves every thumbnail through the main client after a 421', async () => {
     // covers: Test-1139
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const h = harness({
@@ -463,19 +465,20 @@ describe('ThumbnailQueue — transient FTP errors are not retried automatically'
         message: '421 Too many connections. Service temporarily unavailable.'
       })
     })
-    // 첫 로그인이 거절되고 큐가 보조 연결을 포기한 뒤에 나머지가 들어온다. 처음 한 번에 몰려 들어온 항목은
-    // 그 거절을 알기 전에 각자 로그인하므로(동시 수만큼), 반복이 없다는 것은 포기 뒤의 요청으로 본다.
-    h.queue.request(req(0))
-    await flush()
+    // 한꺼번에 들어온 항목은 첫 거절을 알기 전에 각자 로그인하므로(동시 수까지) 상한은 동시 수다.
+    // 큐가 보조 연결을 포기한 뒤에는 시간이 지나도 다시 로그인하지 않는다.
     h.queue.requestBatch(
       MAIN_VIEWER,
-      range(1, 5).map((i) => req(i))
+      range(0, 5).map((i) => req(i))
     )
     await flush()
+    const afterGivingUp = h.counts.created
     await vi.advanceTimersByTimeAsync(10_000)
     await h.drain()
 
-    expect(h.counts.created).toBe(1)
+    expect(afterGivingUp).toBeLessThanOrEqual(3)
+    expect(h.counts.created).toBe(afterGivingUp)
+    expect(h.runOnMainClient).toHaveBeenCalledTimes(5)
     expect(h.onReady).toHaveBeenCalledTimes(5)
     expect(h.onError).not.toHaveBeenCalled()
   })
