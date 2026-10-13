@@ -98,6 +98,7 @@ describe('saved servers and connect', () => {
       expect.objectContaining({ id, host: 'nas.local', port: 21, user: 'me', password: 'pw' })
     )
     expect(h.sessions).toHaveBeenCalledWith({
+      server: 'me@nas.local:21',
       status: 'connected',
       serverId: id,
       host: 'nas.local',
@@ -112,7 +113,10 @@ describe('saved servers and connect', () => {
     expect(h.sessions).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/' }))
 
     expect(dataOf(await call(client, 'disconnect'))).toEqual({ disconnected: true })
-    expect(h.sessions).toHaveBeenLastCalledWith({ status: 'disconnected' })
+    expect(h.sessions).toHaveBeenLastCalledWith({
+      server: 'me@nas.local:21',
+      status: 'disconnected'
+    })
   })
 
   it('refuses connect with BUSY while a transfer or a file operation is running', async () => {
@@ -266,7 +270,7 @@ describe('remote changes', () => {
 
     expect(created).toHaveBeenCalledWith(
       'delete',
-      { itemCount: 2, itemName: undefined },
+      { itemCount: 2, itemName: undefined, server: 'me@nas.local:21' },
       'files',
       2
     )

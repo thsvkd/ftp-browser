@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow } from 'electron'
-import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
+import { FtpConnectionManager, type ManagerStatus } from '../ftp/FtpConnectionManager'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
 import { OperationManager } from '../operation/OperationManager'
 import { getDatabase } from '../db/database'
@@ -17,11 +17,13 @@ import {
 } from '../db/servers'
 import { SavedPasswordUnreadableError, type PasswordVault } from '../db/passwordVault'
 import { ipcError } from '../utils/errorClassifier'
+import { parseConnKey } from '@shared/connKey'
 import type {
   FtpConnectPayload,
   FtpConnectionState,
   FtpListResult,
   FtpMutationEvent,
+  RemoteChangedEvent,
   FtpServer,
   FtpServerInput,
   PasswordProtection,
@@ -49,12 +51,27 @@ export function registerFtpHandlers(
   const manager = new FtpConnectionManager()
   const fileOps = new FtpFileOperations(manager)
 
-  manager.on('connectionStatus', (state: FtpConnectionState) => {
-    if (!win.isDestroyed()) win.webContents.send('ftp:connectionStatus', state)
+  // 매니저는 연결 하나뿐이라 지금 연결의 키가 모든 이벤트의 `server`다(S1에서 레지스트리가 세션별로 붙인다).
+  const stateOf = (status: ManagerStatus): FtpConnectionState => {
+    const server = manager.getConnKey()
+    const parsed = parseConnKey(server)
+    return {
+      server,
+      status: status.status,
+      host: status.host ?? manager.getHost(),
+      port: parsed?.port ?? 0,
+      user: parsed?.user ?? '',
+      error: status.error
+    }
+  }
+
+  manager.on('connectionStatus', (status: ManagerStatus) => {
+    if (!win.isDestroyed()) win.webContents.send('ftp:connectionStatus', stateOf(status))
   })
   // GUI가 시작한 것도 포함해 원격 변경을 알린다. 에이전트가 바꾼 폴더를 GUI가 새로 고친다(K5).
   manager.on('mutation', (event: FtpMutationEvent) => {
-    if (!win.isDestroyed()) win.webContents.send('ftp:remoteChanged', event)
+    const changed: RemoteChangedEvent = { ...event, server: manager.getConnKey() }
+    if (!win.isDestroyed()) win.webContents.send('ftp:remoteChanged', changed)
   })
 
   ipcMain.handle(
@@ -252,10 +269,7 @@ export function registerFtpHandlers(
   ipcMain.handle('ftp:getStatus', (): IpcResult<FtpConnectionState> => {
     return {
       success: true,
-      data: {
-        status: manager.isConnected() ? 'connected' : 'disconnected',
-        host: manager.getHost()
-      }
+      data: stateOf({ status: manager.isConnected() ? 'connected' : 'disconnected' })
     }
   })
 
@@ -264,7 +278,8 @@ export function registerFtpHandlers(
     async (_event, targets: DeleteTarget[]): Promise<IpcResult<void>> => {
       const items = {
         itemCount: targets.length,
-        itemName: targets.length === 1 ? remoteBasename(targets[0].path) : undefined
+        itemName: targets.length === 1 ? remoteBasename(targets[0].path) : undefined,
+        server: manager.getConnKey()
       }
       const job = operationManager.create('delete', items, 'files', targets.length)
 

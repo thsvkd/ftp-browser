@@ -1,3 +1,5 @@
+import type { ConnKey } from '../connKey'
+
 export type OperationKind = 'copy' | 'move' | 'delete'
 export type OperationStatus = 'active' | 'completed' | 'failed' | 'cancelled'
 export type OperationUnit = 'files' | 'bytes'
@@ -17,6 +19,8 @@ export interface OperationJob {
   error?: string
   /** Name of the item currently being processed (for the detail line). */
   currentItem?: string
+  /** The connection a remote delete runs on; absent for local operations. */
+  server?: ConnKey
 }
 
 export interface OperationProgress {

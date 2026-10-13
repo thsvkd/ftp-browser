@@ -57,13 +57,14 @@ describe('event bridges after the window is closed', () => {
       registerOperationHandlers(win),
       {} as PasswordVault
     )
+    vi.spyOn(manager, 'getConnKey').mockReturnValue('me@nas.local:21')
 
     manager.emit('mutation', { kind: 'upload', remotePath: '/a.jpg' })
     destroyed = true
     manager.emit('mutation', { kind: 'delete', remotePath: '/b' })
 
     expect(send.mock.calls).toEqual([
-      ['ftp:remoteChanged', { kind: 'upload', remotePath: '/a.jpg' }]
+      ['ftp:remoteChanged', { kind: 'upload', remotePath: '/a.jpg', server: 'me@nas.local:21' }]
     ])
   })
 })

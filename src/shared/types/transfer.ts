@@ -1,3 +1,5 @@
+import type { ConnKey } from '../connKey'
+
 export type TransferDirection = 'upload' | 'download'
 export type TransferStatus = 'pending' | 'active' | 'completed' | 'failed' | 'cancelled'
 
@@ -12,6 +14,8 @@ export interface TransferJob {
   id: string
   /** Shared by files enqueued as one multi-file/folder transfer. */
   batchId?: string
+  /** 이 작업이 도는 연결(multi-connection MC7). 큐가 만들 때 넣는다. */
+  server: ConnKey
   direction: TransferDirection
   localPath: string
   remotePath: string

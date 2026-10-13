@@ -21,6 +21,7 @@ import { useServerStore } from '@renderer/stores/useServerStore'
 import { useActiveTab, useTabsStore } from '@renderer/stores/useTabsStore'
 import { SourceBadge } from '@renderer/components/common/SourceBadge'
 import { useDropTarget } from '@renderer/components/explorer/dnd'
+import { connKey } from '@shared/connKey'
 import type { ConnectionStatus, FtpServer, RecentPath } from '@shared/types/ftp'
 import type { IpcResult } from '@shared/types/ipc'
 import type { LocalPlaces } from '@shared/types/local'
@@ -49,7 +50,7 @@ const STATUS_SUB: Record<Exclude<ConnectionStatus, 'connected'>, MessageKey> = {
 
 /** 서버 키 `"user@host:port"`(D1). 익명은 'anonymous'로 접속한다(useServerStore.connect). */
 const serverKey = (s: Pick<FtpServer, 'username' | 'host' | 'port'>): string =>
-  `${s.username || 'anonymous'}@${s.host}:${s.port}`
+  connKey(s.host, s.port, s.username)
 
 function Heading({ children }: { children: string }): React.JSX.Element {
   return (

@@ -8,6 +8,7 @@ import type { TransferJob } from '@shared/types/transfer'
 function job(id: string, overrides: Partial<TransferJob> = {}): TransferJob {
   return {
     id,
+    server: 'me@nas.local:21',
     direction: 'upload',
     localPath: `/local/${id}`,
     remotePath: `/remote/${id}`,

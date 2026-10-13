@@ -18,6 +18,7 @@ import {
 } from './segmentedDownload'
 import { classifyError, isRetryableError, socketErrorDetail } from '../utils/errorClassifier'
 import { markSparse } from '../utils/sparseFile'
+import type { ConnKey } from '@shared/connKey'
 import type {
   TransferJob,
   TransferDirection,
@@ -107,6 +108,15 @@ interface WorkItem {
 
 type SegmentItem = WorkItem & Required<Pick<WorkItem, 'segment'>>
 
+/** 큐 생성자 옵션 */
+export interface QueueOptions {
+  /**
+   * 이 큐의 작업이 도는 연결(`TransferJob.server`). 매니저가 하나인 동안은 지금 연결을 돌려주는
+   * 게터를 받는다. 없으면 `''`(기존 테스트).
+   */
+  server?: ConnKey | (() => ConnKey)
+}
+
 /** enqueueBatch 옵션 */
 export interface EnqueueOptions {
   /**
@@ -162,9 +172,15 @@ export class TransferQueue extends EventEmitter {
 
   constructor(
     private fileOps: FtpFileOperations,
-    private pool: TransferClientPool
+    private pool: TransferClientPool,
+    private queueOptions: QueueOptions = {}
   ) {
     super()
+  }
+
+  private serverKey(): ConnKey {
+    const { server = '' } = this.queueOptions
+    return typeof server === 'function' ? server() : server
   }
 
   enqueue(
@@ -187,9 +203,11 @@ export class TransferQueue extends EventEmitter {
     if (items.length === 0) return []
 
     const batchId = items.length > 1 || forceBatch ? randomUUID() : undefined
+    const server = this.serverKey()
     const jobs: TransferJob[] = items.map((item) => ({
       id: randomUUID(),
       batchId,
+      server,
       direction,
       ...item,
       transferredBytes: 0,

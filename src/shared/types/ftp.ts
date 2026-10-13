@@ -1,3 +1,5 @@
+import type { ConnKey } from '../connKey'
+
 /** Simultaneous transfer connections per server. 1 = one at a time; 20 is the cap the setting allows. */
 export const DEFAULT_MAX_TRANSFERS = 16
 export const MIN_MAX_TRANSFERS = 1
@@ -101,10 +103,19 @@ export interface FtpMutationEvent {
   newPath?: string
 }
 
+/** `ftp:remoteChanged`의 페이로드: 어느 연결의 원격이 바뀌었는지 `server`를 붙인 변경 알림. */
+export interface RemoteChangedEvent extends FtpMutationEvent {
+  server: ConnKey
+}
+
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
+/** `ftp:connectionStatus` 이벤트·`ftp:getStatus`의 연결 하나의 상태. */
 export interface FtpConnectionState {
+  server: ConnKey
   status: ConnectionStatus
-  host?: string
+  host: string
+  port: number
+  user: string
   error?: string
 }

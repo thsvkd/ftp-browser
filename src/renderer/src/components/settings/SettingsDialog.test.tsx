@@ -108,6 +108,7 @@ describe('SettingsDialog updates', () => {
       jobs: [
         {
           id: 'active-transfer',
+          server: 'me@nas.local:21',
           direction: 'download',
           localPath: 'C:\\photo.jpg',
           remotePath: '/photo.jpg',

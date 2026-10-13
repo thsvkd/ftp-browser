@@ -1,6 +1,7 @@
 import { mkdirSync } from 'fs'
 import { posix } from 'path'
 import type Database from 'better-sqlite3'
+import { connKey } from '@shared/connKey'
 import type { AgentSessionEvent } from '@shared/types/mcp'
 import type { FtpServer } from '@shared/types/ftp'
 import { getRecentPaths, KEEP_PASSWORD, listServers, recordConnection } from '../db/servers'
@@ -26,7 +27,7 @@ export type { TransferPlan }
 export interface AgentDeps {
   db: Database.Database
   ftp: Pick<FtpConnectionManager, 'connect' | 'disconnect' | 'list' | 'isConnected'> &
-    Pick<FtpConnectionManager, 'getStatus' | 'getHost' | 'getPort' | 'getUser'>
+    Pick<FtpConnectionManager, 'getStatus' | 'getHost' | 'getPort' | 'getUser' | 'getConnKey'>
   fileOps: Pick<FtpFileOperations, 'mkdir' | 'rename' | 'deleteFile' | 'deleteDirectory'>
   queue: Pick<TransferQueue, 'enqueueBatch' | 'getAll'>
   operations: Pick<OperationManager, 'create' | 'progress' | 'complete' | 'fail' | 'getAll'> &
@@ -127,14 +128,23 @@ export async function connectSaved(
     if (opened === '/') throw err
     await deps.ftp.list((opened = '/'))
   }
-  deps.onSession({ status: 'connected', serverId: id, host, port, user, path: opened })
+  deps.onSession({
+    server: connKey(host, port, user),
+    status: 'connected',
+    serverId: id,
+    host,
+    port,
+    user,
+    path: opened
+  })
   return { server, path: opened }
 }
 
 export async function disconnect(deps: AgentDeps): Promise<void> {
   refuseIfBusy(deps, 'disconnecting')
+  const server = deps.ftp.getConnKey()
   await deps.ftp.disconnect()
-  deps.onSession({ status: 'disconnected' })
+  deps.onSession({ server, status: 'disconnected' })
 }
 
 // --- 원격 파일 ---
@@ -181,7 +191,7 @@ export async function startDelete(deps: AgentDeps, paths: string[]): Promise<str
   const itemName = targets.length === 1 ? posix.basename(targets[0].remotePath) : undefined
   const { id } = ops.create(
     'delete',
-    { itemCount: targets.length, itemName },
+    { itemCount: targets.length, itemName, server: deps.ftp.getConnKey() },
     'files',
     targets.length
   )

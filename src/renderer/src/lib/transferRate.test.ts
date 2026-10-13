@@ -10,6 +10,7 @@ beforeEach(() => {
 function job(over: Partial<TransferJob>): TransferJob {
   return {
     id: 'j',
+    server: 'me@nas.local:21',
     direction: 'download',
     localPath: 'C:\\a',
     remotePath: '/a',

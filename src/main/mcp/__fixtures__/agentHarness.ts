@@ -7,6 +7,7 @@ import { vi } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createMcpHandler } from '@modelcontextprotocol/server'
 import { isImageFile } from '@shared/constants'
+import { connKey } from '@shared/connKey'
 import type {
   ConnectionStatus,
   FtpConnectPayload,
@@ -57,6 +58,9 @@ function ftpError(message: string): Error {
  * 메모리 위 원격 트리. FtpConnectionManager(list/connect…)와 FtpFileOperations(mkdir/rename/delete…)
  * 자리에 들어간다. 목 FTP 서버에는 LIST·MKD·DELE·RNFR이 없어 도구 테스트는 이것을 쓴다.
  */
+/** FakeRemote의 기본 연결 키(`user@host:port`). FakeQueue가 작업의 `server`로 쓴다. */
+const FAKE_SERVER = connKey('nas.local', 21, 'me')
+
 export class FakeRemote extends EventEmitter {
   nodes = new Map<string, Node>([['/', { type: 'directory', size: 0 }]])
   connected = true
@@ -105,6 +109,7 @@ export class FakeRemote extends EventEmitter {
   getHost = (): string => this.host
   getPort = (): number => this.port
   getUser = (): string => this.user
+  getConnKey = (): string => connKey(this.host, this.port, this.user)
 
   mkdir = vi.fn(async (dir: string) => {
     if (!this.ignoreMkd) {
@@ -164,6 +169,7 @@ export class FakeQueue extends EventEmitter {
       const added = items.map((item) => ({
         id: randomUUID(),
         batchId,
+        server: FAKE_SERVER,
         direction,
         ...item,
         transferredBytes: 0,
@@ -178,6 +184,7 @@ export class FakeQueue extends EventEmitter {
   add(fields: Partial<TransferJob> = {}): TransferJob {
     const job: TransferJob = {
       id: randomUUID(),
+      server: FAKE_SERVER,
       direction: 'download',
       localPath: '/tmp/x',
       remotePath: '/x',

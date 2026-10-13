@@ -24,6 +24,7 @@ import { currentPlatform } from './platform'
 import { moveRemoteFiles } from './remoteDrop'
 import { planSameSide, type SameSideItem, type SameSideOp } from './sameSidePlan'
 import { planSend, type SendConnection, type SendPlan } from './sendPlan'
+import { connKey, parseConnKey } from '@shared/connKey'
 import type { IpcResult } from '@shared/types/ipc'
 import type { FtpServer } from '@shared/types/ftp'
 import type { LocalFileEntry, LocalPlaces } from '@shared/types/local'
@@ -38,7 +39,7 @@ interface FtpConnectionFields {
 
 /** 지금 연결의 서버 키 `"user@host:port"`(D1). 연결돼 있지 않으면 null. */
 export function connectedServer(s: FtpConnectionFields): string | null {
-  return s.connectionStatus === 'connected' ? `${s.username ?? ''}@${s.host}:${s.port}` : null
+  return s.connectionStatus === 'connected' ? connKey(s.host, s.port, s.username ?? '') : null
 }
 
 export function currentConnection(): SendConnection {
@@ -331,12 +332,9 @@ export function sendDestinations(current: Loc): Loc[] {
  * 비밀번호가 저장돼 있으면 바로 연결하고, 아니면 툴바에 그 서버를 넣고 비밀번호 칸에 포커스를 준다.
  */
 export function connectToServer(server: string): void {
-  const at = server.lastIndexOf('@')
-  const user = server.slice(0, Math.max(0, at))
-  const hostPort = server.slice(at + 1)
-  const colon = hostPort.lastIndexOf(':')
-  const host = colon > 0 ? hostPort.slice(0, colon) : hostPort
-  const port = colon > 0 ? Number(hostPort.slice(colon + 1)) : 21
+  const parsed = parseConnKey(server)
+  if (!parsed) return
+  const { user, host, port } = parsed
   const store = useServerStore.getState()
   // 익명 연결은 저장된 사용자 이름이 비어 있어도 'anonymous'로 접속한다(useServerStore.connect).
   const saved = store.servers.find(
@@ -344,7 +342,7 @@ export function connectToServer(server: string): void {
       s.host === host && s.port === port && (s.username || 'anonymous') === (user || 'anonymous')
   )
   if (saved) return connectSaved(saved)
-  store.setAddress(user ? `${user}@${hostPort}` : hostPort)
+  store.setAddress(user ? `${user}@${host}:${port}` : `${host}:${port}`)
   focusPassword()
 }
 

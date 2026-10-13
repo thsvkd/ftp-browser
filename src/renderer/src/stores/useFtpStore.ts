@@ -5,6 +5,7 @@ import type {
   FtpConnectionState,
   ConnectionStatus
 } from '@shared/types/ftp'
+import { connKey } from '@shared/connKey'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
 import { t } from '@renderer/i18n'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
@@ -93,7 +94,7 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
         return false
       }
       // 확정된 시작 폴더의 목록을 캐시에 넣고 원격 탭 하나를 그리로 옮겨 활성화한다(D3).
-      const server = `${config.user}@${config.host}:${config.port}`
+      const server = connKey(config.host, config.port, config.user)
       useListingStore.getState().put(
         { side: 'remote', path, server },
         listed.data.entries.map((e) => fromFtpEntry(e, path, server))

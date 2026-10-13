@@ -13,6 +13,7 @@ function job(id: string, overrides: Partial<TransferJob> = {}): TransferJob {
   return {
     id,
     batchId: 'b',
+    server: 'me@nas.local:21',
     direction: 'download',
     localPath: `C:\\dl\\${id}`,
     remotePath: `/photos/${id}`,

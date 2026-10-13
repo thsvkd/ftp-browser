@@ -40,7 +40,10 @@ export function registerTransferHandlers(
   localFs: LocalFileSystem
 ): TransferQueue {
   // 전송은 전용 연결 풀에서 돌아 메인 클라이언트(탐색)를 막지 않는다
-  const queue = new TransferQueue(fileOps, new TransferClientPool(manager))
+  // 매니저가 하나인 동안은 작업이 만들어지는 때의 연결이 작업의 `server`다(S1에서 세션 큐가 고정 키를 받는다)
+  const queue = new TransferQueue(fileOps, new TransferClientPool(manager), {
+    server: () => manager.getConnKey()
+  })
 
   queue.on('queue:updated', (update: TransferUpdate) => {
     if (!win.isDestroyed()) win.webContents.send('transfer:updated', update)

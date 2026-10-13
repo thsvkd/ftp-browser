@@ -13,6 +13,7 @@ afterEach(() => {
 function job(id: string, patch: Partial<TransferJob>): TransferJob {
   return {
     id,
+    server: 'me@nas.local:21',
     direction: 'download',
     localPath: `C:\\dl\\${id}`,
     remotePath: `/photos/${id}`,
