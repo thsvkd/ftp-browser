@@ -230,36 +230,36 @@ export function ItemMenu({
       target instanceof Node &&
       (!!rootRef.current?.contains(target) || !!subRef.current?.contains(target))
     const close = (): void => closeRef.current()
-    const onClick = (e: Event): void => {
-      if (!inside(e.target)) close()
-    }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') close()
     }
-    // 메뉴를 연 우클릭의 네이티브 이벤트는 이 리스너가 붙을 때도 아직 전파 중이다. 그 이벤트는
-    // window의 capture 단계를 이미 지났으므로, capture에서 본 이벤트만 닫기로 친다(자기 충돌 방지).
+    // 메뉴를 연 좌·우클릭의 네이티브 이벤트는 이 리스너가 붙을 때도 아직 전파 중이다(React가 그
+    // 이벤트 안에서 렌더·effect를 끝낸다). 그 이벤트는 window의 capture 단계를 이미 지났으므로,
+    // capture에서 본 이벤트만 닫기로 친다(자기 충돌 방지).
     let captured: Event | null = null
     const mark = (e: Event): void => {
       captured = e
     }
-    const onContext = (e: Event): void => {
+    const onOutside = (e: Event): void => {
       if (captured === e && !inside(e.target)) close()
     }
     const onScroll = (e: Event): void => {
       if (!inside(e.target)) close()
     }
-    document.addEventListener('click', onClick)
+    window.addEventListener('click', mark, true)
+    document.addEventListener('click', onOutside)
     document.addEventListener('keydown', onKey)
     window.addEventListener('contextmenu', mark, true)
-    document.addEventListener('contextmenu', onContext)
+    document.addEventListener('contextmenu', onOutside)
     window.addEventListener('blur', close)
     // 안쪽 스크롤 컨테이너의 scroll은 버블링되지 않으므로 capture로 듣는다.
     window.addEventListener('scroll', onScroll, true)
     return () => {
-      document.removeEventListener('click', onClick)
+      window.removeEventListener('click', mark, true)
+      document.removeEventListener('click', onOutside)
       document.removeEventListener('keydown', onKey)
       window.removeEventListener('contextmenu', mark, true)
-      document.removeEventListener('contextmenu', onContext)
+      document.removeEventListener('contextmenu', onOutside)
       window.removeEventListener('blur', close)
       window.removeEventListener('scroll', onScroll, true)
     }

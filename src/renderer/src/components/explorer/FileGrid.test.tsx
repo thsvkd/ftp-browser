@@ -256,3 +256,19 @@ describe('FileGrid — zoom modifiers (migrated)', () => {
     expect(useSettingsStore.getState().tileSize).toBe(160 - ZOOM_STEP)
   })
 })
+
+describe('FileGrid — selection does not resize a tile', () => {
+  it('keeps the selected thumbnail box the same size and marks it with the ring only', async () => {
+    // covers: Test-851
+    h = setupExplorer({ remote: { '/d': [ftp('a.jpg'), ftp('b.jpg')] } })
+    await renderExplorer(remoteLoc('/d'))
+    fireEvent.click(option('a.jpg'))
+    const box = (name: string): HTMLElement => option(name).firstElementChild as HTMLElement
+    const picked = box('a.jpg')
+    expect(picked.className).not.toMatch(/(^|\s)scale-/)
+    expect(picked.className).not.toContain('transition-transform')
+    expect(picked.style.height).toBe(box('b.jpg').style.height)
+    expect(picked.classList.contains('ring-2')).toBe(true)
+    expect(picked.classList.contains('ring-[var(--ac)]')).toBe(true)
+  })
+})
