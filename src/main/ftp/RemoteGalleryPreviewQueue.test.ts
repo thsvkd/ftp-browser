@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { FileInfo } from 'basic-ftp'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { FTPError, type FileInfo } from 'basic-ftp'
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>()
 
@@ -35,7 +35,7 @@ function image(name: string): FileInfo {
 }
 
 /** 폴더 LIST가 테스트가 `list`로 끝낼 때까지 기다리는 가짜 보조 클라이언트를 주는 큐 */
-function createHarness(): {
+function createHarness(options: { connectError?: Error; listError?: Error } = {}): {
   queue: RemoteGalleryPreviewQueue
   listing: string[]
   list: (path: string) => Promise<void>
@@ -48,11 +48,13 @@ function createHarness(): {
     getConnKey: () => CONN,
     createSecondaryClient: vi.fn(async () => {
       counts.created++
+      if (options.connectError) throw options.connectError
       const failures = new Set<(err: Error) => void>()
       return {
         list: (path: string) =>
           new Promise<FileInfo[]>((resolve, reject) => {
             listing.push(path)
+            if (options.listError) return reject(options.listError)
             failures.add(reject)
             pending.set(path, () => resolve([image(`${path.slice(1)}.jpg`)]))
           }),
@@ -192,5 +194,55 @@ describe('gallery:remoteFolderPreview — routed by connection', () => {
       success: false,
       error: 'Invalid viewer id.'
     })
+  })
+})
+
+describe('RemoteGalleryPreviewQueue — transient FTP errors are not retried automatically', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('rejects a folder whose LIST failed with the wrapped 425 and does not list it again', async () => {
+    // covers: Test-1138
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const h = createHarness({
+      listError: new Error(
+        "None of the available transfer strategies work. Last error response was 'FTPError: 425 Too many connections. Can't open data channel.'"
+      )
+    })
+
+    const result = h.queue.request('/a', 'left').then(
+      () => 'resolved',
+      (err: Error) => err.message
+    )
+    await flush()
+
+    expect(await result).toMatch(/Last error response was 'FTPError: 425 /)
+    await vi.advanceTimersByTimeAsync(10_000)
+    await flush()
+    expect(h.listing.filter((path) => path === '/a')).toHaveLength(1)
+  })
+
+  it('tries the secondary login once and resolves every folder with null after a 421', async () => {
+    // covers: Test-1139
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const h = createHarness({
+      connectError: new FTPError({
+        code: 421,
+        message: '421 Too many connections. Service temporarily unavailable.'
+      })
+    })
+
+    // 첫 로그인이 거절되고 큐가 보조 연결을 포기한 뒤에 나머지가 들어온다. 처음 한 번에 몰려 들어온 폴더는
+    // 그 거절을 알기 전에 각자 로그인하므로(동시 수만큼), 반복이 없다는 것은 포기 뒤의 요청으로 본다.
+    const results = [h.queue.request('/a', 'left')]
+    await flush()
+    results.push(h.queue.request('/b', 'left'), h.queue.request('/c', 'left'))
+    await flush()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await flush()
+
+    await expect(Promise.all(results)).resolves.toEqual([null, null, null])
+    expect(h.counts.created).toBe(1)
   })
 })

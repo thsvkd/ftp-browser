@@ -909,6 +909,82 @@ describe('TransferQueue', () => {
       const claims = download.mock.calls.filter((call) => call[0] === '/remote/a.jpg')
       expect(claims[1][4]).toBe(claims[0][4])
     })
+
+    it('should retry a download rejected by a server FIN like an ECONNRESET', async () => {
+      // covers: Test-1132
+      const fin = new Error('Server sent FIN packet unexpectedly, closing connection.')
+      const download = mockFileOps.download as ReturnType<typeof vi.fn>
+      download.mockRejectedValueOnce(fin)
+
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 100)
+      await settle()
+
+      const job = queue.getAll()[0]
+      expect(job.status).toBe('pending')
+      expect(job.retryCount).toBe(1)
+      expect(job.transferredBytes).toBe(0)
+      expect(job.error).toBe('Retry 1/3: Server sent FIN packet unexpectedly, closing connection.')
+      expect(download).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(1999)
+      expect(download).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(download).toHaveBeenCalledTimes(2)
+      expect(download.mock.calls[1][0]).toBe('/remote/a.jpg')
+      expect(download.mock.calls[1][1]).toBe('/local/a.jpg')
+
+      await settle()
+      expect(queue.getAll()[0].status).toBe('completed')
+    })
+
+    it('should retry an upload refused with 425 three times and then fail without a prefix', async () => {
+      // covers: Test-1133
+      const refused = (): FTPError =>
+        new FTPError({ code: 425, message: "425 Too many connections. Can't open data channel." })
+      const upload = mockFileOps.upload as ReturnType<typeof vi.fn>
+      const errors: Error[] = []
+      upload.mockImplementation(async () => {
+        const err = refused()
+        errors.push(err)
+        throw err
+      })
+
+      queue.enqueue('upload', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 100)
+      await settle()
+      expect(upload).toHaveBeenCalledTimes(1)
+      expect(queue.getAll()[0].error).toBe(
+        "Retry 1/3: 425 Too many connections. Can't open data channel."
+      )
+
+      for (const [attempts, retry] of [
+        [2, 2],
+        [3, 3]
+      ]) {
+        await vi.advanceTimersByTimeAsync(1999)
+        expect(upload).toHaveBeenCalledTimes(attempts - 1)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(upload).toHaveBeenCalledTimes(attempts)
+        expect(queue.getAll()[0].error).toBe(
+          `Retry ${retry}/3: 425 Too many connections. Can't open data channel.`
+        )
+      }
+
+      await vi.advanceTimersByTimeAsync(1999)
+      expect(upload).toHaveBeenCalledTimes(3)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(upload).toHaveBeenCalledTimes(4)
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(upload).toHaveBeenCalledTimes(4)
+      const job = queue.getAll()[0]
+      expect(job.status).toBe('failed')
+      expect(job.error).toBe("425 Too many connections. Can't open data channel.")
+      expect(pool.releaseAfterError).toHaveBeenCalledTimes(4)
+      for (const [i, err] of errors.entries()) {
+        expect(pool.releaseAfterError).toHaveBeenNthCalledWith(i + 1, pool.clients[i], err)
+      }
+    })
   })
 
   describe('retry(ids)', () => {
@@ -1231,7 +1307,7 @@ describe('TransferQueue', () => {
       download
         .mockRejectedValueOnce(new FTPError({ code: 550, message: '550 No such file' }))
         .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error('Server sent FIN packet unexpectedly'))
+        .mockRejectedValueOnce(new Error('Server closed connection unexpectedly.'))
         .mockResolvedValueOnce(undefined)
       queue = new TransferQueue(mockFileOps, realPool)
 
