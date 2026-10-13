@@ -104,12 +104,14 @@ export function applyPaneKey(
   maxWidth?: number
 ): PaneState {
   const spec = PANE_SPECS[side]
+  if (a.kind === 'grow' || a.kind === 'shrink') {
+    if (s.collapsed) return a.kind === 'grow' ? { width: s.width, collapsed: false } : s
+    const delta = a.kind === 'grow' ? a.step : -a.step
+    return { width: clampPaneWidth(side, s.width + delta, maxWidth), collapsed: false }
+  }
   if (a.kind === 'toggle') return togglePane(s)
-  if (a.kind === 'min') return { width: spec.min, collapsed: false }
-  if (a.kind === 'max') return { width: clampPaneWidth(side, spec.max, maxWidth), collapsed: false }
-  if (s.collapsed) return a.kind === 'grow' ? { width: s.width, collapsed: false } : s
-  const delta = a.kind === 'grow' ? a.step : -a.step
-  return { width: clampPaneWidth(side, s.width + delta, maxWidth), collapsed: false }
+  const width = a.kind === 'min' ? spec.min : clampPaneWidth(side, spec.max, maxWidth)
+  return { width, collapsed: false }
 }
 
 /** D12. otherWidth = 반대쪽 화면 폭(드래그 시작 때 값). 컨테이너를 모르면 spec.max. */
