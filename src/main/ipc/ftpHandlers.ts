@@ -88,6 +88,12 @@ export function registerFtpHandlers(
         if (result.success) {
           // UPSERT server info (keyed on host+port)
           try {
+            // 이미 있던 연결을 다시 썼으면 이 페이로드로 로그인하지 않았다(MC5). 확인되지 않은
+            // 비밀번호·보안 설정은 저장하지 않고 그 주소의 연결 시각만 찍는다.
+            if (result.reused) {
+              recordConnection(getDatabase(), { ...config, id: undefined }, KEEP_PASSWORD)
+              return { success: true, data: undefined }
+            }
             // 갱신하는 서버의 저장된 비밀번호로 연결했으면 그대로 두고, 아니면 로그인한 비밀번호를
             // 암호화해 저장한다(E8). 암호화도 저장의 일부라 실패해도 연결은 성공이다.
             const write =

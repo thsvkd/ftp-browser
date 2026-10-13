@@ -87,6 +87,11 @@ export interface ConnectResult {
   success: boolean
   error?: string
   cancelled?: boolean
+  /**
+   * 이번 호출이 이 페이로드로 로그인하지 않았다: 이미 연결돼 있었거나 진행 중인 다른 로그인을 함께
+   * 기다렸다. 그 비밀번호·보안 설정은 확인되지 않았으므로 저장하면 안 된다.
+   */
+  reused?: true
 }
 
 /**
@@ -112,11 +117,20 @@ export class ConnectionRegistry extends EventEmitter {
    */
   connect(payload: FtpConnectPayload): Promise<ConnectResult> {
     const key = connKey(payload.host, payload.port, payload.user)
+    // 키로 다시 읽을 수 없는 연결(포트 범위 밖 등)은 세션을 만들지 않는다: stateOf가 그 키를 풀지 못한다
+    if (parseConnKey(key) === null) {
+      return Promise.resolve({ server: key, success: false, error: 'Invalid connection key.' })
+    }
     const pending = this.logins.get(key)
-    if (pending) return pending
+    if (pending) return pending.then((result) => ({ ...result, reused: true }))
     const session = this.ensure(key)
-    if (session.manager.isConnected()) return Promise.resolve({ server: key, success: true })
-    const login = this.login(session, payload).finally(() => this.logins.delete(key))
+    if (session.manager.isConnected()) {
+      return Promise.resolve({ server: key, success: true, reused: true })
+    }
+    const login: Promise<ConnectResult> = this.login(session, payload).finally(() => {
+      // 끊기 뒤에 새 로그인이 들어섰으면 그것은 지우지 않는다
+      if (this.logins.get(key) === login) this.logins.delete(key)
+    })
     this.logins.set(key, login)
     return login
   }
@@ -126,8 +140,12 @@ export class ConnectionRegistry extends EventEmitter {
     return { server: session.key, ...result }
   }
 
-  /** 그 세션만 끊는다. 세션이 없으면 아무것도 하지 않는다. */
+  /**
+   * 그 세션만 끊는다. 세션이 없으면 아무것도 하지 않는다. 진행 중인 로그인은 잊는다: 그것을 기다리던
+   * 쪽은 취소로 끝나고, 그 뒤의 connect는 새로 로그인한다.
+   */
   async disconnect(key: ConnKey): Promise<void> {
+    this.logins.delete(key)
     await this.byKey.get(key)?.manager.disconnect()
   }
 

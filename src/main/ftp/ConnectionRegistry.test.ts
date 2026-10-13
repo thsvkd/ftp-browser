@@ -44,7 +44,7 @@ describe('ConnectionRegistry.connect', () => {
     await reg.connect(payloadOf(A))
     const again = await reg.connect(payloadOf(A))
 
-    expect(again).toEqual({ server: A, success: true })
+    expect(again).toEqual({ server: A, success: true, reused: true })
     expect(remoteOf(reg.get(A)).connect).toHaveBeenCalledTimes(1)
 
     // 첫 로그인이 끝나기 전에 온 두 번째 호출은 같은 로그인을 기다린다
@@ -62,8 +62,43 @@ describe('ConnectionRegistry.connect', () => {
     release()
     const [r1, r2] = await Promise.all(both)
     expect(r1).toEqual({ server: B, success: true })
-    expect(r2).toEqual(r1)
+    // 함께 기다린 쪽은 자기 페이로드로 로그인하지 않았다
+    expect(r2).toEqual({ ...r1, reused: true })
     expect(remoteOf(fresh.get(B)).connect).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses a key it could not read back without creating a session', async () => {
+    // covers: Test-963
+    const reg = registry()
+    for (const port of [0, 70000, Number.NaN]) {
+      const result = await reg.connect({ ...payloadOf(A), port })
+      expect(result).toMatchObject({ success: false, error: 'Invalid connection key.' })
+    }
+    expect(reg.sessions()).toEqual([])
+    expect(reg.states()).toEqual([])
+  })
+
+  it('starts a fresh login after a disconnect cancels the pending one', async () => {
+    // covers: Test-964
+    let settle!: (result: { success: boolean; cancelled?: boolean }) => void
+    const reg = new ConnectionRegistry((key) => {
+      const session = fakeSession(key)
+      remoteOf(session).connect.mockImplementationOnce(
+        () => new Promise((resolve) => (settle = resolve))
+      )
+      return session
+    })
+    const first = reg.connect(payloadOf(A))
+    await Promise.resolve()
+
+    await reg.disconnect(A)
+    const second = reg.connect(payloadOf(A))
+    settle({ success: false, cancelled: true })
+
+    expect(await first).toEqual({ server: A, success: false, cancelled: true })
+    expect(await second).toEqual({ server: A, success: true })
+    expect(remoteOf(reg.get(A)).connect).toHaveBeenCalledTimes(2)
+    expect(reg.connectedKeys()).toEqual([A])
   })
 
   it('disconnects one key only, reuses the same session on reconnect and ignores unknown keys', async () => {

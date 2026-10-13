@@ -592,6 +592,30 @@ describe('remote channels with two connections', () => {
     ])
   })
 
+  it('keeps the saved password and settings when a connect reuses the live connection', async () => {
+    // covers: Test-963
+    const row = (): unknown =>
+      state.db
+        .prepare(
+          "SELECT id, username, secure, max_transfers, password_cipher FROM servers WHERE host = 'a.example' AND port = 21"
+        )
+        .get()
+    const before = row() as { id: number }
+    expect(before).toMatchObject({ username: 'me', password_cipher: fakeCipherOf('pw') })
+
+    const result = await invoke('ftp:connect', {
+      ...payloadOf(A),
+      id: before.id,
+      password: 'wrong-pw',
+      secure: true,
+      maxTransfers: 2
+    })
+
+    expect(result).toEqual({ success: true, data: undefined })
+    expect(remoteOf(registry.get(A)).connect).toHaveBeenCalledTimes(1)
+    expect(row()).toEqual(before)
+  })
+
   it('tags the remote change and the delete job with the key they ran on', async () => {
     // covers: Test-972
     await invoke('ftp:deleteBatch', B, [{ path: '/x/b.txt', isDirectory: false }])
