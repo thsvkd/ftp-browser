@@ -397,13 +397,16 @@ describe('FileFilterMenu — keyboard and accessibility', () => {
       const el = trigger()
       Object.defineProperty(el, 'getBoundingClientRect', {
         configurable: true,
-        value: () => ({ left: 0, right: 100, top: 740, bottom: 780, width: 100, height: 40 })
+        value: () => ({ left: 900, right: 1000, top: 740, bottom: 780, width: 100, height: 40 })
       })
       fireEvent.click(el)
       const style = dialog().style
       expect(style.position).toBe('fixed')
-      // 왼쪽: right(100) - 288 < 0 이라 여백(4)으로 밀린다.
-      expect(parseFloat(style.left)).toBe(MENU_VIEWPORT_MARGIN)
+      // 오른쪽 끝: 앵커 x(right - 288 = 712) + 288 이 뷰포트(1000) - 여백(4)을 넘어 뒤집힌다.
+      // 보정이 없으면 left는 712로 남아 팝오버의 오른쪽 끝이 뷰포트 밖 여백을 침범한다.
+      expect(parseFloat(style.left)).toBe(712 - 288)
+      expect(parseFloat(style.left) + 288).toBeLessThanOrEqual(1000 - MENU_VIEWPORT_MARGIN)
+      expect(parseFloat(style.left)).toBeGreaterThanOrEqual(MENU_VIEWPORT_MARGIN)
       // 아래: bottom(780) + 4 + 200 이 뷰포트(800)를 넘어 앵커 기준으로 뒤집힌다.
       expect(parseFloat(style.top)).toBe(780 + 4 - 200)
     } finally {

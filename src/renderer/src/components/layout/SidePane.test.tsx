@@ -164,9 +164,12 @@ describe('SidePane — dragging', () => {
     move(handle, 300)
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(p.style.width).toBe('220px')
+    // 취소한 뒤에도 포인터는 아직 눌려 있다: 놓기 전의 이동은 폭을 바꾸지 못한다.
+    move(handle, 320)
+    expect(p.style.width).toBe('220px')
+    expect(p.hasAttribute('data-dragging')).toBe(false)
     up(handle)
     expect(stored().left).toEqual({ width: 220, collapsed: false })
-    move(handle, 320)
     expect(p.style.width).toBe('220px')
 
     down(handle, 220, 2)

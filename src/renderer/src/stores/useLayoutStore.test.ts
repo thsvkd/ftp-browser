@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useLayoutStore } from './useLayoutStore'
 
 const KEY = 'ftp-browser-layout'
@@ -43,7 +43,7 @@ describe('useLayoutStore', () => {
     expect(s().priority).toBe('left')
   })
 
-  it('persists left and right only, repairs stored values and ignores a stored priority', () => {
+  it('persists left and right only, repairs stored values and ignores a stored priority', async () => {
     // covers: Test-902
     useLayoutStore.getState().commit('left', { width: 300 })
     useLayoutStore.getState().toggle('right')
@@ -70,13 +70,14 @@ describe('useLayoutStore', () => {
     expect(useLayoutStore.getState().right).toEqual({ width: 480, collapsed: false })
     expect(useLayoutStore.getState().priority).toBeNull()
 
-    useLayoutStore.setState({
-      left: { width: 220, collapsed: false },
-      right: { width: 288, collapsed: false }
-    })
+    // 깨진 JSON을 들고 앱이 새로 뜨면 기본값으로 시작하고, 이어지는 변경이 저장소를 고친다.
+    // (rehydrate()는 읽기에 실패하면 메모리 상태를 건드리지 않으므로, 새 모듈로 가른다.)
     localStorage.setItem(KEY, '{')
-    useLayoutStore.persist.rehydrate()
-    expect(useLayoutStore.getState().left).toEqual({ width: 220, collapsed: false })
-    expect(useLayoutStore.getState().right).toEqual({ width: 288, collapsed: false })
+    vi.resetModules()
+    const fresh = (await import('./useLayoutStore')).useLayoutStore
+    expect(fresh.getState().left).toEqual({ width: 220, collapsed: false })
+    expect(fresh.getState().right).toEqual({ width: 288, collapsed: false })
+    fresh.getState().commit('left', { width: 301 })
+    expect(JSON.parse(localStorage.getItem(KEY) ?? '{').state.left.width).toBe(301)
   })
 })

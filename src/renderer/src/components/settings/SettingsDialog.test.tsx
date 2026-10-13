@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
-import { EMPTY_OVERRIDES } from '@renderer/lib/fileCategories'
+import { DEFAULT_CATEGORIES, EMPTY_OVERRIDES } from '@renderer/lib/fileCategories'
 import { useConfirmStore } from '@renderer/stores/useConfirmStore'
 import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
@@ -511,8 +511,11 @@ describe('SettingsDialog file categories', () => {
         ['Images', 'RAW', 'Videos', 'Audio', 'Documents', 'Archives', 'Code'].includes(n!)
       )
     expect(names).toEqual(['Images', 'RAW', 'Videos', 'Audio', 'Documents', 'Archives', 'Code'])
-    expect(chips('Images')).toContain('jpg')
-    expect(chips('RAW')).toContain('cr3')
+    // 카테고리의 확장자는 하나도 빠지지 않고 칩으로 보인다.
+    expect(DEFAULT_CATEGORIES).toHaveLength(names.length)
+    DEFAULT_CATEGORIES.forEach((c, i) => {
+      expect(chips(names[i]!)).toEqual([...c.extensions])
+    })
 
     // 이미 있는 확장자는 칩이 늘지 않고 안내만 한다.
     const before = chips('RAW').length

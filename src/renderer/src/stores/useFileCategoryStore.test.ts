@@ -4,9 +4,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { useCategories, useTabMatcher } from '@renderer/hooks/useFileFilter'
 import { EMPTY_FILTER, EMPTY_OVERRIDES, type TabFilter } from '@renderer/lib/fileCategories'
 import { selectCategories, useFileCategoryStore } from './useFileCategoryStore'
-import { useSettingsStore } from './useSettingsStore'
 
 const KEY = 'ftp-browser-file-categories'
+const SETTINGS_KEY = 'ftp-browser-settings'
 const state = (): ReturnType<typeof useFileCategoryStore.getState> =>
   useFileCategoryStore.getState()
 const extsOf = (id: string): string[] =>
@@ -20,17 +20,16 @@ beforeEach(() => {
 describe('useFileCategoryStore persistence', () => {
   it('saves only overrides under its own key, leaves the settings store alone and recomputes defaults after an update', async () => {
     // covers: Test-935
-    useSettingsStore.setState({ showHidden: false })
+    // 설정 키를 먼저 심어 두고, 카테고리 편집이 그 바이트를 건드리지 않는지 본다.
+    const seededSettings = JSON.stringify({ state: { showHidden: true }, version: 2 })
+    localStorage.setItem(SETTINGS_KEY, seededSettings)
     state().removeExtension('image', 'png')
     state().addCustom('Docs')
 
     const saved = JSON.parse(localStorage.getItem(KEY)!)
     expect(saved.version).toBe(1)
     expect(Object.keys(saved.state)).toEqual(['overrides'])
-    const settings = JSON.parse(localStorage.getItem('ftp-browser-settings') ?? '{"version":2}')
-    expect(settings.version).toBe(2)
-    expect(Object.keys(settings.state ?? {})).not.toContain('overrides')
-    expect(Object.keys(settings.state ?? {})).not.toContain('categories')
+    expect(localStorage.getItem(SETTINGS_KEY)).toBe(seededSettings)
 
     const before = state().overrides
     useFileCategoryStore.setState({ overrides: EMPTY_OVERRIDES })
