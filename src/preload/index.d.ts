@@ -25,6 +25,7 @@ type InvokeChannel =
   | 'local:rename'
   | 'local:mkdir'
   | 'local:getPlaces'
+  | 'local:stat'
   | 'local:preview'
   | 'app:setTheme'
   | 'transfer:enqueue'

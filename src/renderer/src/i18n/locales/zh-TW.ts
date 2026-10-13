@@ -389,6 +389,7 @@ export const zhTW = {
   'dnd.ghost_other': '{{count}} 項 · {{size}}',
   'toast.pathCopied_other': '已複製 {{count}} 個路徑',
   'toast.alreadyOnShelf': '已在暫存架中',
+  'toast.shelfDropSkipped_other': '無法讀取 {{count}} 個放入的項目',
   'toast.shelfEmpty': '暫存架是空的。請選取項目後按 Shift+S。',
   'toast.sendSkipped_other': '已略過 {{count}} 項',
   'toast.sendFailed': '無法開始傳輸',

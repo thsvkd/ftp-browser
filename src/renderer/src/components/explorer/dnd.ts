@@ -10,7 +10,13 @@ import { toast } from 'sonner'
 import { t } from '@renderer/i18n'
 import type { ExplorerEntry, Loc } from '@renderer/lib/explorerEntry'
 import { planSend } from '@renderer/lib/sendPlan'
-import { dropOsFiles, planVerb, sendItems, useConnection } from '@renderer/lib/sendItems'
+import {
+  dropOsFiles,
+  planVerb,
+  sendItems,
+  shelveOsFiles,
+  useConnection
+} from '@renderer/lib/sendItems'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 
 interface DndState {
@@ -115,17 +121,18 @@ export function useDropTarget(
         if (!dest) return
         if (useDnd.getState().items)
           enter(e, valid ? (plan?.transfer.length || dest === 'shelf' ? 'copy' : 'move') : 'none')
-        else if (dest !== 'shelf' && hasFiles(e)) enter(e, 'copy')
+        else if (hasFiles(e)) enter(e, 'copy')
       },
       onDrop: (e) => {
         if (!dest) return
         const dragged = useDnd.getState().items
-        if (!dragged && (dest === 'shelf' || !hasFiles(e))) return
+        if (!dragged && !hasFiles(e)) return
         e.preventDefault()
         e.stopPropagation()
         endDrag()
         if (!dragged) {
-          if (dest !== 'shelf') void dropOsFiles(Array.from(e.dataTransfer.files), dest)
+          const files = Array.from(e.dataTransfer.files)
+          void (dest === 'shelf' ? shelveOsFiles(files) : dropOsFiles(files, dest))
         } else if (dest === 'shelf') {
           if (!useShelfStore.getState().add(dragged)) toast(t('toast.alreadyOnShelf'))
         } else {

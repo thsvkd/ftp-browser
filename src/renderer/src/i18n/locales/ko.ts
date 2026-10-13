@@ -397,6 +397,7 @@ export const ko = {
   'dnd.ghost_other': '항목 {{count}}개 · {{size}}',
   'toast.pathCopied_other': '경로 {{count}}개를 복사했습니다',
   'toast.alreadyOnShelf': '이미 선반에 있습니다',
+  'toast.shelfDropSkipped_other': '놓은 항목 {{count}}개를 읽을 수 없습니다',
   'toast.shelfEmpty': '선반이 비어 있습니다. 항목을 고르고 Shift+S를 누르세요.',
   'toast.sendSkipped_other': '항목 {{count}}개를 건너뛰었습니다',
   'toast.sendFailed': '전송을 시작하지 못했습니다',

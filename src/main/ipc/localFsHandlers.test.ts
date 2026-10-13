@@ -24,7 +24,7 @@ import type { BrowserWindow } from 'electron'
 import { isSafeCopyName, registerLocalFsHandlers } from './localFsHandlers'
 import type { OperationManager } from '../operation/OperationManager'
 import type { IpcResult } from '@shared/types/ipc'
-import type { LocalPlaces } from '@shared/types/local'
+import type { LocalFileEntry, LocalPlaces } from '@shared/types/local'
 import { MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
 
 type Handler = (event: unknown, ...args: unknown[]) => Promise<IpcResult<void>>
@@ -269,6 +269,27 @@ describe('localFsHandlers', () => {
       for (const name of ['', '.', '..', 'a/b'])
         for (const platform of ['win32', 'linux', 'darwin'])
           expect(isSafeCopyName(name, platform)).toBe(false)
+    })
+  })
+
+  describe('local:stat', () => {
+    it('stats paths into LocalFileEntry items, skipping unreadable ones, and rejects non-arrays as a value', async () => {
+      // covers: Test-872
+      const file = path.join(tmpDir, 'a.txt')
+      await fs.writeFile(file, 'hello')
+
+      const result = (await handler('local:stat')(null, [
+        file,
+        path.join(tmpDir, 'nope')
+      ])) as unknown as IpcResult<LocalFileEntry[]> & { success: true }
+
+      expect(result.success).toBe(true)
+      expect(result.data).toHaveLength(1)
+      expect(result.data[0]).toMatchObject({ path: file, name: 'a.txt', type: 'file', size: 5 })
+      expect(await handler('local:stat')(null, 'x')).toEqual({
+        success: false,
+        error: 'paths must be an array'
+      })
     })
   })
 })

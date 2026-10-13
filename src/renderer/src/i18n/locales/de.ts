@@ -433,6 +433,8 @@ export const de = {
   'toast.pathCopied_one': '{{count}} Pfad kopiert',
   'toast.pathCopied_other': '{{count}} Pfade kopiert',
   'toast.alreadyOnShelf': 'Bereits in der Ablage',
+  'toast.shelfDropSkipped_one': '{{count}} abgelegtes Element konnte nicht gelesen werden',
+  'toast.shelfDropSkipped_other': '{{count}} abgelegte Elemente konnten nicht gelesen werden',
   'toast.shelfEmpty': 'Die Ablage ist leer. Elemente auswählen und Umschalt+S drücken.',
   'toast.sendSkipped_one': '{{count}} Element übersprungen',
   'toast.sendSkipped_other': '{{count}} Elemente übersprungen',

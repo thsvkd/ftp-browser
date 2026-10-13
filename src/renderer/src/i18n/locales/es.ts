@@ -431,6 +431,8 @@ export const es = {
   'toast.pathCopied_one': 'Se copió {{count}} ruta',
   'toast.pathCopied_other': 'Se copiaron {{count}} rutas',
   'toast.alreadyOnShelf': 'Ya está en la bandeja',
+  'toast.shelfDropSkipped_one': 'No se pudo leer {{count}} elemento soltado',
+  'toast.shelfDropSkipped_other': 'No se pudieron leer {{count}} elementos soltados',
   'toast.shelfEmpty': 'La bandeja está vacía. Selecciona elementos y pulsa Mayús+S.',
   'toast.sendSkipped_one': 'Se omitió {{count}} elemento',
   'toast.sendSkipped_other': 'Se omitieron {{count}} elementos',

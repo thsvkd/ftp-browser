@@ -401,6 +401,7 @@ export const ja = {
   'dnd.ghost_other': '{{count}} 件の項目 · {{size}}',
   'toast.pathCopied_other': '{{count}} 件のパスをコピーしました',
   'toast.alreadyOnShelf': '既に棚にあります',
+  'toast.shelfDropSkipped_other': 'ドロップした {{count}} 件の項目を読み取れませんでした',
   'toast.shelfEmpty': '棚は空です。項目を選んで Shift+S を押してください。',
   'toast.sendSkipped_other': '{{count}} 件の項目をスキップしました',
   'toast.sendFailed': '転送を開始できませんでした',

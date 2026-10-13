@@ -389,6 +389,7 @@ export const zhCN = {
   'dnd.ghost_other': '{{count}} 项 · {{size}}',
   'toast.pathCopied_other': '已复制 {{count}} 个路径',
   'toast.alreadyOnShelf': '已在暂存架中',
+  'toast.shelfDropSkipped_other': '无法读取 {{count}} 个放入的项目',
   'toast.shelfEmpty': '暂存架为空。请选中项目后按 Shift+S。',
   'toast.sendSkipped_other': '已跳过 {{count}} 项',
   'toast.sendFailed': '无法开始传输',

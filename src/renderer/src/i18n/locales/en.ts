@@ -425,6 +425,8 @@ export const en = {
   'toast.pathCopied_one': 'Copied {{count}} path',
   'toast.pathCopied_other': 'Copied {{count}} paths',
   'toast.alreadyOnShelf': 'Already on the shelf',
+  'toast.shelfDropSkipped_one': "{{count}} dropped item couldn't be read",
+  'toast.shelfDropSkipped_other': "{{count}} dropped items couldn't be read",
   'toast.shelfEmpty': 'The shelf is empty. Select items and press Shift+S.',
   'toast.sendSkipped_one': 'Skipped {{count}} item',
   'toast.sendSkipped_other': 'Skipped {{count}} items',
