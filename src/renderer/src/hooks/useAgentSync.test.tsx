@@ -7,7 +7,7 @@ import { useListingStore } from '@renderer/stores/useListingStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { locKey, type Loc } from '@renderer/lib/explorerEntry'
-import { emptyDraft } from '@renderer/lib/serverAddress'
+import { emptyDraft, toDraft } from '@renderer/lib/serverAddress'
 import type { FtpServer } from '@shared/types/ftp'
 import { useAgentSync } from './useAgentSync'
 
@@ -266,11 +266,18 @@ describe('useAgentSync — agent sessions', () => {
     expect(invokeCalls(mockInvoke, 'ftp:disconnect')).toEqual([])
   })
 
-  it('leaves the GUI alone while the user is connecting by themselves', async () => {
+  it('leaves the GUI alone while the user is connecting to that server by themselves', async () => {
     // covers: Test-516
     renderHook(() => useAgentSync())
     const id = openRemote('/photos')
-    useServerStore.setState({ connecting: true })
+    // 사용자가 툴바로 Office에 연결하는 중(로그인이 끝나지 않는다)
+    const pending = mockInvoke.getMockImplementation()!
+    mockInvoke.mockImplementation((channel: string, ...args: unknown[]) =>
+      channel === 'ftp:connect' ? new Promise(() => undefined) : pending(channel, ...args)
+    )
+    void useServerStore.getState().connect(toDraft(OFFICE))
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    const draft = useServerStore.getState().draft
 
     emit('agent:session', {
       server: OFFICE_KEY,
@@ -283,8 +290,10 @@ describe('useAgentSync — agent sessions', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(invokeCalls(mockInvoke, 'ftp:getRecentServers')).toEqual([])
-    expect(useServerStore.getState().draft).toEqual(emptyDraft())
-    expect(Object.keys(useFtpStore.getState().connections)).toEqual([SERVER])
+    expect(useServerStore.getState().draft).toBe(draft)
+    expect(useServerStore.getState().connecting).toBe(true)
+    expect(useFtpStore.getState().connections[OFFICE_KEY].status).toBe('connecting')
+    expect(useTabsStore.getState().tabs.map((tab) => tab.loc.server)).toEqual([SERVER])
     expect(useFtpStore.getState().connections[SERVER]).toMatchObject({
       status: 'connected',
       host: 'nas.local'
@@ -340,5 +349,34 @@ describe('useAgentSync — several connections', () => {
     expect(tabPath(tabA)).toBe('/x')
     expect(useTabsStore.getState().activeId).toBe(local)
     await vi.advanceTimersByTimeAsync(0)
+
+    // 사용자가 툴바로 다른 서버에 연결하는 중이어도 B 세션은 따르고, 툴바 초안만 그대로 둔다
+    const C = 'eve@c.example:21'
+    const listing = mockInvoke.getMockImplementation()!
+    mockInvoke.mockImplementation((channel: string, ...args: unknown[]) =>
+      channel === 'ftp:connect' ? new Promise(() => undefined) : listing(channel, ...args)
+    )
+    void useServerStore
+      .getState()
+      .connect({ ...emptyDraft(), host: 'c.example', username: 'eve', password: 'pw' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(useFtpStore.getState().connections[C].status).toBe('connecting')
+    const draft = useServerStore.getState().draft
+    emit('agent:session', { server: B, status: 'disconnected' })
+    expect(useFtpStore.getState().connections[B].status).toBe('disconnected')
+    emit('agent:session', {
+      server: B,
+      status: 'connected',
+      serverId: OFFICE.id,
+      host: 'ftp.office.lan',
+      port: 2121,
+      user: 'kim',
+      path: '/docs'
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(useFtpStore.getState().connections[B].status).toBe('connected')
+    expect(tabPath(tabB)).toBe('/docs')
+    expect(useServerStore.getState().draft).toBe(draft)
+    expect(useFtpStore.getState().connections[C].status).toBe('connecting')
   })
 })

@@ -140,7 +140,7 @@
 - **Test-500** — `ftp:remoteChanged`가 현재 폴더의 자식이면 디바운스 후 `refresh()` 1회, 무관한 경로면 0회.
 - **Test-501** — 현재 폴더(또는 그 위)가 지워지거나 이름이 바뀌면 상위 폴더로 이동한다.
 - **Test-503** — `agent:session` connected → 서버 목록 다시 읽기, 툴바가 그 서버, `path`로 이동(다시 연결하지 않음). disconnected → GUI의 해제와 같은 초기화.
-- **Test-516** — GUI가 직접 연결 중일 때 온 `agent:session`은 무시한다.
+- **Test-516** — GUI가 직접 연결 중인 **그 서버**의 `agent:session`은 무시한다. 다른 서버의 세션은 따르고 툴바 초안만 그대로 둔다(multi-connection MC29, Test-1029).
 - **Test-519** — 동기화가 시작한 새로 고침이 끝나기 전에 사용자가 다른 원격 폴더로 옮기면 늦게 온 이전 폴더 목록을 버린다.
 - **Test-513** — `mcp:*` 호출 채널과 `ftp:remoteChanged`·`agent:session` 이벤트 채널이 preload 허용 목록에 있다.
 

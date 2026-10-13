@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
-import { useServerStore } from '@renderer/stores/useServerStore'
+import { connectingKey, useServerStore } from '@renderer/stores/useServerStore'
 import { emptyDraft, findSaved, serverAddress } from '@renderer/lib/serverAddress'
 import type { AgentSessionEvent } from '@shared/types/mcp'
 import type { RemoteChangedEvent } from '@shared/types/ftp'
@@ -83,7 +83,7 @@ async function followSession(event: AgentSessionEvent): Promise<void> {
 
   const servers = useServerStore.getState()
   await servers.loadServers()
-  // 서버 목록을 받는 사이 사용자가 연결을 시작했으면 툴바를 빼앗지 않는다.
+  // 사용자가 연결 중이면(서버 목록을 받는 사이 시작했어도) 툴바를 빼앗지 않는다.
   if (useServerStore.getState().connecting) return
   const all = useServerStore.getState().servers
   const saved =
@@ -116,9 +116,11 @@ export function useAgentSync(): void {
         remote.push(args[0] as RemoteChangedEvent)
       }),
       window.api.on('agent:session', (...args: unknown[]) => {
-        // 사용자가 직접 연결하는 중이면 그 흐름이 툴바와 패널을 정한다.
-        if (useServerStore.getState().connecting) return
-        void followSession(args[0] as AgentSessionEvent)
+        const event = args[0] as AgentSessionEvent
+        // 사용자가 직접 연결하는 중인 그 서버는 그 흐름이 패널을 정한다(adoptSession이 그 시도를
+        // 무효로 만든다). 다른 서버의 세션은 그대로 따른다(MC29). 툴바 초안은 followSession이 지킨다.
+        if (connectingKey() === event.server) return
+        void followSession(event)
       })
     ]
     return () => {
