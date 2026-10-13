@@ -296,7 +296,7 @@ describe('RelayLane', () => {
   })
 
   it('removes the truncated target file when a retry after a source FIN finds no second connection', async () => {
-    // covers: Test-1140
+    // covers: Test-1160
     const fin = (): Error => new Error('Server sent FIN packet unexpectedly, closing connection.')
     remote(B).addDir('/in').addFile('/in/a.bin')
     file(A, 'a.bin', ['ab', 'cd'], fin)
