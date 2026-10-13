@@ -659,14 +659,6 @@ describe('two users on one host', () => {
     )
     for (const key of [RA, RB2]) expect(h.connections.remotes.get(key)!.list).not.toHaveBeenCalled()
 
-    // 저장 행의 사용자는 연결되지 않고 다른 사용자 둘이 연결된 저장 서버
-    const backup = addServer(h.db, { host: 'backup.lan', user: 'admin' })
-    h.connections.add('guest@backup.lan:21')
-    h.connections.add('other@backup.lan:21')
-    expect(textOf(await call(client, 'list_directory', { path: '/', server: backup }))).toBe(
-      `AMBIGUOUS: 2 connections match backup.lan: guest@backup.lan:21, other@backup.lan:21. ${NEXT}`
-    )
-
     // 안내에 나온 키를 넘기면 그 연결의 목록이다
     const rb2 = h.connections.remotes.get(RB2)!
     rb2.addDir('/inbox')
@@ -676,5 +668,38 @@ describe('two users on one host', () => {
     expect(listed.entries.map((e) => e.name)).toEqual(['inbox'])
     expect(rb2.list).toHaveBeenCalledWith('/')
     expect(h.connections.remotes.get(RA)!.list).not.toHaveBeenCalled()
+  })
+
+  it('a saved server whose user is not connected is NOT_CONNECTED and names the other keys, never another account', async () => {
+    // covers: Test-1199
+    const CONNECT = 'Call connect with a saved server from list_servers, then retry.'
+    const id = addServer(h.db, { name: 'Lab', host: '127.0.0.1', port: 2121, user: 'ra' })
+    h.connections.remotes.get(RA)!.setOffline()
+    const rb2 = h.connections.remotes.get(RB2)!
+    const notConnected =
+      `NOT_CONNECTED: Lab (id ${id}, 127.0.0.1:2121) is not connected as ra. Connected there as ` +
+      `other users: ${RB2}. Call connect with server ${id} first, or pass server with one of ` +
+      `those keys. ${CONNECT}`
+
+    const listed = await call(client, 'list_directory', { path: '/', server: id })
+    expect(listed.isError).toBe(true)
+    expect(textOf(listed)).toBe(notConnected)
+    expect(rb2.list).not.toHaveBeenCalled()
+
+    const dropped = await call(client, 'disconnect', { server: id })
+    expect(dropped.isError).toBe(true)
+    expect(textOf(dropped)).toBe(notConnected)
+    expect(rb2.disconnect).not.toHaveBeenCalled()
+    expect(rb2.isConnected()).toBe(true)
+
+    // 저장 행의 사용자는 연결되지 않고 다른 사용자 둘이 연결된 저장 서버(옛 AMBIGUOUS 장면)
+    const backup = addServer(h.db, { host: 'backup.lan', user: 'admin' })
+    h.connections.add('guest@backup.lan:21')
+    h.connections.add('other@backup.lan:21')
+    expect(textOf(await call(client, 'list_directory', { path: '/', server: backup }))).toBe(
+      `NOT_CONNECTED: backup.lan (id ${backup}, backup.lan:21) is not connected as admin. ` +
+        'Connected there as other users: guest@backup.lan:21, other@backup.lan:21. Call connect ' +
+        `with server ${backup} first, or pass server with one of those keys. ${CONNECT}`
+    )
   })
 })

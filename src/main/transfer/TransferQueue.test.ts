@@ -7,8 +7,9 @@ import * as path from 'path'
 import { Readable, type Writable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { FTPError, type Client } from 'basic-ftp'
-import { LOGIN_HOLD_MS, MAX_LOGIN_FAILURES, TransferQueue } from './TransferQueue'
+import { LOGIN_HOLD_MS, MAX_LOGIN_FAILURES, TransferQueue, jobError } from './TransferQueue'
 import { planSegments, LAN_RTT_MS } from './segmentedDownload'
+import { RelayError } from './RelayLane'
 import {
   LIMIT,
   MAX_PROBE_COOLDOWN_MS,
@@ -94,6 +95,8 @@ interface MockPool {
   release: ReturnType<typeof vi.fn>
   discard: ReturnType<typeof vi.fn>
   releaseAfterError: ReturnType<typeof vi.fn>
+  /** 한도 응답(425·421)으로 limit를 배웠는지. 기본값은 배우지 않는다(혼자인 연결). */
+  shrinkAfterLimitReply: ReturnType<typeof vi.fn>
   armIdleClose: ReturnType<typeof vi.fn>
   /** acquire가 새로 로그인한 클라이언트를 줬는지. 기본값은 매번 새 로그인이다. */
   takeFreshLogin: ReturnType<typeof vi.fn>
@@ -122,6 +125,7 @@ function createMockPool(limit = 3): MockPool {
     release: vi.fn(),
     discard: vi.fn(),
     releaseAfterError: vi.fn(),
+    shrinkAfterLimitReply: vi.fn(() => false),
     armIdleClose: vi.fn(),
     takeFreshLogin: vi.fn(() => true),
     get slots() {
@@ -521,7 +525,9 @@ describe('TransferQueue', () => {
           '/local/file.jpg',
           expect.any(Function),
           pool.clients[0],
-          undefined
+          undefined,
+          expect.any(Function),
+          expect.any(Function)
         )
       })
       expect(pool.release).toHaveBeenCalledWith(pool.clients[0])
@@ -1146,6 +1152,302 @@ describe('TransferQueue', () => {
 
       expect(queue.getAll()).toEqual([])
       expect(mockFileOps.download).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('failed download cleanup', () => {
+    /** 재시도하지 않는 실패(550) */
+    const denied = (): FTPError => new FTPError({ code: 550, message: '550 Permission denied' })
+    const reset = (): Error => Object.assign(new Error('reset'), { code: 'ECONNRESET' })
+    type OnOpen = () => void
+    type Download = (
+      remote: string,
+      local: string,
+      onProgress: unknown,
+      client: unknown,
+      claim: { created: boolean } | undefined,
+      onOpen: OnOpen | undefined,
+      onRemoved?: () => void
+    ) => Promise<void>
+
+    function mockDownload(impl: Download): ReturnType<typeof vi.fn> {
+      const download = mockFileOps.download as ReturnType<typeof vi.fn>
+      download.mockImplementation(impl)
+      return download
+    }
+
+    it('should remove the local file a failed single-stream download opened, for GUI and exclusive downloads', async () => {
+      // covers: Test-1180
+      const err = denied()
+      mockDownload(async (_r, _l, _p, _c, _claim, onOpen) => {
+        onOpen!()
+        throw err
+      })
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+
+      expect(queue.getAll()[0]).toMatchObject({ status: 'failed', error: jobError(err) })
+      expect(unlink).toHaveBeenCalledTimes(1)
+      expect(unlink).toHaveBeenCalledWith('/local/a.jpg')
+
+      // 배타적 다운로드: 자기가 만든 파일을 지우고, 다음 시도는 'wx'로 새로 만든다
+      vi.mocked(unlink).mockClear()
+      const seen: Array<{ created: boolean } | undefined> = []
+      const download = mockDownload(async (_r, _l, _p, _c, claim, onOpen) => {
+        seen.push(claim && { ...claim })
+        if (seen.length > 1) return
+        claim!.created = true
+        onOpen!()
+        throw denied()
+      })
+      download.mockClear()
+      const [id] = queue.enqueueBatch(
+        'download',
+        [
+          {
+            localPath: '/local/b.jpg',
+            remotePath: '/remote/b.jpg',
+            fileName: 'b.jpg',
+            totalBytes: 10
+          }
+        ],
+        false,
+        undefined,
+        { exclusive: true }
+      )
+      await settle()
+      expect(queue.getAll()[1].status).toBe('failed')
+      expect(unlink).toHaveBeenCalledTimes(1)
+      expect(unlink).toHaveBeenCalledWith('/local/b.jpg')
+
+      queue.retry([id])
+      await settle()
+      expect(queue.getAll()[1].status).toBe('completed')
+      expect(seen).toEqual([{ created: false }, { created: false }])
+    })
+
+    it('should keep the file through automatic retries and remove it once the last attempt fails', async () => {
+      // covers: Test-1181
+      const download = mockDownload(async (_r, _l, _p, _c, _claim, onOpen) => {
+        onOpen!()
+        throw reset()
+      })
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        expect(download).toHaveBeenCalledTimes(attempt)
+        expect(queue.getAll()[0].status).toBe('pending')
+        await vi.advanceTimersByTimeAsync(1999)
+        expect(unlink).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(1)
+      }
+      expect(download).toHaveBeenCalledTimes(4)
+      expect(queue.getAll()[0]).toMatchObject({ status: 'failed', retryCount: 3 })
+      expect(unlink).toHaveBeenCalledTimes(1)
+      expect(unlink).toHaveBeenCalledWith('/local/a.jpg')
+    })
+
+    it('should not remove a file the job never opened', async () => {
+      // covers: Test-1182
+      // ① 'w' 열기 자체가 실패했다(읽기 전용 기존 파일): 덮어쓰기를 고른 사용자 파일은 남는다
+      mockDownload(async () => {
+        throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+      })
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+      expect(queue.getAll()[0].status).toBe('failed')
+      expect(unlink).not.toHaveBeenCalled()
+
+      // ② 한 번도 시작하지 못하고 로그인 실패 연쇄로 실패했다
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      pool.acquire.mockRejectedValue(new FTPError({ code: 530, message: '530 Login incorrect' }))
+      queue.enqueue('download', '/local/b.jpg', '/remote/b.jpg', 'b.jpg', 10)
+      await vi.advanceTimersByTimeAsync(LOGIN_HOLD_TOTAL)
+      expect(queue.getAll()[1].status).toBe('failed')
+      expect(unlink).not.toHaveBeenCalled()
+
+      // ③ 첫 시도가 연 빈 파일을 download가 스스로 지웠다(onRemoved). 재시도 대기 중 그 경로에 생긴 파일은
+      // 이 작업이 연 것이 아니므로 로그인 실패 연쇄로 실패해도 지우지 않는다
+      pool.acquire.mockResolvedValueOnce(createFakeClient())
+      mockDownload(async (_r, _l, _p, _c, _claim, onOpen, onRemoved) => {
+        onOpen!()
+        onRemoved!()
+        throw reset()
+      })
+      queue.enqueue('download', '/local/c.jpg', '/remote/c.jpg', 'c.jpg', 10)
+      await settle()
+      expect(queue.getAll()[2]).toMatchObject({ status: 'pending', retryCount: 1 })
+      await vi.advanceTimersByTimeAsync(2000 + LOGIN_HOLD_TOTAL)
+      expect(queue.getAll()[2].status).toBe('failed')
+      expect(unlink).not.toHaveBeenCalled()
+      vi.mocked(console.warn).mockRestore()
+    })
+
+    it('should remove the file an earlier attempt opened when the job fails through the login failure chain', async () => {
+      // covers: Test-1183
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      mockDownload(async (_r, _l, _p, _c, _claim, onOpen) => {
+        onOpen!()
+        throw reset()
+      })
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+      expect(queue.getAll()[0]).toMatchObject({ status: 'pending', retryCount: 1 })
+
+      pool.acquire.mockRejectedValue(new FTPError({ code: 530, message: '530 Login incorrect' }))
+      await vi.advanceTimersByTimeAsync(2000 + LOGIN_HOLD_TOTAL)
+
+      expect(queue.getAll()[0].status).toBe('failed')
+      expect(unlink).toHaveBeenCalledTimes(1)
+      expect(unlink).toHaveBeenCalledWith('/local/a.jpg')
+      vi.mocked(console.warn).mockRestore()
+    })
+
+    it('should note in the error when the partial file could not be removed, but not when it was already gone', async () => {
+      // covers: Test-1184
+      const err = denied()
+      mockDownload(async (_r, _l, _p, _c, _claim, onOpen) => {
+        onOpen!()
+        throw err
+      })
+      vi.mocked(unlink).mockRejectedValueOnce(
+        Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' })
+      )
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+      expect(queue.getAll()[0].error).toBe(`${jobError(err)} (partial file left on this computer)`)
+
+      vi.mocked(unlink).mockRejectedValueOnce(
+        Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' })
+      )
+      queue.enqueue('download', '/local/b.jpg', '/remote/b.jpg', 'b.jpg', 10)
+      await settle()
+      expect(queue.getAll()[1]).toMatchObject({ status: 'failed', error: jobError(err) })
+      expect(unlink).toHaveBeenCalledTimes(2)
+    })
+
+    it('should start a user retry only after the cleanup of the failed attempt has finished', async () => {
+      // covers: Test-1185
+      const download = mockDownload(async (_r, _l, _p, _c, _claim, onOpen) => {
+        onOpen!()
+        if (download.mock.calls.length === 1) throw denied()
+      })
+      const removal = deferred()
+      vi.mocked(unlink).mockReturnValueOnce(removal.promise)
+      const id = queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+      expect(queue.getAll()[0].status).toBe('failed')
+      expect(unlink).toHaveBeenCalledTimes(1)
+
+      queue.retry([id])
+      expect(queue.getAll()[0].status).toBe('pending')
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(download).toHaveBeenCalledTimes(1)
+      expect(queue.getAll()[0].status).toBe('pending')
+
+      removal.resolve()
+      await settle()
+      expect(download).toHaveBeenCalledTimes(2)
+      expect(queue.getAll()[0].status).toBe('completed')
+      expect(unlink).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('limit replies (425·421)', () => {
+    const e3 = (): FTPError =>
+      new FTPError({ code: 425, message: "425 Too many connections. Can't open data channel." })
+    const e4 = (): Error =>
+      new Error(
+        "None of the available transfer strategies work. Last error response was 'FTPError: 425 Too many connections. Can't open data channel.'"
+      )
+    const e6 = (): FTPError =>
+      new FTPError({
+        code: 421,
+        message: '421 Service not available, closing control connection.'
+      })
+
+    it('should hand a job refused for the connection limit back without a retry once the pool learns the limit', async () => {
+      // covers: Test-1192
+      for (const refusal of [e3, e4, e6]) {
+        vi.clearAllMocks()
+        mockFileOps = createMockFileOps()
+        pool = createMockPool(2)
+        queue = new TransferQueue(mockFileOps, asPool(pool))
+        pool.shrinkAfterLimitReply.mockImplementation(() => {
+          // 실제 풀처럼 다른 연결 수로 limit를 줄인다
+          pool.limit = 1
+          return true
+        })
+        const err = refusal()
+        const hold = deferred()
+        const download = mockFileOps.download as ReturnType<typeof vi.fn>
+        let attempts = 0
+        download.mockImplementation(async (remote: string) => {
+          if (remote === '/remote/0.jpg') return hold.promise
+          attempts++
+          if (attempts === 1) throw err
+        })
+
+        queue.enqueueBatch('download', items(2))
+        await settle()
+
+        const refused = queue.getAll()[1]
+        expect(refused).toMatchObject({ status: 'pending', transferredBytes: 0 })
+        expect(refused.retryCount).toBeUndefined()
+        expect(refused.error).toBeUndefined()
+        expect(pool.shrinkAfterLimitReply).toHaveBeenCalledWith(pool.clients[1], err)
+        expect(pool.releaseAfterError).not.toHaveBeenCalledWith(pool.clients[1], err)
+        expect(pool.discard).not.toHaveBeenCalledWith(pool.clients[1])
+        await vi.advanceTimersByTimeAsync(2000)
+        expect(attempts).toBe(1)
+        expect(queue.getAll()[1].status).toBe('pending')
+
+        hold.resolve()
+        await settle()
+        expect(attempts).toBe(2)
+        expect(queue.getAll().map((job) => job.status)).toEqual(['completed', 'completed'])
+      }
+    })
+
+    it('should retry a mid-session 421 three times like a reset when the pool learns nothing', async () => {
+      // covers: Test-1193
+      const download = mockFileOps.download as ReturnType<typeof vi.fn>
+      const errors: Error[] = []
+      download.mockImplementation(async () => {
+        const err = e6()
+        errors.push(err)
+        throw err
+      })
+
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 100)
+      await settle()
+      expect(download).toHaveBeenCalledTimes(1)
+      expect(queue.getAll()[0].error).toBe(
+        'Retry 1/3: 421 Service not available, closing control connection.'
+      )
+      for (const attempt of [2, 3, 4]) {
+        await vi.advanceTimersByTimeAsync(1999)
+        expect(download).toHaveBeenCalledTimes(attempt - 1)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(download).toHaveBeenCalledTimes(attempt)
+        if (attempt < 4) {
+          expect(queue.getAll()[0].error).toBe(
+            `Retry ${attempt}/3: 421 Service not available, closing control connection.`
+          )
+        }
+      }
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(download).toHaveBeenCalledTimes(4)
+      expect(queue.getAll()[0]).toMatchObject({
+        status: 'failed',
+        error: '421 Service not available, closing control connection.'
+      })
+      expect(pool.releaseAfterError).toHaveBeenCalledTimes(4)
+      for (const [i, err] of errors.entries()) {
+        expect(pool.releaseAfterError).toHaveBeenNthCalledWith(i + 1, pool.clients[i], err)
+      }
     })
   })
 
@@ -2385,7 +2687,9 @@ describe('TransferQueue', () => {
         localPath,
         expect.any(Function),
         client,
-        undefined
+        undefined,
+        expect.any(Function),
+        expect.any(Function)
       )
     })
 
@@ -2529,6 +2833,74 @@ describe('TransferQueue', () => {
       expect(mockFileOps.download).not.toHaveBeenCalled()
       // 미리 늘려 둔 파일은 크기만 서버와 같고 0으로 찬 구멍이 있으므로 남기지 않는다
       await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+    })
+
+    it('should not ask the pool to learn the limit from a fast-flow 425, a range 425 or a main-client 425', async () => {
+      // covers: Test-1194
+      const refused = (): FTPError =>
+        new FTPError({ code: 425, message: "425 Too many connections. Can't open data channel." })
+      // ① 빠른 업로드가 의심하는 425는 fastBroken이 먼저다
+      const fast = refused()
+      fastSuspects.add(fast)
+      const upload = mockFileOps.upload as ReturnType<typeof vi.fn>
+      upload.mockRejectedValueOnce(fast)
+      queue.enqueue('upload', '/local/up.jpg', '/remote/up.jpg', 'up.jpg', 10)
+      await vi.waitFor(() =>
+        expect(queue.getAll().find((job) => job.fileName === 'up.jpg')!.status).toBe('completed')
+      )
+      expect(pool.fastBroken).toBe(true)
+      expect(pool.shrinkAfterLimitReply).not.toHaveBeenCalled()
+
+      // ② 시작 0인 구간의 425는 구간 재시도다
+      server.rejections.set(0, refused())
+      enqueueBig()
+      await vi.waitFor(() => expect(big().error).toMatch(/^Retry 1\/3: 425/))
+      expect(big().status).toBe('active')
+      server.rejections.delete(0)
+      await vi.advanceTimersByTimeAsync(2000)
+      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      expect(pool.shrinkAfterLimitReply).not.toHaveBeenCalled()
+
+      // ③ 메인 클라이언트 대체(acquire가 null)의 425는 지금처럼 재시도다
+      pool.acquire.mockResolvedValue(null)
+      ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockRejectedValueOnce(refused())
+      queue.enqueue('download', '/local/main.jpg', '/remote/main.jpg', 'main.jpg', 10)
+      await vi.waitFor(() =>
+        expect(queue.getAll().find((job) => job.fileName === 'main.jpg')!.error).toMatch(
+          /^Retry 1\/3: 425/
+        )
+      )
+      await vi.advanceTimersByTimeAsync(2000)
+      await vi.waitFor(() =>
+        expect(queue.getAll().find((job) => job.fileName === 'main.jpg')!.status).toBe('completed')
+      )
+      expect(pool.shrinkAfterLimitReply).not.toHaveBeenCalled()
+    })
+
+    it('should unlink a failed segmented download exactly once and never unlink after a failed upload', async () => {
+      // covers: Test-1188
+      holdAll()
+      server.failures.set(0, new FTPError({ code: 550, message: 'Permission denied' }))
+      enqueueBig()
+      await vi.waitFor(() => expect(big().transferredBytes).toBe(3 * CHUNK))
+      server.holds.get(0)!.resolve()
+      await vi.waitFor(() => expect(big().status).toBe('failed'))
+      for (const start of STARTS) server.holds.get(start)!.resolve()
+      await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(unlink).toHaveBeenCalledTimes(1)
+
+      // 올리다 만 원격 파일은 남기고 로컬 파일은 건드리지 않는다
+      vi.mocked(unlink).mockClear()
+      ;(mockFileOps.upload as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new FTPError({ code: 550, message: '550 Permission denied' })
+      )
+      queue.enqueue('upload', '/local/up.jpg', '/remote/up.jpg', 'up.jpg', 10)
+      await vi.waitFor(() =>
+        expect(queue.getAll().find((job) => job.fileName === 'up.jpg')!.status).toBe('failed')
+      )
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(unlink).not.toHaveBeenCalled()
     })
 
     it('should revive a failed segmented job pressed for retry while its other ranges are still closing', async () => {
@@ -3154,6 +3526,48 @@ describe('TransferQueue', () => {
       second!.done(new Error('boom'))
       expect(pool.discard).toHaveBeenCalledWith(second!.client)
       expect(pool.release).not.toHaveBeenCalledWith(second!.client)
+    })
+
+    it('tells the borrower when a limit reply on the lent client taught the pool its limit', async () => {
+      // covers: Test-1195
+      const e4 = new Error(
+        "None of the available transfer strategies work. Last error response was 'FTPError: 425 Too many connections. Can't open data channel.'"
+      )
+      const e6 = new FTPError({
+        code: 421,
+        message: '421 Service not available, closing control connection.'
+      })
+      pool.shrinkAfterLimitReply.mockReturnValue(true)
+      for (const err of [e4, e6]) {
+        const lease = (await queue.borrow())!
+        expect(lease.done(err)).toBe(true)
+        expect(pool.shrinkAfterLimitReply).toHaveBeenLastCalledWith(lease.client, err)
+        expect(pool.release).not.toHaveBeenCalledWith(lease.client)
+        expect(pool.discard).not.toHaveBeenCalledWith(lease.client)
+        expect(lease.done(err)).toBe(false)
+      }
+
+      // 풀이 배우지 않았으면(혼자인 연결) 지금처럼 버리고 false
+      pool.shrinkAfterLimitReply.mockReturnValue(false)
+      const lone = (await queue.borrow())!
+      expect(lone.done(e4)).toBe(false)
+      expect(pool.discard).toHaveBeenCalledWith(lone.client)
+
+      // 한도 응답이 아닌 오류와 오류 없음은 풀에 묻지 않는다
+      pool.shrinkAfterLimitReply.mockClear()
+      pool.shrinkAfterLimitReply.mockReturnValue(true)
+      const other = (await queue.borrow())!
+      expect(other.done(new Error('boom'))).toBe(false)
+      expect(pool.discard).toHaveBeenCalledWith(other.client)
+      // 서버 간 전송의 다른 쪽이 받는 RelayError는 문구가 같아도 이 서버의 한도 응답이 아니다
+      const peer = (await queue.borrow())!
+      expect(peer.done(new RelayError('dest', e4))).toBe(false)
+      expect(pool.discard).toHaveBeenCalledWith(peer.client)
+      const ok = (await queue.borrow())!
+      expect(ok.done()).toBe(false)
+      expect(pool.release).toHaveBeenCalledWith(ok.client)
+      expect(ok.done()).toBe(false)
+      expect(pool.shrinkAfterLimitReply).not.toHaveBeenCalled()
     })
 
     it('lends null without a secondary connection, rejects on login give-up and leaves the line on abort', async () => {

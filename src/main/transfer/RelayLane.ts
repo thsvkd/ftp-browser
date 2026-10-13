@@ -306,7 +306,16 @@ export class RelayLane extends EventEmitter {
       failure = err
     }
     this.clients.delete(job.id)
-    for (const lease of leases.values()) lease.done(failure)
+    const side = failure instanceof RelayError && failure.side === 'source' ? 'source' : 'dest'
+    const key = side === 'source' ? job.sourceServer! : job.server
+    const cause = failure instanceof RelayError ? failure.error : failure
+    // 실패한 쪽 임대에는 안쪽 오류를 넘겨 그 풀이 한도 응답(425·421)을 배우게 한다. 다른 쪽은 배우지 않는다
+    const failed = failure !== undefined && !isCancelled(job)
+    let learned = false
+    for (const [leaseKey, lease] of leases) {
+      if (failed && leaseKey === key) learned = lease.done(cause)
+      else lease.done(failure)
+    }
 
     if (failure === undefined && !isCancelled(job)) {
       job.transferredBytes = job.totalBytes
@@ -324,9 +333,15 @@ export class RelayLane extends EventEmitter {
       this.cleanUpPartial(job)
       return
     }
-    const side = failure instanceof RelayError && failure.side === 'source' ? 'source' : 'dest'
-    const key = side === 'source' ? job.sourceServer! : job.server
-    this.retryOrFail(job, key, failure instanceof RelayError ? failure.error : failure)
+    if (learned) {
+      // 최종 실패가 아니다: 재시도 횟수·타이머·부분 정리 없이 맨 앞에서 줄어든 풀의 빌림을 기다린다
+      job.status = 'pending'
+      job.transferredBytes = 0
+      this.markDirty(job)
+      this.waiting.unshift(job)
+      return
+    }
+    this.retryOrFail(job, key, cause)
   }
 
   /**

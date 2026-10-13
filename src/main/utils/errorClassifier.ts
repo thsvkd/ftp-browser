@@ -137,22 +137,28 @@ export function ipcError(err: unknown): { success: false; error: string; code: E
 
 /** basic-ftp가 제어 연결에서 서버의 FIN을 받았다. 닫힌 클라이언트의 다음 작업은 "Client is closed because …"로 감싼다 */
 const SERVER_FIN_RE = /Server sent FIN packet unexpectedly/
-/** 새 클라이언트의 첫 전송에서 EPSV·PASV가 모두 실패하고 마지막 응답이 425였다 */
-const WRAPPED_DATA_CHANNEL_REFUSED_RE = /Last error response was 'FTPError: 425 /
+/** 새 클라이언트의 첫 전송에서 EPSV·PASV가 모두 실패하고 마지막 응답이 425·421이었다 */
+const WRAPPED_LIMIT_REPLY_RE = /Last error response was 'FTPError: 42[15] /
+
+/**
+ * 서버가 연결 수 때문에 거절했을 수 있는 응답: 데이터 연결 거부(425)와 세션 도중의 421, basic-ftp가 감싼 것
+ * 포함. 응답 문구는 보지 않는다. 전송 풀이 limit를 배우는 데 쓴다(transfer-stability TS7).
+ */
+export function isLimitReply(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const { code } = err as { code?: unknown }
+  if (code === 425 || code === 421) return true
+  // 감싼 응답은 basic-ftp가 만든 평범한 Error다. 그 문구를 옮겨 담은 하위 클래스(서버 간 전송의 다른 쪽이 받는
+  // RelayError)는 그 서버의 응답이 아니다
+  return Object.getPrototypeOf(err) === Error.prototype && WRAPPED_LIMIT_REPLY_RE.test(err.message)
+}
 
 /**
  * 재시도 가능한 에러인지 판단 (네트워크/일시적 에러만 재시도).
- * 서버의 FIN과 데이터 연결 거부(425)는 classifyError의 코드를 바꾸지 않고(UNKNOWN 그대로) 여기서만 센다.
+ * 서버의 FIN과 한도 응답(425·421)은 classifyError의 코드를 바꾸지 않고(UNKNOWN 그대로) 여기서만 센다.
  */
 export function isRetryableError(err: unknown): boolean {
-  if (
-    err instanceof Error &&
-    ((err as { code?: unknown }).code === 425 ||
-      SERVER_FIN_RE.test(err.message) ||
-      WRAPPED_DATA_CHANNEL_REFUSED_RE.test(err.message))
-  ) {
-    return true
-  }
+  if (isLimitReply(err) || (err instanceof Error && SERVER_FIN_RE.test(err.message))) return true
   const { code } = classifyError(err)
   return (
     code === ErrorCode.CONNECTION_TIMEOUT ||
