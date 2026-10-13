@@ -151,31 +151,45 @@ function menuKeys(
 /** 메뉴가 새로 열릴 때 window에 보내는 이벤트. 다른 메뉴는 이것을 듣고 닫힌다(메뉴는 한 번에 하나). */
 const MENU_OPEN = 'itemmenu:open'
 
-/**
- * 탐색기의 메뉴(항목·빈 곳·정렬·숨은 경로). 열린 자리를 화면 안으로 보정하고(menuPosition),
- * 바깥 좌·우클릭, Esc, 창 포커스 잃음, 바깥 스크롤에 닫힌다(D20). 다른 메뉴가 열려도 닫힌다: 그때
- * `onClose('replaced')`라 연 쪽은 포커스를 되돌리지 않는다(새 메뉴가 포커스를 갖는다, split-view §4 18행).
- * "보내기 ▸" 같은 하위 메뉴는 항목 옆에 따로 뜬다(메뉴 안에는 menuitem과 separator만 있다).
- */
-export function ItemMenu({
-  x,
-  y,
-  label,
-  items,
-  onClose
-}: {
+interface ItemMenuProps {
   x: number
   y: number
   label: string
   items: MenuItem[]
   /** `reason`은 다른 메뉴가 열려 닫힐 때만 `'replaced'`다 */
   onClose: (reason?: 'replaced') => void
-}): React.JSX.Element {
+  /** 키보드로 열었다: 자리를 잡은 뒤 첫 사용 가능한 항목에 포커스를 준다(explorer-ux-polish X12·X13) */
+  focusFirst?: boolean
+}
+
+/**
+ * 탐색기의 메뉴(항목·빈 곳·정렬·숨은 경로). 열린 자리를 화면 안으로 보정하고(menuPosition),
+ * 바깥 좌·우클릭, Esc, 창 포커스 잃음, 바깥 스크롤에 닫힌다(D20). 다른 메뉴가 열려도 닫힌다: 그때
+ * `onClose('replaced')`라 연 쪽은 포커스를 되돌리지 않는다(새 메뉴가 포커스를 갖는다, split-view §4 18행).
+ * "보내기 ▸" 같은 하위 메뉴는 항목 옆에 따로 뜬다(메뉴 안에는 menuitem과 separator만 있다).
+ *
+ * 본문은 열림의 정체(앵커와 이름)마다 다시 마운트한다(X14). 한 호출처가 같은 click으로 다른 메뉴를
+ * 열면 옛 본문의 리스너는 정리되고(`onClose`를 부르지 않는다) 새 본문은 그 click의 capture 뒤에
+ * 리스너를 붙이므로 그 click에 닫히지 않는다. 고른 항목·하위 메뉴·자리도 넘어가지 않는다. 내용만
+ * 바뀌는 재렌더(열린 메뉴의 항목 상태)는 다시 마운트하지 않는다(key에 `items`를 넣지 않는다).
+ */
+export function ItemMenu(props: ItemMenuProps): React.JSX.Element {
+  return <MenuBody key={`${props.x}:${props.y}:${props.label}`} {...props} />
+}
+
+function MenuBody({
+  x,
+  y,
+  label,
+  items,
+  onClose,
+  focusFirst = false
+}: ItemMenuProps): React.JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
   const subRef = useRef<HTMLDivElement>(null)
   const [placement, setPlacement] = useState<MenuPlacement | null>(null)
   const [subPlacement, setSubPlacement] = useState<MenuPlacement | null>(null)
-  const [active, setActive] = useState(-1)
+  const [active, setActive] = useState(() => (focusFirst ? (enabled(items)[0] ?? -1) : -1))
   const [sub, setSub] = useState<number | null>(null)
   const [subActive, setSubActive] = useState(-1)
   const closeRef = useRef(onClose)
@@ -213,8 +227,14 @@ export function ItemMenu({
   }, [sub])
 
   // 자리를 잡아 보이게 된 뒤에 포커스를 준다. visibility:hidden인 동안의 focus()는 브라우저가 무시한다.
+  // 키보드로 열어 고른 항목이 있으면 그 항목, 아니면 메뉴 상자다(X13).
   useLayoutEffect(() => {
-    if (placement) rootRef.current?.focus()
+    if (!placement) return
+    const root = rootRef.current
+    const picked = active >= 0 ? root?.querySelector<HTMLElement>(`[data-index="${active}"]`) : null
+    ;(picked ?? root)?.focus()
+    // 자리를 잡을 때만 준다. 그 뒤 고른 항목의 포커스는 아래 effect의 몫이다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placement])
   useLayoutEffect(() => {
     if (subPlacement) subRef.current?.focus()

@@ -435,7 +435,13 @@ function TabExplorer({
   }, [busy, key])
 
   // ---------- 오버레이 ----------
-  const [menu, setMenu] = useState<{ x: number; y: number; target: ExplorerEntry[] } | null>(null)
+  const [menu, setMenu] = useState<{
+    x: number
+    y: number
+    target: ExplorerEntry[]
+    /** 메뉴 키·Shift+F10으로 열었다: 첫 사용 가능한 항목에 포커스(explorer-ux-polish X12) */
+    keyboard?: boolean
+  } | null>(null)
   const [props, setProps] = useState<ExplorerEntry | null>(null)
   const [lightbox, setLightbox] = useState<number | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -678,7 +684,12 @@ function TabExplorer({
     const el = cur && scrollRef.current?.querySelector(`[data-path="${CSS.escape(cur.path)}"]`)
     const r = (el ?? scrollRef.current)?.getBoundingClientRect()
     if (!r) return
-    setMenu({ x: r.left + 24, y: r.top + Math.min(r.height, 40), target: targetOf() })
+    setMenu({
+      x: r.left + 24,
+      y: r.top + Math.min(r.height, 40),
+      target: targetOf(),
+      keyboard: true
+    })
   }
 
   // ---------- 키보드 ----------
@@ -1058,6 +1069,7 @@ function TabExplorer({
                 : locLabel(loc)
           }
           items={menu.target.length ? itemMenu(menu.target) : backgroundMenu()}
+          focusFirst={menu.keyboard}
           onClose={(reason) => {
             setMenu(null)
             // 다른 메뉴가 열려 닫혔으면 포커스는 그 메뉴 것이다. 되돌리면 이 패널이 다시 활성이 된다(P7).

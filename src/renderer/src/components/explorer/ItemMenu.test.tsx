@@ -9,6 +9,7 @@ import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { invokeCalls, stubMenuViewport } from '@renderer/test/rendererTestUtils'
 import {
+  activeTab,
   ftp,
   listbox,
   localLoc,
@@ -64,10 +65,8 @@ describe('ItemMenu — keyboard', () => {
     fireEvent.keyDown(listbox(), { key: 'F10', shiftKey: true })
     const [menu] = menus()
     expect(menu).toBeTruthy()
-    expect(document.activeElement).toBe(menu)
-
-    fireEvent.keyDown(menu, { key: 'ArrowDown' })
     expect(document.activeElement).toBe(item(en['menu.preview']))
+
     fireEvent.keyDown(menu, { key: 'End' })
     expect(document.activeElement).toBe(item(en['menu.properties']))
     fireEvent.keyDown(menu, { key: 'Home' })
@@ -89,8 +88,108 @@ describe('ItemMenu — keyboard', () => {
 
     fireEvent.keyDown(listbox(), { key: 'ContextMenu' })
     expect(menus()).toHaveLength(1)
-    expect(document.activeElement).toBe(menus()[0])
+    expect(document.activeElement).toBe(item(en['menu.preview']))
     spy.mockRestore()
+  })
+})
+
+/** 브라우저처럼 `visibility: hidden`인 요소의 focus()는 아무것도 하지 않는다. 테스트가 실패해도 되돌린다. */
+let focusSpy: { mockRestore: () => void } | null = null
+afterEach(() => {
+  focusSpy?.mockRestore()
+  focusSpy = null
+})
+function ignoreHiddenFocus(): void {
+  const focus = HTMLElement.prototype.focus
+  focusSpy = vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (
+    this: HTMLElement,
+    options?: FocusOptions
+  ) {
+    if (!this.closest('[style*="visibility: hidden"]')) focus.call(this, options)
+  })
+}
+
+describe('ItemMenu — menus opened from the keyboard', () => {
+  it('focuses the first enabled item with focusFirst so Enter runs it, and keeps focus on the menu box otherwise', () => {
+    // covers: Test-1174
+    h = setupExplorer()
+    ignoreHiddenFocus()
+    const a = vi.fn()
+    const b = vi.fn()
+    const c = vi.fn()
+    const items: MenuItem[] = [
+      { label: 'A', disabled: true, onSelect: a },
+      'sep',
+      { label: 'B', onSelect: b },
+      { label: 'C', onSelect: c }
+    ]
+    const onClose = vi.fn()
+    render(<ItemMenu x={10} y={10} label="menu" items={items} onClose={onClose} focusFirst />)
+    expect(document.activeElement).toBe(item('B'))
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Enter' })
+    expect(b).toHaveBeenCalledTimes(1)
+    expect(onClose).toHaveBeenCalledTimes(1)
+    cleanup()
+
+    // 가드: focusFirst 없이 열면 메뉴 상자에 포커스, Enter는 아무것도 하지 않는다.
+    b.mockClear()
+    const quiet = vi.fn()
+    render(<ItemMenu x={10} y={10} label="menu" items={items} onClose={quiet} />)
+    expect(document.activeElement).toBe(screen.getByRole('menu'))
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Enter' })
+    expect(b).toHaveBeenCalledTimes(0)
+    expect(quiet).toHaveBeenCalledTimes(0)
+    cleanup()
+
+    // 사용 가능한 항목이 없으면 focusFirst여도 메뉴 상자다.
+    const none: MenuItem[] = [{ label: 'X', disabled: true }, 'sep', { label: 'Y', disabled: true }]
+    render(<ItemMenu x={10} y={10} label="menu" items={none} onClose={vi.fn()} focusFirst />)
+    expect(document.activeElement).toBe(screen.getByRole('menu'))
+    expect(a).toHaveBeenCalledTimes(0)
+    expect(c).toHaveBeenCalledTimes(0)
+  })
+
+  it('focuses the first enabled entry of menus opened with Shift+F10 or the menu key, not of right-clicked ones', async () => {
+    // covers: Test-1175
+    ignoreHiddenFocus()
+    await photos()
+    fireEvent.click(option('b.jpg'))
+    fireEvent.keyDown(listbox(), { key: 'F10', shiftKey: true })
+    expect(document.activeElement).toBe(item(en['menu.preview']))
+    fireEvent.keyDown(menus()[0], { key: 'Enter' })
+    expect(menus()).toHaveLength(0)
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    // 여러 항목: 미리 보기가 비활성이라 건너뛴다.
+    fireEvent.keyDown(listbox(), { key: 'a', ctrlKey: true })
+    fireEvent.keyDown(listbox(), { key: 'ContextMenu' })
+    const [menu] = menus()
+    expect(item(en['menu.preview'])).toHaveProperty('disabled', true)
+    const first = within(menu)
+      .getAllByRole('menuitem')
+      .find((el) => !(el as HTMLButtonElement).disabled)
+    expect(first?.textContent).toContain('Add 3 to shelf')
+    expect(document.activeElement).toBe(first)
+    fireEvent.keyDown(menu, { key: 'Escape' })
+    expect(menus()).toHaveLength(0)
+
+    // 선택을 풀면 빈 곳 메뉴: 첫 항목은 새 폴더다.
+    fireEvent.keyDown(listbox(), { key: 'Escape' })
+    expect(activeTab().sel).toEqual([])
+    fireEvent.keyDown(listbox(), { key: 'ContextMenu' })
+    expect(document.activeElement).toBe(item(new RegExp(`^${en['explorer.newFolder']}`)))
+    fireEvent.keyDown(menus()[0], { key: 'Escape' })
+
+    // 마우스 우클릭은 지금처럼 메뉴 상자에 포커스, 고른 항목이 없다.
+    fireEvent.contextMenu(option('a.jpg'))
+    expect(document.activeElement).toBe(menus()[0])
+    expect(
+      within(menus()[0])
+        .getAllByRole('menuitem')
+        .some((el) => el === document.activeElement)
+    ).toBe(false)
   })
 })
 
@@ -393,5 +492,39 @@ describe('ItemMenu — the opening click', () => {
     expect(again).toHaveBeenCalledTimes(0)
     nativeClick(document.body, 'contextmenu')
     expect(again).toHaveBeenCalledTimes(1)
+  })
+
+  it('replaces a menu with another one drawn by the same click into the same root, without closing it', () => {
+    // covers: Test-1178
+    const onClose = vi.fn<() => void>()
+    const menuHost = document.createElement('div')
+    const host = document.createElement('div')
+    const button = document.createElement('button')
+    host.appendChild(button)
+    document.body.append(host, menuHost)
+    const root = createRoot(menuHost)
+    opened = { root, hosts: [host, menuHost] }
+    const FIRST: MenuItem[] = [{ label: 'One' }, { label: 'Two' }, { label: 'Three' }]
+    const SECOND: MenuItem[] = [{ label: 'Four' }, { label: 'Five' }]
+    flushSync(() =>
+      root.render(<ItemMenu x={10} y={10} label="first" items={FIRST} onClose={onClose} />)
+    )
+    fireEvent.mouseEnter(screen.getByRole('menuitem', { name: 'Two' }))
+    expect(screen.getByRole('menuitem', { name: 'Two' }).className).toContain('bg-[var(--acw)]')
+
+    host.addEventListener('click', () =>
+      flushSync(() =>
+        root.render(<ItemMenu x={200} y={10} label="second" items={SECOND} onClose={onClose} />)
+      )
+    )
+    nativeClick(button)
+    expect(menus().map((m) => m.getAttribute('aria-label'))).toEqual(['second'])
+    expect(onClose).toHaveBeenCalledTimes(0)
+    expect(
+      screen.getAllByRole('menuitem').some((m) => m.className.includes('bg-[var(--acw)]'))
+    ).toBe(false)
+
+    nativeClick(document.body)
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

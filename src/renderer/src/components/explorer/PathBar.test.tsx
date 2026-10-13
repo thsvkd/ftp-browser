@@ -203,6 +203,47 @@ describe('PathBar — dropping on a crumb', () => {
   })
 })
 
+describe('PathBar — menus opened from the keyboard', () => {
+  it('focuses the first entry of the sort and hidden-crumbs menus opened by Enter or Space and returns focus on Esc', async () => {
+    // covers: Test-1176
+    act(() =>
+      useTabsStore.getState().patchTab(activeTab().id, {
+        sort: { ...activeTab().sort, key: 'size' }
+      })
+    )
+    const sortButton = screen.getByRole('button', { name: en['sort.label'] })
+    // Enter·Space로 누른 버튼의 click은 detail이 0이다.
+    fireEvent.click(sortButton, { detail: 0 })
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: en['file.name'] }))
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Enter' })
+    expect(activeTab().sort.key).toBe('name')
+
+    const more = within(pathNav()).getByRole('button', { name: en['path.hidden'] })
+    fireEvent.click(more, { detail: 0 })
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'a' }))
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Enter' })
+    await flush()
+    expect(activeTab().loc.path).toBe('/a')
+
+    // 마우스 click(detail 1)은 지금처럼 메뉴 상자에 포커스
+    fireEvent.click(screen.getByRole('button', { name: en['sort.label'] }), { detail: 1 })
+    expect(document.activeElement).toBe(screen.getByRole('menu'))
+
+    // Esc로 닫으면 연 버튼으로 돌아간다(X9).
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: en['sort.label'] }))
+
+    act(() => useTabsStore.getState().navigate(remoteLoc('/a/b/c'), { tabId: activeTab().id }))
+    await flush()
+    const hiddenButton = within(pathNav()).getByRole('button', { name: en['path.hidden'] })
+    fireEvent.click(hiddenButton, { detail: 0 })
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(document.activeElement).toBe(hiddenButton)
+  })
+})
+
 // ---------- 메뉴를 연 click이 그 메뉴를 닫지 않는다(explorer-menu-and-focus M1) ----------
 
 describe('PathBar — menus opened by a real click stay open', () => {
@@ -237,6 +278,28 @@ describe('PathBar — menus opened by a real click stay open', () => {
     nativeClick(document.body)
     await settle()
     expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('switches between the sort and hidden-crumbs menus with one click', async () => {
+    // covers: Test-1179
+    const sortButton = (): HTMLElement => screen.getByRole('button', { name: en['sort.label'] })
+    const hiddenButton = (): HTMLElement =>
+      within(pathNav()).getByRole('button', { name: en['path.hidden'] })
+    const names = (): (string | null)[] =>
+      screen.queryAllByRole('menu').map((m) => m.getAttribute('aria-label'))
+    nativeClick(sortButton())
+    await settle()
+    expect(names()).toEqual([en['sort.label']])
+    nativeClick(hiddenButton())
+    await settle()
+    expect(names()).toEqual([en['path.hidden']])
+    nativeClick(sortButton())
+    await settle()
+    expect(names()).toEqual([en['sort.label']])
+
+    nativeClick(document.body)
+    await settle()
+    expect(names()).toEqual([])
   })
 
   it('keeps the hidden-crumbs menu open after clicking "…" and navigates from it', async () => {

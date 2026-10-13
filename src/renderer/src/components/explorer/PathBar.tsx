@@ -140,7 +140,8 @@ function Crumbs({
   tabId: string
   loc: Loc
   onEdit: () => void
-  onMenu: (x: number, y: number, hidden: Crumb[]) => void
+  /** `opener`는 "…" 버튼, `keyboard`는 Enter·Space로 눌렀는가(click의 detail 0, X12) */
+  onMenu: (x: number, y: number, hidden: Crumb[], opener: HTMLElement, keyboard: boolean) => void
 }): React.JSX.Element {
   const t = useT()
   const crumbs = pathCrumbs(loc.side, loc.path)
@@ -202,7 +203,7 @@ function Crumbs({
               className="h-7 rounded-md px-1.5 text-[var(--mu)] hover:bg-[var(--hv)]"
               onClick={(e) => {
                 const r = e.currentTarget.getBoundingClientRect()
-                onMenu(r.left, r.bottom + 4, hidden)
+                onMenu(r.left, r.bottom + 4, hidden, e.currentTarget, e.detail === 0)
               }}
             >
               …
@@ -289,7 +290,25 @@ export function PathBar({
     y: number
     items: MenuItem[]
     label: string
+    /** Enter·Space로 연 메뉴: 첫 사용 가능한 항목에 포커스(X12) */
+    focusFirst: boolean
   } | null>(null)
+  // 메뉴를 연 버튼과, 메뉴가 Esc로 닫혔는가. Esc로 닫히면 연 버튼으로 포커스를 돌려준다(X9).
+  const opener = useRef<HTMLElement | null>(null)
+  const escaped = useRef(false)
+  const openMenu = (
+    el: HTMLElement,
+    m: { x: number; y: number; items: MenuItem[]; label: string; focusFirst: boolean }
+  ): void => {
+    opener.current = el
+    escaped.current = false
+    setMenu(m)
+  }
+  const closeMenu = (reason?: 'replaced'): void => {
+    setMenu(null)
+    if (reason !== 'replaced' && escaped.current) opener.current?.focus()
+    escaped.current = false
+  }
   const patch = (p: Partial<Tab>): void => useTabsStore.getState().patchTab(tab.id, p)
   const { loc, sort } = tab
 
@@ -337,6 +356,10 @@ export function PathBar({
       ref={barRef}
       data-dim={dim ? 'true' : undefined}
       className="path-bar relative flex min-h-[52px] shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--bd)] px-3 py-2"
+      // 메뉴는 이 막대 안에 그려지므로 그 Esc를 메뉴보다 먼저 본다(X9).
+      onKeyDownCapture={(e) => {
+        if (menu && e.key === 'Escape') escaped.current = true
+      }}
     >
       <button
         className={iconBtn}
@@ -379,10 +402,11 @@ export function PathBar({
             tabId={tab.id}
             loc={loc}
             onEdit={() => onEditingChange(true)}
-            onMenu={(x, y, hidden) =>
-              setMenu({
+            onMenu={(x, y, hidden, el, keyboard) =>
+              openMenu(el, {
                 x,
                 y,
+                focusFirst: keyboard,
                 label: t('path.hidden'),
                 items: hidden.map((c) => ({
                   label: c.name,
@@ -468,7 +492,13 @@ export function PathBar({
           className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-semibold text-[var(--mu)] hover:bg-[var(--hv)] hover:text-[var(--tx)]"
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect()
-            setMenu({ x: r.right - 232, y: r.bottom + 4, items: sortItems, label: t('sort.label') })
+            openMenu(e.currentTarget, {
+              x: r.right - 232,
+              y: r.bottom + 4,
+              items: sortItems,
+              label: t('sort.label'),
+              focusFirst: e.detail === 0
+            })
           }}
           aria-haspopup="menu"
           aria-label={t('sort.label')}
@@ -535,7 +565,8 @@ export function PathBar({
           y={menu.y}
           label={menu.label}
           items={menu.items}
-          onClose={() => setMenu(null)}
+          focusFirst={menu.focusFirst}
+          onClose={closeMenu}
         />
       )}
     </div>

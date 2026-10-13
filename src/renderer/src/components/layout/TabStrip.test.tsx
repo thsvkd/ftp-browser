@@ -428,6 +428,46 @@ describe('TabStrip — split pair pill and tab menu', () => {
     expect(document.activeElement).toBe(tab('B'))
   })
 
+  it('focuses the first entry of the + menu and the tab menu when opened from the keyboard, not by mouse', async () => {
+    // covers: Test-1177
+    const ids = setupNamed('A', 'B')
+    await renderShell()
+    const plus = screen.getByRole('button', { name: en['tabs.new'] })
+    const firstEnabled = (): HTMLElement | undefined =>
+      within(screen.getByRole('menu'))
+        .getAllByRole('menuitem')
+        .find((el) => !(el as HTMLButtonElement).disabled)
+
+    // Enter·Space로 누른 버튼의 click은 detail이 0이다. 메뉴는 loadPlaces 뒤에 열린다.
+    fireEvent.click(plus, { detail: 0 })
+    await flush()
+    await flush()
+    expect(screen.getByRole('menu', { name: en['tabs.new'] })).toBeTruthy()
+    expect(document.activeElement).toBe(firstEnabled())
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+
+    tab('B').focus()
+    fireEvent.keyDown(tab('B'), { key: 'F10', shiftKey: true })
+    expect(document.activeElement).toBe(
+      within(screen.getByRole('menu')).getByRole('menuitem', { name: en['split.menuSplitRight'] })
+    )
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Enter' })
+    expect(splitOf(ids)).toEqual(['A', 'B'])
+    await flush()
+
+    act(() => useTabsStore.setState({ split: null, activeId: ids.A }))
+    fireEvent.contextMenu(tab('B'))
+    expect(document.activeElement).toBe(screen.getByRole('menu'))
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+
+    fireEvent.click(plus, { detail: 1 })
+    await flush()
+    await flush()
+    expect(screen.getByRole('menu', { name: en['tabs.new'] })).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByRole('menu'))
+  })
+
   it('gives focus back to the half after Swap sides or Unsplit redraws the pair', async () => {
     // covers: Test-1072
     // 메뉴 항목이 탭줄을 다시 그리면(반쪽 버튼이 옮겨지거나 다시 마운트되면) 포커스가 body로 빠졌다.
