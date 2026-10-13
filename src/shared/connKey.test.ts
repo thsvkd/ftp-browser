@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { connKey, parseConnKey } from './connKey'
+import { connKey, connLabel, parseConnKey } from './connKey'
 
 describe('connKey', () => {
   it('builds user@host:port and falls back to anonymous for an empty user', () => {
@@ -43,5 +43,18 @@ describe('parseConnKey', () => {
       expect(parsed).not.toBeNull()
       expect(connKey(parsed!.host, parsed!.port, parsed!.user)).toBe(key)
     }
+  })
+})
+
+describe('connLabel', () => {
+  it('shows the key itself, drops only an exact anonymous user, and passes non-keys through', () => {
+    // covers: Test-1140
+    const RA = 'ra@127.0.0.1:2121'
+    expect(connLabel(RA)).toBe(RA)
+    expect(connLabel('anonymous@ftp.example.com:21')).toBe('ftp.example.com:21')
+    expect(connLabel('Anonymous@h:21')).toBe('Anonymous@h:21')
+    expect(connLabel('a@b@h:21')).toBe('a@b@h:21')
+    expect(connLabel('h:21')).toBe('h:21')
+    expect(connLabel('')).toBe('')
   })
 })

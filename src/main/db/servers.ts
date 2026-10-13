@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { parseConnKey, type ConnKey } from '@shared/connKey'
 import { ErrorCode, type ErrorCodeType } from '@shared/types/ipc'
 import {
   DEFAULT_MAX_TRANSFERS,
@@ -146,9 +147,11 @@ export function saveServer(
     ).run(...fields, server.maxTransfers ?? null, server.id)
     writePassword(db, server.id, password)
     if (old.host !== host || old.port !== server.port) {
-      // 새 주소에 남은 고아 경로가 있으면 UNIQUE에 걸리므로 덮어쓴다.
+      // 그 주소의 모든 사용자 경로를 옮긴다. 사용자만 바뀌면 옮기지 않는다(same-host-accounts SH11).
+      // 새 주소에 남은 고아 경로가 있으면 UNIQUE에 걸리므로 덮어쓴다. 읽기처럼 호스트 대소문자는
+      // 가리지 않는다(SH8): 옛 테이블에서 복사된 'NAS.local' 행도 'nas.local' 저장 행을 따라간다.
       db.prepare(
-        'UPDATE OR REPLACE server_recent_paths SET server_host = ?, server_port = ? WHERE server_host = ? AND server_port = ?'
+        'UPDATE OR REPLACE remote_recent_paths SET host = ?, port = ? WHERE lower(host) = lower(?) AND port = ?'
       ).run(host, server.port, old.host, old.port)
     }
     return server.id
@@ -345,12 +348,19 @@ export function replaceCipher(
   )
 }
 
-/** 저장된 서버와 그 최근 경로를 지운다. 없는 id면 아무것도 하지 않는다. */
+/**
+ * 저장된 서버와 그 host·port의 최근 경로(모든 사용자, 옛 테이블 것까지)를 지운다. 새 테이블은
+ * 읽기처럼 호스트 대소문자를 가리지 않는다(SH8). 없는 id면 아무것도 하지 않는다.
+ */
 export function deleteServer(db: Database.Database, id: number): void {
   const row = db.prepare('SELECT host, port FROM servers WHERE id = ?').get(id) as
     | { host: string; port: number }
     | undefined
   if (row) {
+    db.prepare('DELETE FROM remote_recent_paths WHERE lower(host) = lower(?) AND port = ?').run(
+      row.host,
+      row.port
+    )
     db.prepare('DELETE FROM server_recent_paths WHERE server_host = ? AND server_port = ?').run(
       row.host,
       row.port
@@ -359,12 +369,44 @@ export function deleteServer(db: Database.Database, id: number): void {
   db.prepare('DELETE FROM servers WHERE id = ?').run(id)
 }
 
-/** 이 서버에서 연 폴더, 최근 순 20개. 저장된 서버처럼 호스트는 대소문자를 가리지 않는다. */
-export function getRecentPaths(db: Database.Database, host: string, port: number): RecentPath[] {
+/**
+ * 이 연결(`user@host:port`)에서 연 폴더, 최근 순 20개. 저장된 서버처럼 호스트는 대소문자를 가리지
+ * 않고, 사용자는 키처럼 가린다(same-host-accounts SH8).
+ */
+export function getRecentPaths(db: Database.Database, key: ConnKey): RecentPath[] {
+  const { host, port, user } = parseConnKey(key)!
   const rows = db
     .prepare(
-      'SELECT path, last_visited FROM server_recent_paths WHERE lower(server_host) = lower(?) AND server_port = ? ORDER BY last_visited DESC LIMIT 20'
+      'SELECT path, last_visited FROM remote_recent_paths WHERE lower(host) = lower(?) AND port = ? AND username = ? ORDER BY last_visited DESC LIMIT 20'
     )
-    .all(host, port) as Array<{ path: string; last_visited: string }>
+    .all(host, port, user) as Array<{ path: string; last_visited: string }>
   return rows.map((r) => ({ path: r.path, lastVisited: r.last_visited }))
+}
+
+/**
+ * 이 연결에서 폴더를 열었다는 기록. 키마다 최근 20개만 남긴다. 호스트는 읽기처럼 대소문자를
+ * 가리지 않는다(SH8): 철자만 다른 호스트로 남은 같은 경로는 이 철자의 행 하나로 합친다.
+ */
+export function recordRecentPath(db: Database.Database, key: ConnKey, path: string): void {
+  const { host, port, user } = parseConnKey(key)!
+  db.prepare(
+    'DELETE FROM remote_recent_paths WHERE lower(host) = lower(?) AND host <> ? AND port = ? AND username = ? AND path = ?'
+  ).run(host, host, port, user, path)
+  // 밀리초까지 찍는다. 다시 연결할 때 가장 최근 경로에서 여는데, 1초 안에
+  // 폴더를 여러 번 옮기면 초 단위로는 어느 것이 마지막인지 가릴 수 없다.
+  db.prepare(
+    `INSERT INTO remote_recent_paths (host, port, username, path, last_visited)
+     VALUES (?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now'))
+     ON CONFLICT(host, port, username, path)
+     DO UPDATE SET last_visited = excluded.last_visited`
+  ).run(host, port, user, path)
+  db.prepare(
+    `DELETE FROM remote_recent_paths
+     WHERE lower(host) = lower(?) AND port = ? AND username = ?
+     AND id NOT IN (
+       SELECT id FROM remote_recent_paths
+       WHERE lower(host) = lower(?) AND port = ? AND username = ?
+       ORDER BY last_visited DESC LIMIT 20
+     )`
+  ).run(host, port, user, host, port, user)
 }

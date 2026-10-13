@@ -207,14 +207,14 @@ describe('TabStrip — the new-tab menu opened by a real click', () => {
     )
     expect(rows.slice(0, 4)).toEqual([
       expect.stringMatching(/^This PC › me/),
-      expect.stringMatching(/^a\.lan:21 › /),
-      expect.stringMatching(/^b\.lan:21 › /),
+      expect.stringMatching(/^a@a\.lan:21 › /),
+      expect.stringMatching(/^b@b\.lan:21 › /),
       '—'
     ])
     expect(rows.some((r) => /c\.lan|d\.lan/.test(r))).toBe(false)
     expect(rows[4]).toMatch(new RegExp(en['tabs.duplicate']))
 
-    nativeClick(within(menu).getByRole('menuitem', { name: /^b\.lan:21 › / }))
+    nativeClick(within(menu).getByRole('menuitem', { name: /^b@b\.lan:21 › / }))
     await settle()
     expect(activeTab().loc).toEqual({ side: 'remote', path: '/', server: B })
 
@@ -224,6 +224,31 @@ describe('TabStrip — the new-tab menu opened by a real click', () => {
     await settle()
     const empty = screen.getByRole('menu', { name: en['tabs.new'] })
     expect(within(empty).queryAllByRole('menuitem', { name: /lan:21/ })).toEqual([])
+  })
+
+  it('names two users on one host apart in root tabs, their titles and the + menu', async () => {
+    // covers: Test-1142
+    const RA = 'ra@127.0.0.1:2121'
+    const RB2 = 'rb2@127.0.0.1:2121'
+    useFtpStore.setState({ connections: {} })
+    setConnection(RA, 'connected')
+    setConnection(RB2, 'connected')
+    useTabsStore.getState().openTab({ side: 'remote', path: '/', server: RA }, false)
+    useTabsStore.getState().openTab({ side: 'remote', path: '/', server: RB2 }, false)
+    render(<TabStrip />)
+    const tabA = screen.getByRole('tab', { name: /^ra@127\.0\.0\.1:2121 root/ })
+    const tabB = screen.getByRole('tab', { name: /^rb2@127\.0\.0\.1:2121 root/ })
+    expect(tabA.getAttribute('title')).toBe(`${RA} · /`)
+    expect(tabB.getAttribute('title')).toBe(`${RB2} · /`)
+
+    nativeClick(screen.getByRole('button', { name: en['tabs.new'] }))
+    await settle()
+    const menu = screen.getByRole('menu', { name: en['tabs.new'] })
+    const items = within(menu)
+      .getAllByRole('menuitem')
+      .map((el) => el.textContent ?? '')
+    expect(items.filter((r) => /^ra@127\.0\.0\.1:2121 › /.test(r))).toHaveLength(1)
+    expect(items.filter((r) => /^rb2@127\.0\.0\.1:2121 › /.test(r))).toHaveLength(1)
   })
 })
 

@@ -688,7 +688,7 @@ describe('reconnecting — start folder', () => {
 
     await waitFor(() => expect(activeRemotePath()).toBe('/photos/2026'))
     expect(listedPaths()[0]).toBe('/photos/2026')
-    expect(invokeCalls(mockInvoke, 'ftp:getRecentPaths')[0]).toEqual(['nas.local', 21])
+    expect(invokeCalls(mockInvoke, 'ftp:getRecentPaths')[0]).toEqual(['anonymous@nas.local:21'])
   })
 
   it('starts at the root when the server has no recent folder', async () => {

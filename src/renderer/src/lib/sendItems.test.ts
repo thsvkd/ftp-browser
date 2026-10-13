@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { toast } from 'sonner'
+import { t } from '@renderer/i18n'
 import { en } from '@renderer/i18n/locales/en'
 import { useFtpStore, type ConnInfo } from '@renderer/stores/useFtpStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
@@ -9,7 +10,7 @@ import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { makeApiMock, invokeCalls, type ApiMock } from '@renderer/test/rendererTestUtils'
 import type { LocalFileEntry } from '@shared/types/local'
 import { fromLocalEntry, type Loc } from './explorerEntry'
-import { reloadActiveTab, shelveOsFiles } from './sendItems'
+import { locLabel, reloadActiveTab, shelveOsFiles, sourceLabel } from './sendItems'
 
 vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }),
@@ -223,5 +224,28 @@ describe('reloadActiveTab', () => {
     useTabsStore.setState({ tabs: [], activeId: '', recent: [] })
     reload()
     expect(invoke).not.toHaveBeenCalled()
+  })
+})
+
+describe('sourceLabel', () => {
+  it('names a remote source by its connection label so two users on one host differ', () => {
+    // covers: Test-1141
+    const RA = 'ra@127.0.0.1:2121'
+    const RB2 = 'rb2@127.0.0.1:2121'
+    expect(sourceLabel({ side: 'remote', server: RA })).toBe(RA)
+    expect(sourceLabel({ side: 'remote', server: RB2 })).toBe(RB2)
+    expect(sourceLabel({ side: 'remote', server: 'anonymous@example.org:21' })).toBe(
+      'example.org:21'
+    )
+    expect(sourceLabel({ side: 'remote' })).toBe(t('explorer.remote'))
+    expect(sourceLabel({ side: 'local' })).toBe(t('sidebar.thisPc'))
+
+    const rootA = locLabel({ side: 'remote', path: '/', server: RA })
+    const rootB = locLabel({ side: 'remote', path: '/', server: RB2 })
+    expect(rootA).not.toBe(rootB)
+    expect(rootA).toBe(t('place.root', { source: RA }))
+    expect(rootB).toBe(t('place.root', { source: RB2 }))
+    expect(locLabel({ side: 'remote', path: '/photos', server: RA })).toBe('photos')
+    expect(locLabel({ side: 'remote', path: '/photos', server: RB2 })).toBe('photos')
   })
 })

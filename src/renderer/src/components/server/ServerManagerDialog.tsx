@@ -17,6 +17,7 @@ import {
   toDraft,
   type ServerDraft
 } from '@renderer/lib/serverAddress'
+import { connKey } from '@shared/connKey'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
 import {
   isValidMaxTransfers,
@@ -70,17 +71,16 @@ export function ServerManagerDialog({
   const dirty = selected ? !sameFields(draft, selected) : draft.host.trim() !== ''
   const error = saveError || connectError
 
-  // 저장된 서버를 고르면 그 서버의 최근 경로를 시작 폴더 후보로 가져온다.
-  const selHost = selected?.host
-  const selPort = selected?.port
+  // 저장된 서버를 고르면 그 서버 계정의 최근 경로를 시작 폴더 후보로 가져온다.
+  const selKey = selected && connKey(selected.host, selected.port, selected.username)
   useEffect(() => {
-    if (selHost === undefined) {
+    if (selKey === undefined) {
       setRecent([])
       return
     }
     let stale = false
     window.api
-      .invoke<IpcResult<RecentPath[]>>('ftp:getRecentPaths', selHost, selPort)
+      .invoke<IpcResult<RecentPath[]>>('ftp:getRecentPaths', selKey)
       .then((result) => {
         if (!stale && result.success) setRecent(result.data)
       })
@@ -88,7 +88,7 @@ export function ServerManagerDialog({
     return () => {
       stale = true
     }
-  }, [selHost, selPort])
+  }, [selKey])
 
   // 저장된 비밀번호를 이 컴퓨터가 얼마나 보호하는지 묻는다. 묻지 못하면 경고 없이 둔다(E11).
   useEffect(() => {

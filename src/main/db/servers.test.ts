@@ -4,8 +4,11 @@ import fs from 'fs'
 import path from 'path'
 import { ErrorCode } from '@shared/types/ipc'
 import {
+  deleteServer,
+  getRecentPaths,
   listServers,
   recordConnection,
+  recordRecentPath,
   saveServer,
   ServerSaveError,
   type PasswordWrite
@@ -33,6 +36,9 @@ beforeEach(() => {
     last_visited TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(server_host, server_port, path)
   )`)
+  db.exec(
+    fs.readFileSync(path.join(__dirname, 'migrations', '005_remote_recent_paths.sql'), 'utf-8')
+  )
 })
 
 afterEach(() => db.close())
@@ -61,12 +67,21 @@ function stored(id?: number): { password_enc: string | null; password_cipher: Bu
   }
 }
 
+/** 그 host·port의 최근 경로 행, 사용자마다 `user path` */
 function paths(host: string, port: number): string[] {
   return (
     db
-      .prepare('SELECT path FROM server_recent_paths WHERE server_host = ? AND server_port = ?')
-      .all(host, port) as Array<{ path: string }>
-  ).map((r) => r.path)
+      .prepare(
+        'SELECT username, path FROM remote_recent_paths WHERE host = ? AND port = ? ORDER BY username, path'
+      )
+      .all(host, port) as Array<{ username: string; path: string }>
+  ).map((r) => `${r.username} ${r.path}`)
+}
+
+function addPath(host: string, port: number, username: string, path: string): void {
+  db.prepare(
+    'INSERT INTO remote_recent_paths (host, port, username, path) VALUES (?, ?, ?, ?)'
+  ).run(host, port, username, path)
 }
 
 describe('saved password', () => {
@@ -186,14 +201,12 @@ describe('saveServer', () => {
 
   it('updates by id and moves recent paths when the address changes', () => {
     const { id } = saveServer(db, base, plain('pw'))
-    db.prepare(
-      "INSERT INTO server_recent_paths (server_host, server_port, path) VALUES ('nas.local', 21, '/photos')"
-    ).run()
+    addPath('nas.local', 21, 'me', '/photos')
 
     const moved = saveServer(db, { ...base, id, host: 'nas2.local', port: 2121 }, plain('pw'))
 
     expect(moved).toMatchObject({ id, host: 'nas2.local', port: 2121 })
-    expect(paths('nas2.local', 2121)).toEqual(['/photos'])
+    expect(paths('nas2.local', 2121)).toEqual(['me /photos'])
     expect(paths('nas.local', 21)).toEqual([])
     expect(listServers(db)).toHaveLength(1)
   })
@@ -368,5 +381,104 @@ describe('listServers', () => {
 
     expect(list).toHaveLength(25)
     expect(list[0].host).toBe('h3')
+  })
+})
+
+describe('recent paths per connection', () => {
+  const RA = 'ra@127.0.0.1:2121'
+  const RB2 = 'rb2@127.0.0.1:2121'
+  const read = (key: string): string[] => getRecentPaths(db, key).map((p) => p.path)
+  /** 밀리초 시각이 바뀔 때까지 기다린다(기록 순서가 시각으로 갈리게) */
+  const nextMs = (): void => {
+    const start = Date.now()
+    while (Date.now() < start + 2) {
+      // 바쁜 대기
+    }
+  }
+
+  it('records and reads the recent folders of each user@host:port on its own', () => {
+    // covers: Test-1148
+    recordRecentPath(db, RA, '/photos')
+    recordRecentPath(db, RB2, '/inbox')
+    expect(read(RB2)).toEqual(['/inbox'])
+    expect(read(RA)).toEqual(['/photos'])
+
+    // 호스트는 대소문자를 가리지 않고, 사용자는 가린다
+    recordRecentPath(db, 'me@nas.local:21', '/a')
+    expect(read('me@NAS.local:21')).toEqual(['/a'])
+    expect(read('ME@nas.local:21')).toEqual([])
+
+    // 같은 경로를 다시 기록하면 행이 늘지 않고 맨 앞으로
+    recordRecentPath(db, 'me@nas.local:21', '/b')
+    db.prepare("UPDATE remote_recent_paths SET last_visited = '2000-01-01 00:00:00.000'").run()
+    recordRecentPath(db, 'me@nas.local:21', '/a')
+    expect(read('me@nas.local:21')).toEqual(['/a', '/b'])
+    expect(paths('nas.local', 21)).toEqual(['me /a', 'me /b'])
+
+    // 호스트 철자만 다르게 같은 경로를 기록해도 행이 늘지 않고, 20개도 한 키로 센다
+    nextMs()
+    recordRecentPath(db, 'me@NAS.local:21', '/b')
+    expect(read('me@nas.local:21')).toEqual(['/b', '/a'])
+    expect(paths('NAS.local', 21)).toEqual(['me /b'])
+    expect(paths('nas.local', 21)).toEqual(['me /a'])
+    for (let i = 0; i <= 20; i++) {
+      nextMs()
+      recordRecentPath(db, i < 20 ? 'me@NAS.local:21' : 'me@nas.local:21', `/c${i}`)
+    }
+    expect(read('me@nas.local:21')).toEqual(Array.from({ length: 20 }, (_, i) => `/c${20 - i}`))
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS n FROM remote_recent_paths WHERE lower(host) = 'nas.local'")
+        .get()
+    ).toEqual({ n: 20 })
+
+    // 키마다 20개를 남긴다
+    const many = Array.from({ length: 25 }, (_, i) => `/p${i}`)
+    for (const p of many) {
+      nextMs()
+      recordRecentPath(db, RA, p)
+    }
+    expect(read(RA)).toEqual(many.slice(5).reverse())
+    expect(
+      db.prepare("SELECT COUNT(*) AS n FROM remote_recent_paths WHERE username = 'ra'").get()
+    ).toEqual({ n: 20 })
+    expect(read(RB2)).toEqual(['/inbox'])
+  })
+
+  it("moves every user's recent folders with the saved address and deletes them with the server", () => {
+    // covers: Test-1149
+    const { id } = saveServer(db, base, plain('pw'))
+    addPath('nas.local', 21, 'me', '/photos')
+    addPath('nas.local', 21, 'guest', '/guest')
+    // 옛 테이블에서 호스트 철자 그대로 복사된 행(SH9)도 저장 행을 따라간다
+    addPath('NAS.local', 21, 'me', '/old-case')
+    // 새 주소에 같은 사용자·경로의 행이 이미 있어도 실패하지 않는다
+    addPath('nas.local', 2121, 'me', '/photos')
+
+    saveServer(db, { ...base, id, port: 2121 }, plain('pw'))
+    expect(paths('nas.local', 2121)).toEqual(['guest /guest', 'me /old-case', 'me /photos'])
+    expect(paths('nas.local', 21)).toEqual([])
+    expect(paths('NAS.local', 21)).toEqual([])
+
+    // 사용자만 바꾸면 아무 행도 옮기지 않는다
+    saveServer(db, { ...base, id, port: 2121, username: 'you' }, plain('pw'))
+    expect(paths('nas.local', 2121)).toEqual(['guest /guest', 'me /old-case', 'me /photos'])
+
+    // 지우면 그 host·port의 모든 사용자 행(호스트 철자만 다른 행 포함)과 옛 테이블 행이 지워지고,
+    // 다른 주소의 행은 남는다
+    addPath('other.lan', 21, 'me', '/keep')
+    addPath('NAS.local', 2121, 'me', '/photos')
+    db.prepare(
+      "INSERT INTO server_recent_paths (server_host, server_port, path) VALUES ('nas.local', 2121, '/old')"
+    ).run()
+    deleteServer(db, id!)
+    expect(paths('nas.local', 2121)).toEqual([])
+    expect(paths('NAS.local', 2121)).toEqual([])
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS n FROM server_recent_paths WHERE server_host = 'nas.local'")
+        .get()
+    ).toEqual({ n: 0 })
+    expect(paths('other.lan', 21)).toEqual(['me /keep'])
   })
 })

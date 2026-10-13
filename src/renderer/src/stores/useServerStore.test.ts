@@ -95,4 +95,57 @@ describe('useServerStore.connect with several connections', () => {
     await expect(useServerStore.getState().connect(DRAFT_B)).resolves.toBe(false)
     expect(useServerStore.getState().error).toBe(en['connect.failed'])
   })
+
+  it("asks the recent folders of the account it connects as, not the saved row's", async () => {
+    // covers: Test-1152
+    const RA = 'ra@127.0.0.1:2121'
+    const RB2 = 'rb2@127.0.0.1:2121'
+    useFtpStore.setState({ connections: {} })
+    useServerStore.setState({
+      servers: [
+        {
+          id: 1,
+          name: '',
+          host: '127.0.0.1',
+          port: 2121,
+          username: 'ra',
+          hasPassword: false,
+          secure: false
+        }
+      ]
+    })
+    const draft = (username: string): ServerDraft => ({
+      ...emptyDraft(),
+      id: 1,
+      host: '127.0.0.1',
+      port: '2121',
+      username,
+      password: 'pw'
+    })
+    const recent: Record<string, string[]> = { [RA]: ['/photos'] }
+    const connectAs = async (username: string): Promise<unknown[][]> => {
+      invoke.mockClear()
+      useFtpStore.setState({ connections: {} })
+      mockIpc({
+        'ftp:getRecentPaths': (key) => ({
+          success: true,
+          data: (recent[key as string] ?? []).map((path) => ({ path, lastVisited: '' }))
+        })
+      })
+      await expect(useServerStore.getState().connect(draft(username))).resolves.toBe(true)
+      return callsOf('ftp:getRecentPaths')
+    }
+
+    // 다른 계정으로 연결: 그 계정의 키로 묻고, 기록이 없으면 RA의 /photos가 아니라 / 에서 연다
+    expect(await connectAs('rb2')).toEqual([[RB2]])
+    expect(callsOf('ftp:list')).toEqual([[RB2, '/']])
+
+    recent[RB2] = ['/inbox']
+    expect(await connectAs('rb2')).toEqual([[RB2]])
+    expect(callsOf('ftp:list')).toEqual([[RB2, '/inbox']])
+
+    // 저장된 계정 그대로 연결하면 저장된 키로 묻는다
+    expect(await connectAs('ra')).toEqual([[RA]])
+    expect(callsOf('ftp:list')).toEqual([[RA, '/photos']])
+  })
 })

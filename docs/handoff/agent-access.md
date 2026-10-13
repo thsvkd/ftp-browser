@@ -29,7 +29,7 @@
 
 | 도구                 | 위험도              | 동작                                                                                                                                                                                                    |
 | -------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_status`         | read-only           | `connections[]`(연결마다 server·serverId·name·host·port·user·status·lastUsed), 전송·파일 작업의 상태별 합계                                                                                             |
+| `get_status`         | read-only           | `connections[]`(연결마다 server·serverId·name·host·port·user·status·lastUsed. serverId·name은 사용자까지 같은 저장 서버일 때만), 전송·파일 작업의 상태별 합계                                           |
 | `list_servers`       | read-only           | 저장된 서버(id·이름·host·port·user·secure). 비밀번호 필드 없음                                                                                                                                          |
 | `list_directory`     | read-only           | 원격 폴더 목록, `kind`·`nameContains`·`modifiedFrom/To` 필터, 페이지(cursor)                                                                                                                            |
 | `get_image_previews` | read-only           | 원격 이미지 썸네일(JPEG, 최대 360px) 1–8개, 부분 실패 허용                                                                                                                                              |
@@ -44,7 +44,7 @@
 
 모든 도구 설명은 원격 이름·내용이 신뢰할 수 없는 데이터라고 밝힌다. 오류는 `CODE: 메시지 + 다음 행동`의 `isError` 결과다.
 
-**대상 연결**(multi-connection MC18·MC22): 원격 도구 7개(`list_directory`·`get_image_previews`·`create_directory`·`rename`·`download`·`upload`·`delete`)와 `disconnect`는 선택 인자 `server`(`connect.server`와 같은 정수·문자열)를 받는다. 대상은 ① `server`: 연결 키(대소문자 무시) 또는 저장 서버(id·별칭·host)의 연결 — 마지막 사용 연결이 된다, ② 인자가 없으면 마지막 사용 연결(`connect` 성공 또는 `server`로 고른 호출)이 아직 연결돼 있으면 그것, ③ 연결이 하나면 그것, ④ 0개면 `NOT_CONNECTED`, 둘 이상이면 `AMBIGUOUS`(연결마다 이름·id·키 + "Pass server …"). 마지막 사용 연결은 앱에 하나다(`src/main/mcp/agentTarget.ts`).
+**대상 연결**(multi-connection MC18·MC22): 원격 도구 7개(`list_directory`·`get_image_previews`·`create_directory`·`rename`·`download`·`upload`·`delete`)와 `disconnect`는 선택 인자 `server`(`connect.server`와 같은 정수·문자열)를 받는다. 대상은 ① `server`: 연결 키(대소문자 무시) 또는 저장 서버(id·별칭·host)의 연결 — 마지막 사용 연결이 된다, ② 인자가 없으면 마지막 사용 연결(`connect` 성공 또는 `server`로 고른 호출)이 아직 연결돼 있으면 그것, ③ 연결이 하나면 그것, ④ 0개면 `NOT_CONNECTED`, 둘 이상이면 `AMBIGUOUS`(연결마다 키·별칭·id + `Pass server with one of the user@host:port keys listed.`). 마지막 사용 연결은 앱에 하나다(`src/main/mcp/agentTarget.ts`).
 
 ## 3. 지우는 것
 

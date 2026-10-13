@@ -4,7 +4,7 @@ import { t } from '@renderer/i18n'
 import { parentPath, type Loc } from '@renderer/lib/explorerEntry'
 import { nextRate, type RateSample } from '@renderer/lib/transferRate'
 import { useListingStore } from './useListingStore'
-import { parseConnKey, type ConnKey } from '@shared/connKey'
+import { connLabel, type ConnKey } from '@shared/connKey'
 import type {
   ConflictDecision,
   TransferConflict,
@@ -152,9 +152,9 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
         const batch = job.batchId ?? `job:${job.id}`
         if (!partialToasted.has(batch)) {
           partialToasted.add(batch)
-          const dest = parseConnKey(job.server)
-          const server = dest ? `${dest.host}:${dest.port}` : job.server
-          toast(t('toast.relayPartialRemoved', { name: job.fileName, server }))
+          toast(
+            t('toast.relayPartialRemoved', { name: job.fileName, server: connLabel(job.server) })
+          )
         }
       }
       // 받은 파일이 로컬 목록에 보이게 한다. 업로드는 main이 ftp:remoteChanged로 이미 알린다

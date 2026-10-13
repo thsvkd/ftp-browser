@@ -22,7 +22,7 @@ import { useServerStore } from '@renderer/stores/useServerStore'
 import { useActiveTab, useTabsStore } from '@renderer/stores/useTabsStore'
 import { SourceBadge } from '@renderer/components/common/SourceBadge'
 import { useDropTarget } from '@renderer/components/explorer/dnd'
-import { connKey } from '@shared/connKey'
+import { connKey, connLabel } from '@shared/connKey'
 import type { ConnectionStatus, FtpServer, RecentPath } from '@shared/types/ftp'
 import type { IpcResult } from '@shared/types/ipc'
 import type { LocalPlaces } from '@shared/types/local'
@@ -67,6 +67,7 @@ function Place({
   label,
   icon: Icon,
   title,
+  detail,
   small,
   indent
 }: {
@@ -74,6 +75,8 @@ function Place({
   label: string
   icon: LucideIcon
   title?: string
+  /** 이름 뒤의 출처 줄(최근 위치의 원격 항목, same-host-accounts SH5). 있으면 접근 이름에 덧붙인다 */
+  detail?: string
   small?: boolean
   indent?: boolean
 }): React.JSX.Element {
@@ -92,6 +95,7 @@ function Place({
       onDragOver={drop.handlers.onDragOver}
       onDrop={drop.handlers.onDrop}
       aria-current={here ? 'location' : undefined}
+      aria-label={detail ? `${label} · ${detail}` : undefined}
       title={
         drop.over
           ? drop.valid
@@ -121,12 +125,19 @@ function Place({
       />
       <span
         className={cn(
-          'min-w-0 flex-1 truncate',
+          // 출처 줄이 있으면 이름이 제 너비를 갖고 출처 줄이 남는 폭을 쓴다(출처 줄이 먼저 잘린다)
+          'min-w-0 truncate',
+          !detail && 'flex-1',
           small ? 'text-[12.5px] text-[var(--mu)]' : 'text-[13px]'
         )}
       >
         {label}
       </span>
+      {detail && (
+        <span className="mono min-w-0 flex-1 truncate text-[10.5px] text-[var(--mu)]">
+          {detail}
+        </span>
+      )}
       {drop.over && (
         <span
           aria-hidden
@@ -209,8 +220,8 @@ function ServerRow({
       {status === 'connected' && (
         <button
           onClick={onDisconnect}
-          aria-label={t('sidebar.disconnect', { name })}
-          title={t('sidebar.disconnect', { name })}
+          aria-label={t('sidebar.disconnect', { name: sub })}
+          title={t('sidebar.disconnect', { name: sub })}
           className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--mu)] opacity-0 transition-opacity hover:bg-[var(--hv)] hover:text-[var(--dg)] focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100"
         >
           <Unplug className="h-3.5 w-3.5" aria-hidden />
@@ -220,24 +231,24 @@ function ServerRow({
   )
 }
 
-/** 한 서버의 행과, 연결됐으면 그 서버의 최근 폴더 4개(`ftp:getRecentPaths(host, port)`). */
+/** 한 서버의 행과, 연결됐으면 그 연결의 최근 폴더 4개(`ftp:getRecentPaths(key)`). */
 function ServerEntry({ row }: { row: ServerRowData }): React.JSX.Element {
   const status = useFtpStore((s) => s.connections[row.key]?.status ?? 'disconnected')
   const connected = status === 'connected'
   const [recent, setRecent] = useState<string[]>([])
 
   useEffect(() => {
-    setRecent([])
     if (!connected) return
     let current = true
     window.api
-      .invoke<IpcResult<RecentPath[]>>('ftp:getRecentPaths', row.host, row.port)
+      .invoke<IpcResult<RecentPath[]>>('ftp:getRecentPaths', row.key)
       .then((r) => current && r.success && setRecent(r.data.slice(0, 4).map((p) => p.path)))
       .catch(() => undefined)
+    // 끊기거나 키가 바뀌면 그 연결의 폴더를 지운다
     return () => {
       current = false
+      setRecent([])
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- host·port는 키에 들어 있다
   }, [connected, row.key])
 
   const root: Loc | null = connected ? { side: 'remote', path: '/', server: row.key } : null
@@ -245,7 +256,7 @@ function ServerEntry({ row }: { row: ServerRowData }): React.JSX.Element {
     <>
       <ServerRow
         name={row.name}
-        sub={`${row.host}:${row.port}`}
+        sub={connLabel(row.key)}
         status={status}
         root={root}
         onActivate={() => (row.saved ? connectSaved(row.saved) : connectToServer(row.key))}
@@ -286,7 +297,9 @@ function Servers(): React.JSX.Element {
     ...(unsaved
       ? unsaved.split('\n').map((line) => {
           const [key, host, port] = line.split('\t')
-          return { key, name: host, host, port: Number(port) }
+          // 이름은 키 이름표에서 끝의 `:port`를 뗀 것(같은 호스트의 다른 계정도 구별, SH4)
+          const label = connLabel(key)
+          return { key, name: label.slice(0, label.lastIndexOf(':')), host, port: Number(port) }
         })
       : []),
     ...servers.map((s) => ({
@@ -346,16 +359,21 @@ export function Sidebar(): React.JSX.Element {
       {recent.length > 0 && (
         <>
           <Heading>{t('sidebar.recent')}</Heading>
-          {recent.slice(0, 5).map((loc) => (
-            <Place
-              key={locKey(loc)}
-              loc={loc}
-              label={locLabel(loc)}
-              icon={Clock}
-              title={loc.path}
-              small
-            />
-          ))}
+          {recent.slice(0, 5).map((loc) => {
+            // 원격 항목은 출처 줄로 어느 연결의 폴더인지 보인다(SH5). 로컬은 지금 그대로
+            const source = loc.side === 'remote' && loc.server ? connLabel(loc.server) : undefined
+            return (
+              <Place
+                key={locKey(loc)}
+                loc={loc}
+                label={locLabel(loc)}
+                icon={Clock}
+                title={source ? `${source} · ${loc.path}` : loc.path}
+                detail={source}
+                small
+              />
+            )
+          })}
         </>
       )}
     </nav>

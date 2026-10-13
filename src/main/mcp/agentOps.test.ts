@@ -42,12 +42,19 @@ afterEach(async () => {
 
 const at = (...parts: string[]): string => path.join(tmp, ...parts)
 
-function addRecentPath(host: string, port: number, p: string, lastVisited: string): void {
+/** 최근 경로 한 행. 사용자는 연결 키의 사용자다(기본은 저장 행의 'me') */
+function addRecentPath(
+  host: string,
+  port: number,
+  p: string,
+  lastVisited: string,
+  user = 'me'
+): void {
   h.db
     .prepare(
-      'INSERT INTO server_recent_paths (server_host, server_port, path, last_visited) VALUES (?, ?, ?, ?)'
+      'INSERT INTO remote_recent_paths (host, port, username, path, last_visited) VALUES (?, ?, ?, ?, ?)'
     )
-    .run(host, port, p, lastVisited)
+    .run(host, port, user, p, lastVisited)
 }
 
 describe('saved servers and connect', () => {
@@ -117,6 +124,23 @@ describe('saved servers and connect', () => {
       server: 'me@nas.local:21',
       status: 'disconnected'
     })
+  })
+
+  it("opens the saved user's last folder, not another user's on the same address", async () => {
+    // covers: Test-1154
+    const id = addServer(h.db, { name: 'NAS', host: 'nas.local', user: 'me', password: 'pw' })
+    addRecentPath('nas.local', 21, '/photos', '2026-01-01 00:00:00.000', 'me')
+    addRecentPath('nas.local', 21, '/guest', '2026-01-02 00:00:00.000', 'guest')
+    h.remote.addDir('/photos').addDir('/guest')
+
+    expect(dataOf(await call(client, 'connect', { server: id })).path).toBe('/photos')
+    expect(h.sessions).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/photos' }))
+
+    // 저장 행 사용자의 기록이 없으면 다른 사용자의 기록이 있어도 루트에서 연다
+    await call(client, 'disconnect')
+    h.db.prepare("DELETE FROM remote_recent_paths WHERE username = 'me'").run()
+    expect(dataOf(await call(client, 'connect', { server: id })).path).toBe('/')
+    expect(h.sessions).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/' }))
   })
 
   it('adds a connection without touching the others, and opens a folder on one already connected', async () => {

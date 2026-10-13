@@ -8,6 +8,7 @@ import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useActiveTab } from '@renderer/stores/useTabsStore'
 import { ZOOM_STEP } from '@renderer/components/explorer/FileGrid'
+import { connLabel } from '@shared/connKey'
 
 const fileBytes = (sum: number, e: { type: string; size: number }): number =>
   sum + (e.type === 'file' ? e.size : 0)
@@ -40,7 +41,8 @@ export function StatusBar(): React.JSX.Element {
     : connectedCount
       ? 'connected'
       : 'disconnected'
-  const host = server ? (conn?.host ?? '') : ''
+  // 같은 호스트의 다른 계정도 구별되게 키 이름표(same-host-accounts SH6)
+  const host = server ? connLabel(server) : ''
   const { setTileSize, adjustTileSize } = useSettingsStore.getState()
 
   const dirs = all.filter((e) => e.type === 'directory').length
