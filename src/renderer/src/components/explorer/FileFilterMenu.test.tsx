@@ -220,6 +220,8 @@ describe('FileFilterMenu — categories', () => {
     for (const box of within(dialog()).getAllByRole('checkbox'))
       expect((box as HTMLInputElement).checked).toBe(false)
     expect(showAll().disabled).toBe(true)
+    // 비활성이 된 버튼에 포커스가 남지 않고 첫 체크박스로 옮겨 간다.
+    expect(document.activeElement).toBe(within(dialog()).getAllByRole('checkbox')[0])
   })
 })
 

@@ -170,7 +170,11 @@ function Popover({
     >
       <button
         disabled={!active}
-        onClick={() => commit(EMPTY_FILTER)}
+        onClick={() => {
+          commit(EMPTY_FILTER)
+          // 이 버튼은 곧 비활성이 되어 포커스를 잃는다. 키보드 사용자가 이어서 고를 수 있게 옮겨 둔다.
+          rootRef.current?.querySelector<HTMLElement>('input[type="checkbox"]')?.focus()
+        }}
         className="mb-1 h-8 rounded-lg px-2 text-left text-[13px] font-semibold text-[var(--ac)] hover:bg-[var(--hv)] disabled:text-[var(--mu)] disabled:opacity-60 disabled:hover:bg-transparent"
       >
         {t('explorer.showAll')}
