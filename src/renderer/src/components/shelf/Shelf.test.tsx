@@ -168,6 +168,82 @@ describe('Shelf — dropping into the active tab', () => {
   })
 })
 
+describe('Shelf — items from two servers', () => {
+  const B = 'you@b.example:2121'
+  const fromB = (name: string): ExplorerEntry => fromFtpEntry(ftp(name, { size: 1024 }), '/y', B)
+  const sends = (): unknown[][] => invokeCalls(h.invoke, 'transfer:send')
+  const done = {
+    success: true,
+    data: { batchId: 'b1', ids: ['t1'], skipped: [], conflicts: [], totalBytes: 1 }
+  }
+
+  it("downloads each server's items with its own connection and copies across servers as a relay", async () => {
+    // covers: Test-1025
+    h = setupExplorer({ local: { 'C:\\dl': [] }, remote: { '/in': [] } })
+    setConnection(B, 'connected')
+    h.handlers['transfer:send'] = () => done
+    useTabsStore.getState().openTab(localLoc('C:\\dl'))
+    useShelfStore.getState().add([remoteItem('a.jpg'), fromB('b.jpg'), remoteItem('c.jpg')])
+    render(
+      <>
+        <Shelf />
+        <ConflictSheet />
+      </>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /^Download 3 to dl\s*→/ }))
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    expect(sends()).toEqual([
+      [server(), { direction: 'download', sources: ['/x/a.jpg', '/x/c.jpg'], destDir: 'C:\\dl' }],
+      [B, { direction: 'download', sources: ['/y/b.jpg'], destDir: 'C:\\dl' }]
+    ])
+
+    // A의 항목을 B의 원격 탭에: 받는 쪽 연결로 서버 간 복사를 보낸다. 충돌이면 결정을 붙여 다시 보낸다
+    h.invoke.mockClear()
+    let asked = false
+    h.handlers['transfer:send'] = () => {
+      if (asked) return done
+      asked = true
+      return {
+        success: true,
+        data: {
+          ids: [],
+          skipped: [],
+          totalBytes: 1,
+          conflicts: [
+            {
+              target: '/in/a.jpg',
+              source: '/x/a.jpg',
+              name: 'a.jpg',
+              incoming: { size: 1024, modifiedAt: '2024-01-02T00:00:00.000Z' },
+              existing: { size: 10, modifiedAt: '2024-01-01T00:00:00.000Z' }
+            }
+          ]
+        }
+      }
+    }
+    act(() => {
+      useTabsStore.getState().openTab({ side: 'remote', path: '/in', server: B })
+      useShelfStore.getState().add([remoteItem('a.jpg')])
+    })
+    fireEvent.click(await screen.findByRole('button', { name: /^Copy 1 to in\s*→/ }))
+    fireEvent.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Overwrite' })
+    )
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    const relay = {
+      direction: 'relay',
+      sourceServer: server(),
+      sources: ['/x/a.jpg'],
+      destDir: '/in'
+    }
+    expect(sends()).toEqual([
+      [B, relay],
+      [B, { ...relay, decisions: { '/in/a.jpg': 'overwrite' } }]
+    ])
+  })
+})
+
 describe('Shelf — same-side conflicts', () => {
   const sheet = (): Promise<HTMLElement> => screen.findByRole('alertdialog')
   const channels = (): string[] =>

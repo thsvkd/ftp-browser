@@ -57,11 +57,12 @@ export function locLabel(loc: Loc): string {
     : t('place.root', { source: sourceLabel(loc) })
 }
 
-/** "Download 3 · Move 2" — 그 계획이 무엇을 하는지. */
+/** "Download 3 · Move 2" — 그 계획이 무엇을 하는지. 다른 서버로 보내는 것은 복사다(MC17). */
 export function planVerb(plan: SendPlan): string {
   const parts: string[] = []
   if (plan.direction) parts.push(t(`send.${plan.direction}`, { count: plan.transfer.length }))
   if (plan.sameSideVerb) parts.push(t(`send.${plan.sameSideVerb}`, { count: plan.sameSide.length }))
+  if (plan.relay.length) parts.push(t('send.copy', { count: plan.relay.length }))
   return parts.join(' · ')
 }
 
@@ -152,6 +153,18 @@ function transfer(
     .then((r) => r !== null)
 }
 
+/** 다른 서버의 항목을 목적지 서버로 복사한다(서버 간 전송, MC23): 받는 쪽 연결로 보내고 보내는 쪽을 함께 넘긴다. */
+function relay(sourceServer: string, paths: string[], dest: Loc): Promise<boolean> {
+  return useTransferStore
+    .getState()
+    .send(
+      dest.server ?? '',
+      { direction: 'relay', sourceServer, sources: paths, destDir: dest.path },
+      { label: batchLabel(paths.map(baseName)), to: dest }
+    )
+    .then((r) => r !== null)
+}
+
 /** 원격 항목을 서버별로 묶는다(처음 나온 순서). */
 function byServer(entries: readonly ExplorerEntry[]): Map<string, ExplorerEntry[]> {
   const groups = new Map<string, ExplorerEntry[]>()
@@ -187,6 +200,16 @@ async function runParts(plan: SendPlan, dest: Loc): Promise<ExplorerEntry[]> {
           dest
         )
       ])
+  // 서버 간 복사는 보내는 서버마다 한 번씩 보낸다
+  for (const [server, entries] of byServer(plan.relay))
+    parts.push([
+      entries,
+      relay(
+        server,
+        entries.map((e) => e.path),
+        dest
+      )
+    ])
   if (plan.sameSideVerb === 'move') parts.push([plan.sameSide, moveRemote(plan.sameSide, dest)])
   if (plan.sameSideVerb === 'copy') parts.push([plan.sameSide, copyLocal(plan.sameSide, dest)])
   const oks = await Promise.all(parts.map(([, run]) => run))
@@ -196,7 +219,7 @@ async function runParts(plan: SendPlan, dest: Loc): Promise<ExplorerEntry[]> {
 /** 검사를 마친 계획을 실행한다. 전송·같은 쪽 동작이 모두 시작되면 true. */
 export async function runPlan(plan: SendPlan, dest: Loc): Promise<boolean> {
   const started = await runParts(plan, dest)
-  return started.length === plan.transfer.length + plan.sameSide.length
+  return started.length === plan.transfer.length + plan.sameSide.length + plan.relay.length
 }
 
 /** 항목들을 `dest`로 보낸다. 막히면 사유를 토스트로 알리고 false. */
@@ -244,7 +267,7 @@ async function dropShelfOnce(dest: Loc): Promise<boolean> {
   flyTo(cards, document.querySelector('[data-activity-target]'))
   // 모두 시작하면 선반을 비운다(이미 그 폴더에 있던 항목 포함). 일부가 실패하면 시작한 부분의 항목만 뺀다
   const started = await runParts(plan, dest)
-  const ok = started.length === plan.transfer.length + plan.sameSide.length
+  const ok = started.length === plan.transfer.length + plan.sameSide.length + plan.relay.length
   useShelfStore.getState().remove((ok ? items : started).map(locKey))
   return ok
 }

@@ -380,4 +380,67 @@ describe('transfer channels with two connections', () => {
       ((await invoke<TransferJob[]>('transfer:getAll')) as { data: TransferJob[] }).data
     ).toEqual([])
   })
+
+  it('plans a relay from the sending listing, asks about conflicts first and queues one forced relay batch', async () => {
+    // covers: Test-994
+    const send = (
+      conn: ConnKey,
+      request: TransferSendRequest
+    ): Promise<IpcResult<TransferSendResult>> =>
+      invoke<TransferSendResult>('transfer:send', conn, request)
+    const relay: TransferSendRequest = {
+      direction: 'relay',
+      sourceServer: A,
+      sources: ['/r'],
+      destDir: '/'
+    }
+
+    // B에도 /r/a.jpg가 있다: 결정이 없으면 충돌만 돌려주고 아무것도 넣지 않는다
+    const asked = await send(B, relay)
+    expect(asked).toMatchObject({
+      success: true,
+      data: {
+        ids: [],
+        conflicts: [expect.objectContaining({ target: '/r/a.jpg', source: '/r/a.jpg' })]
+      }
+    })
+    expect(hub.getAll()).toEqual([])
+
+    const sent = await send(B, { ...relay, decisions: { '/r/a.jpg': 'overwrite' } })
+    const { batchId, ids } = (sent as { data: TransferSendResult }).data
+    expect(batchId).toEqual(expect.any(String))
+    expect(hub.getAll()).toEqual([
+      expect.objectContaining({
+        id: ids[0],
+        batchId,
+        direction: 'relay',
+        server: B,
+        sourceServer: A,
+        sourcePath: '/r/a.jpg',
+        remotePath: '/r/a.jpg',
+        localPath: ''
+      })
+    ])
+    expect(registry.get(A)!.queue.getAll()).toEqual([])
+    expect(registry.get(B)!.queue.getAll()).toEqual([])
+
+    // 같은 서버면 실패 값, 어느 쪽이든 연결 안 됨이면 FTP_NOT_CONNECTED와 그 키
+    expect(await send(A, relay)).toEqual({
+      success: false,
+      error: 'Use move within the same server.'
+    })
+    await registry.disconnect(A)
+    expect(await send(B, relay)).toMatchObject({
+      success: false,
+      code: 'FTP_NOT_CONNECTED',
+      error: expect.stringContaining(A)
+    })
+    await registry.connect(payloadOf(A))
+    await registry.disconnect(B)
+    expect(await send(B, relay)).toMatchObject({
+      success: false,
+      code: 'FTP_NOT_CONNECTED',
+      error: expect.stringContaining(B)
+    })
+  })
 })

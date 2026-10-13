@@ -391,6 +391,7 @@ export const zhCN = {
   'activity.remaining': '剩余 {{time}}',
   'activity.preparing': '正在准备 {{label}}…',
   'activity.labelMany_other': '{{name}} 等 {{count}} 项',
+  'activity.relay': '服务器间复制',
   'duration.seconds': '{{number}} 秒',
   'duration.minutes': '{{number}} 分钟',
   'duration.hours': '{{number}} 小时',
@@ -421,5 +422,6 @@ export const zhCN = {
   'toast.shelfEmpty': '暂存架为空。请选中项目后按 Shift+S。',
   'toast.sendSkipped_other': '已跳过 {{count}} 项',
   'toast.sendFailed': '无法开始传输',
+  'toast.relayPartialRemoved': '已删除 {{server}} 上 {{name}} 的不完整副本',
   'toast.retryFailed': '无法重试'
 } satisfies LocaleMessages

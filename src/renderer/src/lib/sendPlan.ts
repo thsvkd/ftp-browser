@@ -23,7 +23,8 @@ export interface SendPlan {
   relay: ExplorerEntry[]
   /** 이미 그 폴더에 있어 그대로 두는 수 */
   here: number
-  direction: TransferDirection | null
+  /** 다른 쪽 전송의 방향. 서버 간 복사는 `relay` 묶음이 따로 갖는다 */
+  direction: Exclude<TransferDirection, 'relay'> | null
   sameSideVerb: 'move' | 'copy' | null
   invalid: SendInvalid | null
 }
@@ -72,8 +73,6 @@ export function planSend(
     return refuse('send.invalidNotConnected')
   if (opts.copy && dest.side === 'remote' && plan.sameSide.length)
     return refuse('send.invalidRemoteCopy')
-  // 서버 간 복사는 아직 실행하지 않는다(multi-connection S5b가 이 줄을 지운다).
-  if (plan.relay.length) return refuse('send.invalidRemoteCopy')
   if (!plan.transfer.length && !plan.sameSide.length && !plan.relay.length)
     return refuse('send.invalidHere')
 

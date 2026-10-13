@@ -476,6 +476,7 @@ export const ru = {
   'activity.labelMany_few': '{{name}} и ещё {{count}}',
   'activity.labelMany_many': '{{name}} и ещё {{count}}',
   'activity.labelMany_other': '{{name}} и ещё {{count}}',
+  'activity.relay': 'Копирование между серверами',
   'duration.seconds': '{{number}} с',
   'duration.minutes': '{{number}} мин',
   'duration.hours': '{{number}} ч',
@@ -521,5 +522,6 @@ export const ru = {
   'toast.sendSkipped_many': 'Пропущено {{count}} элементов',
   'toast.sendSkipped_other': 'Пропущено {{count}} элемента',
   'toast.sendFailed': 'Не удалось начать передачу',
+  'toast.relayPartialRemoved': 'Неполная копия {{name}} на {{server}} удалена',
   'toast.retryFailed': 'Не удалось повторить'
 } satisfies LocaleMessages

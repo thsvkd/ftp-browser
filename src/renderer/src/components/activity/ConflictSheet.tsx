@@ -41,8 +41,9 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
   const conflict = conflicts[index]
   const rest = conflicts.length - index - 1
   const side = prompt.direction === 'download' || prompt.direction === 'copy' ? 'local' : 'remote'
-  // 같은 쪽 보내기(원격 이동·로컬 복사, D32)는 두 카드가 같은 쪽이다.
-  const sameSide = prompt.direction === 'move' || prompt.direction === 'copy'
+  // 같은 쪽 보내기(원격 이동·로컬 복사, D32)와 서버 간 복사(MC33)는 두 카드가 같은 쪽이다.
+  const relay = prompt.direction === 'relay'
+  const sameSide = prompt.direction === 'move' || prompt.direction === 'copy' || relay
   const newer = newerSide(conflict)
 
   // 닫히면 연 곳으로 포커스를 돌려준다. 그곳이 사라졌으면 목록으로.
@@ -70,10 +71,12 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
     const facts = conflict[kind]
     // 있던 것은 받는 쪽, 보내는 것은 보내는 쪽 파일이다. 그리드 밖이라 썸네일을 한 건 요청한다(D30).
     const there = kind === 'existing' || sameSide ? side : side === 'local' ? 'remote' : 'local'
+    // 원격 카드는 그 연결의 파일이다(썸네일 키·요청이 entry.server를 쓴다). 서버 간 복사의 보내는 것은 보내는
+    // 쪽 연결이다. 로컬 카드에는 두지 않는다
+    const server = relay && kind === 'incoming' ? prompt.sourceServer : prompt.server
     const entry: ExplorerEntry = {
       side: there,
-      // 원격 카드는 그 연결의 파일이다(썸네일 키·요청이 entry.server를 쓴다). 로컬 카드에는 두지 않는다
-      ...(there === 'remote' && prompt.server ? { server: prompt.server } : {}),
+      ...(there === 'remote' && server ? { server } : {}),
       path: kind === 'existing' ? conflict.target : conflict.source,
       name: conflict.name,
       type: conflict.folder ? 'directory' : 'file',

@@ -425,6 +425,7 @@ export const en = {
   'activity.preparing': 'Preparing {{label}}…',
   'activity.labelMany_one': '{{name}} and {{count}} more',
   'activity.labelMany_other': '{{name}} and {{count}} more',
+  'activity.relay': 'Copy between servers',
   'duration.seconds': '{{number}} s',
   'duration.minutes': '{{number}} min',
   'duration.hours': '{{number}} h',
@@ -460,5 +461,6 @@ export const en = {
   'toast.sendSkipped_one': 'Skipped {{count}} item',
   'toast.sendSkipped_other': 'Skipped {{count}} items',
   'toast.sendFailed': "Couldn't start the transfer",
+  'toast.relayPartialRemoved': 'Removed the incomplete copy of {{name}} on {{server}}',
   'toast.retryFailed': "Couldn't retry"
 }

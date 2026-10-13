@@ -404,6 +404,7 @@ export const ja = {
   'activity.remaining': '残り {{time}}',
   'activity.preparing': '{{label}} を準備中…',
   'activity.labelMany_other': '{{name}} ほか {{count}} 件',
+  'activity.relay': 'サーバー間コピー',
   'duration.seconds': '{{number}} 秒',
   'duration.minutes': '{{number}} 分',
   'duration.hours': '{{number}} 時間',
@@ -434,5 +435,6 @@ export const ja = {
   'toast.shelfEmpty': '棚は空です。項目を選んで Shift+S を押してください。',
   'toast.sendSkipped_other': '{{count}} 件の項目をスキップしました',
   'toast.sendFailed': '転送を開始できませんでした',
+  'toast.relayPartialRemoved': '{{server}} 上の {{name}} の不完全なコピーを削除しました',
   'toast.retryFailed': '再試行できませんでした'
 } satisfies LocaleMessages

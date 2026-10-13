@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
 import { fallbackBatchMeta, useTransferStore } from './useTransferStore'
 import { useListingStore } from './useListingStore'
 import { useSettingsStore } from './useSettingsStore'
 import type { Loc } from '@renderer/lib/explorerEntry'
 import type { TransferJob } from '@shared/types/transfer'
+
+vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }))
 
 function job(id: string, overrides: Partial<TransferJob> = {}): TransferJob {
   return {
@@ -191,17 +194,17 @@ describe('useTransferStore batch meta per connection', () => {
       to: { side: 'remote', path: '/in', server: B }
     })
 
-    // relay 배치(S5b의 방향, 지금 타입에는 없다): 받는 쪽 원격 폴더가 목적지다
+    // relay 배치: 받는 쪽 원격 폴더가 목적지다
     const relay = job('r1', {
       server: B,
-      direction: 'relay' as TransferJob['direction'],
+      direction: 'relay',
       sourceServer: 'me@a.example.com:21',
       sourcePath: '/photos/x/c.jpg',
       localPath: '',
       remotePath: '/photos/x/c.jpg',
       fileName: 'c.jpg',
       batchId: 'rl'
-    } as Partial<TransferJob>)
+    })
     expect(fallbackBatchMeta([relay])).toEqual({
       label: 'c.jpg',
       to: { side: 'remote', server: B, path: '/photos/x' }
@@ -212,6 +215,55 @@ describe('useTransferStore batch meta per connection', () => {
       server: B,
       path: '/photos/x'
     })
+  })
+})
+
+describe('useTransferStore relay partial cleanup toast', () => {
+  const B = 'you@b.example:2121'
+  const relay = (id: string, batchId: string, overrides: Partial<TransferJob> = {}): TransferJob =>
+    job(id, {
+      batchId,
+      direction: 'relay',
+      server: B,
+      sourceServer: 'me@a.example:21',
+      sourcePath: `/photos/${id}`,
+      localPath: '',
+      remotePath: `/in/${id}`,
+      fileName: id,
+      ...overrides
+    })
+  const apply = (...upserts: TransferJob[]): void =>
+    useTransferStore.getState().applyUpdate({ upserts, removedIds: [] })
+
+  beforeEach(() => {
+    vi.mocked(toast).mockClear()
+    useSettingsStore.setState({ language: 'en' })
+    useTransferStore.setState({ jobs: [], batchMeta: {} })
+  })
+
+  it('toasts once per batch when main reports a removed partial file, and never on a guess', () => {
+    // covers: Test-1027
+    apply(relay('a.jpg', 'r1', { status: 'active' }), relay('b.jpg', 'r1', { status: 'active' }))
+    apply(relay('a.jpg', 'r1', { status: 'failed', error: 'x' }))
+    expect(toast).not.toHaveBeenCalled()
+    apply(relay('a.jpg', 'r1', { status: 'failed', error: 'x', partialRemoved: true }))
+    apply(relay('a.jpg', 'r1', { status: 'failed', error: 'x', partialRemoved: true }))
+    apply(relay('b.jpg', 'r1', { status: 'cancelled', partialRemoved: true }))
+    expect(vi.mocked(toast).mock.calls).toEqual([
+      ['Removed the incomplete copy of a.jpg on b.example:2121']
+    ])
+
+    // 지웠다는 표시가 없는 실패·취소에는 토스트가 없다
+    vi.mocked(toast).mockClear()
+    apply(
+      relay('zero.bin', 'r2', { status: 'failed', error: `${B}: Permission denied` }),
+      relay('single.bin', 'r3', {
+        status: 'failed',
+        error: `${B} allows only one connection, so a server-to-server copy can't run.`
+      }),
+      relay('gone.bin', 'r4', { status: 'cancelled' })
+    )
+    expect(toast).not.toHaveBeenCalled()
   })
 })
 

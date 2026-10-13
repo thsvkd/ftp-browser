@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { planSend } from './sendPlan'
+import { planVerb } from './sendItems'
+import { t } from '@renderer/i18n'
 import type { ExplorerEntry, Loc } from './explorerEntry'
 
 function remote(
@@ -95,5 +97,59 @@ describe('planSend', () => {
       'send.invalidRemoteCopy'
     )
     expect(planSend([], localDir('C:\\dl'), connected).invalid).toBe('send.invalidNothing')
+  })
+
+  it('copies remote items to another server as a relay and keeps same-server rules', () => {
+    // covers: Test-1016
+    const A = 'me@h:21'
+    const B = 'you@other:2121'
+    const both: ReadonlySet<string> = new Set([A, B])
+
+    const relay = planSend([remote('/p/a.jpg', 'file', A)], remoteDir('/q', B), both)
+    expect(relay).toMatchObject({ direction: null, sameSideVerb: null, invalid: null, here: 0 })
+    expect(relay.relay.map((e) => e.path)).toEqual(['/p/a.jpg'])
+    expect(planVerb(relay)).toBe(t('send.copy', { count: 1 }))
+
+    const move = planSend([remote('/p/a.jpg', 'file', A)], remoteDir('/q', A), both)
+    expect(move).toMatchObject({ sameSideVerb: 'move', invalid: null, relay: [] })
+
+    const down = planSend(
+      [remote('/p/a.jpg', 'file', A), remote('/p/b.jpg', 'file', B)],
+      localDir('C:\\dl'),
+      both
+    )
+    expect(down).toMatchObject({ direction: 'download', invalid: null, relay: [] })
+    expect(down.transfer.map((e) => e.server)).toEqual([A, B])
+
+    const mixed = planSend(
+      [local('C:\\x\\a.jpg'), remote('/p/b.jpg', 'file', A)],
+      remoteDir('/q', B),
+      both
+    )
+    expect(mixed).toMatchObject({ direction: 'upload', invalid: null })
+    expect(mixed.transfer.map((e) => e.path)).toEqual(['C:\\x\\a.jpg'])
+    expect(mixed.relay.map((e) => e.path)).toEqual(['/p/b.jpg'])
+
+    // 서버가 다르면 "자기 안으로"도 "이미 여기"도 아니다
+    expect(planSend([remote('/a', 'directory', A)], remoteDir('/a/b', B), both).invalid).toBe(null)
+    const sameParent = planSend([remote('/a/x', 'file', A)], remoteDir('/a', B), both)
+    expect(sameParent).toMatchObject({ here: 0, invalid: null })
+    expect(sameParent.relay).toHaveLength(1)
+    expect(planSend([remote('/a/x', 'file', A)], remoteDir('/a', A), both)).toMatchObject({
+      here: 1,
+      invalid: 'send.invalidHere'
+    })
+
+    // 관련 서버가 하나라도 연결 안 됨이면 막는다
+    const onlyA: ReadonlySet<string> = new Set([A])
+    expect(planSend([remote('/p/a.jpg', 'file', A)], remoteDir('/q', B), onlyA).invalid).toBe(
+      'send.invalidNotConnected'
+    )
+    expect(planSend([remote('/p/a.jpg', 'file', B)], remoteDir('/q', A), onlyA).invalid).toBe(
+      'send.invalidNotConnected'
+    )
+    // invalidOtherServer는 없다
+    const all = [relay, move, down, mixed, sameParent].map((p) => p.invalid as string | null)
+    expect(all).not.toContain('send.invalidOtherServer')
   })
 })

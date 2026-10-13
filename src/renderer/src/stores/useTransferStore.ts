@@ -4,7 +4,7 @@ import { t } from '@renderer/i18n'
 import { parentPath, type Loc } from '@renderer/lib/explorerEntry'
 import { nextRate, type RateSample } from '@renderer/lib/transferRate'
 import { useListingStore } from './useListingStore'
-import type { ConnKey } from '@shared/connKey'
+import { parseConnKey, type ConnKey } from '@shared/connKey'
 import type {
   ConflictDecision,
   TransferConflict,
@@ -30,6 +30,8 @@ export interface ConflictPrompt {
   conflicts: TransferConflict[]
   /** 원격 카드의 연결(받는 쪽, 같은 쪽 원격 이동이면 그 서버). 로컬 복사에는 없다 */
   server?: ConnKey
+  /** 서버 간 복사(relay)만: 보내는 것 카드의 연결 */
+  sourceServer?: ConnKey
 }
 
 type Decisions = Record<string, ConflictDecision>
@@ -62,17 +64,25 @@ interface TransferStore {
     request: TransferSendRequest,
     meta: BatchMeta
   ) => Promise<TransferSendResult | null>
-  /** 충돌 시트에 묻는다. `servers.server`는 원격 카드의 연결. 결정을 돌려주고, 취소하면 null. */
+  /**
+   * 충돌 시트에 묻는다. `servers.server`는 원격 카드의 연결, `servers.sourceServer`는 서버 간 복사의 보내는 쪽.
+   * 결정을 돌려주고, 취소하면 null.
+   */
   askConflicts: (
     direction: ConflictPrompt['direction'],
     conflicts: TransferConflict[],
-    servers?: { server?: ConnKey }
+    servers?: { server?: ConnKey; sourceServer?: ConnKey }
   ) => Promise<Decisions | null>
   /** 충돌 시트의 답. `null`은 보내기 취소다. */
   resolveConflicts: (id: string, decisions: Decisions | null) => void
 }
 
 let sendSeq = 0
+/**
+ * 서버 간 복사의 잘린 파일을 지웠다고 이미 알린 배치(`batchId ?? job:<id>`). 배치가 목록에서 빠져도 지우지 않는다:
+ * 다시 시도한 같은 배치가 또 정리되어도 한 번 알린 것으로 충분하다(§10).
+ */
+const partialToasted = new Set<string>()
 const conflictAnswers = new Map<string, (decisions: Decisions | null) => void>()
 
 /** 완료된 다운로드의 로컬 폴더들. 디바운스 뒤 폴더마다 한 번 목록을 무효화한다. */
@@ -137,6 +147,16 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
       if (job.status === 'active')
         rates[job.id] = nextRate(rates[job.id], job.transferredBytes, now)
       else delete rates[job.id]
+      // main이 받는 쪽의 잘린 파일을 실제로 지웠을 때만 알린다(MC26). 상태나 오류 문구로 짐작하지 않는다
+      if (job.partialRemoved && !before?.partialRemoved) {
+        const batch = job.batchId ?? `job:${job.id}`
+        if (!partialToasted.has(batch)) {
+          partialToasted.add(batch)
+          const dest = parseConnKey(job.server)
+          const server = dest ? `${dest.host}:${dest.port}` : job.server
+          toast(t('toast.relayPartialRemoved', { name: job.fileName, server }))
+        }
+      }
       // 받은 파일이 로컬 목록에 보이게 한다. 업로드는 main이 ftp:remoteChanged로 이미 알린다
       // (만든 폴더마다 mkdir). 다운로드도 같게: 파일의 폴더부터 배치 목적지까지 그 사이 폴더를 모두.
       if (
@@ -208,7 +228,10 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
           return data
         }
         // 결정을 모아 같은 요청을 다시 보낸다. 그사이 새로 생긴 충돌은 main이 다시 돌려준다.
-        const decisions = await get().askConflicts(req.direction, data.conflicts, { server: conn })
+        const servers = req.sourceServer
+          ? { server: conn, sourceServer: req.sourceServer }
+          : { server: conn }
+        const decisions = await get().askConflicts(req.direction, data.conflicts, servers)
         if (!decisions) return null
         req = { ...req, decisions: { ...req.decisions, ...decisions } }
       }

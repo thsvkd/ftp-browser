@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownToLine,
+  ArrowLeftRight,
   ArrowUpFromLine,
   ChevronDown,
   CircleAlert,
@@ -213,7 +214,9 @@ function GroupRow({
   const status = groupStatus(jobs)
   const progress = batchProgress(jobs)
   const { speed, eta } = speedOf(jobs, rates)
-  const Dir = jobs[0]?.direction === 'upload' ? ArrowUpFromLine : ArrowDownToLine
+  const direction = jobs[0]?.direction
+  const relay = direction === 'relay'
+  const Dir = relay ? ArrowLeftRight : direction === 'upload' ? ArrowUpFromLine : ArrowDownToLine
   const finished = live.length === 0
   const retry = (ids: string[]): void => void useTransferStore.getState().retry(ids)
   const cancel = (id: string): void => void useTransferStore.getState().cancel(id)
@@ -232,6 +235,11 @@ function GroupRow({
         >
           {finished && !failed.length ? (
             <CircleCheck className="h-4 w-4" aria-hidden />
+          ) : relay ? (
+            // 서버 간 복사 묶음은 아이콘이 그 종류를 말한다(이름표는 다른 묶음과 같은 규칙)
+            <span role="img" aria-label={t('activity.relay')} title={t('activity.relay')}>
+              <Dir className="h-4 w-4" aria-hidden />
+            </span>
           ) : (
             <Dir className="h-4 w-4" aria-hidden />
           )}

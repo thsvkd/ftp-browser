@@ -428,6 +428,7 @@ export const ptBR = {
   'activity.preparing': 'Preparando {{label}}…',
   'activity.labelMany_one': '{{name}} e mais {{count}}',
   'activity.labelMany_other': '{{name}} e mais {{count}}',
+  'activity.relay': 'Cópia entre servidores',
   'duration.seconds': '{{number}} s',
   'duration.minutes': '{{number}} min',
   'duration.hours': '{{number}} h',
@@ -464,5 +465,6 @@ export const ptBR = {
   'toast.sendSkipped_one': '{{count}} item ignorado',
   'toast.sendSkipped_other': '{{count}} itens ignorados',
   'toast.sendFailed': 'Não foi possível iniciar a transferência',
+  'toast.relayPartialRemoved': 'A cópia incompleta de {{name}} em {{server}} foi removida',
   'toast.retryFailed': 'Não foi possível tentar novamente'
 } satisfies LocaleMessages

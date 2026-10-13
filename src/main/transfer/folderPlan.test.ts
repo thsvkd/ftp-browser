@@ -9,7 +9,14 @@ vi.mock('electron', () => ({ app: { getPath: vi.fn(() => os.tmpdir()) } }))
 import { LocalFileSystem } from '../local/LocalFileSystem'
 import { FakeRemote } from '../mcp/__fixtures__/agentHarness'
 import type { ConflictDecision } from '@shared/types/transfer'
-import { planDownload, planUpload, resolvePlan, type FolderPlan, type PlanDeps } from './folderPlan'
+import {
+  planDownload,
+  planRelay,
+  planUpload,
+  resolvePlan,
+  type FolderPlan,
+  type PlanDeps
+} from './folderPlan'
 
 let tmp: string
 let remote: FakeRemote
@@ -308,5 +315,206 @@ describe('resolvePlan', () => {
       }
     ])
     expect(resolved.skipped).toEqual([])
+  })
+})
+
+describe('planRelay', () => {
+  it('expands the sending tree under the receiving folder, skipping links and empty folders', async () => {
+    // covers: Test-982
+    const src = new FakeRemote()
+      .addDir('/photos')
+      .addFile('/photos/a.jpg', 10, '2026-01-01T00:00:00.000Z')
+      .addDir('/photos/sub')
+      .addFile('/photos/sub/b.jpg', 20)
+      .addDir('/photos/sub/deep')
+      .addFile('/photos/sub/deep/c.jpg', 30)
+      .addDir('/photos/empty')
+      .addLink('/photos/link')
+      .addFile('/top.txt', 5)
+    const dst = new FakeRemote().addDir('/in')
+
+    const plan = await planRelay(src, dst, ['/photos', '/top.txt'], '/in')
+
+    // 항목의 localPath 자리에 보내는 쪽 경로(sourcePath)가 든다
+    expect(plan.direction).toBe('relay')
+    expect(plan.items).toEqual([
+      {
+        localPath: '/photos/a.jpg',
+        remotePath: '/in/photos/a.jpg',
+        fileName: 'a.jpg',
+        totalBytes: 10
+      },
+      {
+        localPath: '/photos/sub/b.jpg',
+        remotePath: '/in/photos/sub/b.jpg',
+        fileName: 'b.jpg',
+        totalBytes: 20
+      },
+      {
+        localPath: '/photos/sub/deep/c.jpg',
+        remotePath: '/in/photos/sub/deep/c.jpg',
+        fileName: 'c.jpg',
+        totalBytes: 30
+      },
+      { localPath: '/top.txt', remotePath: '/in/top.txt', fileName: 'top.txt', totalBytes: 5 }
+    ])
+    expect(plan.totalBytes).toBe(65)
+    expect(plan.dirs).toEqual(['/in/photos', '/in/photos/sub', '/in/photos/sub/deep'])
+    expect(plan.skipped).toEqual([{ path: '/photos/link', reason: 'symbolic link' }])
+    expect(plan.conflicts).toEqual([])
+    expect(src.list.mock.calls.map(([dir]) => dir)).toEqual([
+      '/',
+      '/photos',
+      '/photos/sub',
+      '/photos/sub/deep',
+      '/photos/empty'
+    ])
+    expect(dst.list.mock.calls.map(([dir]) => dir)).toEqual(['/in'])
+  })
+
+  it('checks the receiving side like an upload and keeps planUpload as it was', async () => {
+    // covers: Test-983
+    const src = new FakeRemote()
+      .addDir('/photos')
+      .addFile('/photos/a.jpg', 2, '2026-03-01T00:00:00.000Z')
+      .addFile('/photos/b.jpg', 3, '2026-01-01T00:00:00.000Z')
+      .addFile('/photos/docs', 4)
+      .addDir('/photos/album')
+      .addFile('/photos/album/x.jpg', 5)
+      .addDir('/other')
+      .addDir('/other/photos')
+      .addFile('/other/photos/a.jpg', 6)
+    const dst = new FakeRemote()
+      .addDir('/in')
+      .addDir('/in/photos')
+      .addFile('/in/photos/a.jpg', 7, '2026-02-01T00:00:00.000Z')
+      .addFile('/in/photos/A (1).JPG', 8)
+      .addFile('/in/photos/b.jpg', 9, '2026-02-01T00:00:00.000Z')
+      .addDir('/in/photos/docs')
+      .addFile('/in/photos/album')
+
+    const plan = await planRelay(src, dst, ['/photos', '/other/photos'], '/in')
+
+    expect(plan.items).toEqual([])
+    expect(plan.conflicts).toEqual([
+      expect.objectContaining({
+        target: '/in/photos/a.jpg',
+        source: '/photos/a.jpg',
+        name: 'a.jpg',
+        incoming: { size: 2, modifiedAt: '2026-03-01T00:00:00.000Z' },
+        existing: { size: 7, modifiedAt: '2026-02-01T00:00:00.000Z' },
+        // 서버 이름은 대소문자를 구분한다: 'A (1).JPG'가 있어도 'a (1).jpg'는 비어 있다
+        renameTo: 'a (1).jpg'
+      }),
+      expect.objectContaining({
+        target: '/in/photos/b.jpg',
+        source: '/photos/b.jpg',
+        incoming: { size: 3, modifiedAt: '2026-01-01T00:00:00.000Z' },
+        existing: { size: 9, modifiedAt: '2026-02-01T00:00:00.000Z' },
+        renameTo: 'b (1).jpg'
+      })
+    ])
+    expect(plan.skipped).toEqual([
+      { path: '/photos/docs', reason: 'a folder with that name exists on the server' },
+      {
+        path: '/photos/album/x.jpg',
+        reason: 'a file on the server is where its folder would go'
+      },
+      {
+        path: '/other/photos/a.jpg',
+        reason: 'another file in this upload has the same remote path'
+      }
+    ])
+
+    // 네 결정이 그대로 적용된다(대상은 받는 쪽 원격 경로)
+    const decide = (d: ConflictDecision): ReturnType<typeof resolvePlan> =>
+      resolvePlan(plan, () => d)
+    expect(decide('overwrite')).toMatchObject({
+      items: [
+        { localPath: '/photos/a.jpg', remotePath: '/in/photos/a.jpg' },
+        { localPath: '/photos/b.jpg', remotePath: '/in/photos/b.jpg' }
+      ],
+      overwrites: 2
+    })
+    expect(decide('rename').items.map((i) => [i.localPath, i.remotePath, i.fileName])).toEqual([
+      ['/photos/a.jpg', '/in/photos/a (1).jpg', 'a (1).jpg'],
+      ['/photos/b.jpg', '/in/photos/b (1).jpg', 'b (1).jpg']
+    ])
+    expect(decide('skip').skipped.slice(0, 2)).toEqual([
+      { path: '/photos/a.jpg', reason: 'already exists on the server' },
+      { path: '/photos/b.jpg', reason: 'already exists on the server' }
+    ])
+    const newer = decide('newer')
+    expect(newer.items.map((i) => i.localPath)).toEqual(['/photos/a.jpg'])
+    expect(newer.skipped[0]).toEqual({
+      path: '/photos/b.jpg',
+      reason: 'already exists on the server'
+    })
+
+    // planUpload의 결과는 리팩터링 전과 같다(전체 결과를 고정한다)
+    await localFile(at('src', 'a.jpg'), 'aa', '2026-03-01T00:00:00.000Z')
+    await localFile(at('src', 'new', 'n.jpg'), 'nnn', '2026-03-02T00:00:00.000Z')
+    await localFile(at('src', 'docs'), 'd')
+    await localFile(at('src', 'album', 'x.jpg'), 'x')
+    await localFile(at('other', 'a.jpg'), 'again')
+    remote
+      .addDir('/dest')
+      .addFile('/dest/a.jpg', 7, '2026-01-01T00:00:00.000Z')
+      .addFile('/dest/A (1).JPG', 1)
+      .addDir('/dest/docs')
+      .addFile('/dest/album')
+    const upload = await planUpload(
+      deps(),
+      [
+        at('src', 'a.jpg'),
+        at('src', 'new'),
+        at('src', 'docs'),
+        at('src', 'album'),
+        at('other', 'a.jpg')
+      ],
+      '/dest'
+    )
+    expect(upload).toEqual({
+      direction: 'upload',
+      items: [
+        {
+          localPath: at('src', 'new', 'n.jpg'),
+          remotePath: '/dest/new/n.jpg',
+          fileName: 'n.jpg',
+          totalBytes: 3
+        }
+      ],
+      dirs: ['/dest/new'],
+      skipped: [
+        { path: at('src', 'docs'), reason: 'a folder with that name exists on the server' },
+        {
+          path: at('src', 'album', 'x.jpg'),
+          reason: 'a file on the server is where its folder would go'
+        },
+        {
+          path: at('other', 'a.jpg'),
+          reason: 'another file in this upload has the same remote path'
+        }
+      ],
+      totalBytes: 3,
+      overwrites: 0,
+      conflicts: [
+        {
+          target: '/dest/a.jpg',
+          source: at('src', 'a.jpg'),
+          name: 'a.jpg',
+          incoming: { size: 2, modifiedAt: '2026-03-01T00:00:00.000Z' },
+          existing: { size: 7, modifiedAt: '2026-01-01T00:00:00.000Z' },
+          item: {
+            localPath: at('src', 'a.jpg'),
+            remotePath: '/dest/a.jpg',
+            fileName: 'a.jpg',
+            totalBytes: 2
+          },
+          renameTo: 'a (1).jpg',
+          skipAt: 0
+        }
+      ]
+    })
   })
 })

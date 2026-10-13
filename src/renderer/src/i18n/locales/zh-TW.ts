@@ -391,6 +391,7 @@ export const zhTW = {
   'activity.remaining': '剩餘 {{time}}',
   'activity.preparing': '正在準備 {{label}}…',
   'activity.labelMany_other': '{{name}} 等 {{count}} 項',
+  'activity.relay': '伺服器間複製',
   'duration.seconds': '{{number}} 秒',
   'duration.minutes': '{{number}} 分鐘',
   'duration.hours': '{{number}} 小時',
@@ -421,5 +422,6 @@ export const zhTW = {
   'toast.shelfEmpty': '暫存架是空的。請選取項目後按 Shift+S。',
   'toast.sendSkipped_other': '已略過 {{count}} 項',
   'toast.sendFailed': '無法開始傳輸',
+  'toast.relayPartialRemoved': '已刪除 {{server}} 上 {{name}} 的不完整副本',
   'toast.retryFailed': '無法重試'
 } satisfies LocaleMessages

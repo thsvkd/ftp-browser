@@ -432,6 +432,7 @@ export const de = {
   'activity.preparing': '{{label}} wird vorbereitet…',
   'activity.labelMany_one': '{{name}} und {{count}} weiteres',
   'activity.labelMany_other': '{{name}} und {{count}} weitere',
+  'activity.relay': 'Kopie zwischen Servern',
   'duration.seconds': '{{number}} s',
   'duration.minutes': '{{number}} Min.',
   'duration.hours': '{{number}} Std.',
@@ -468,5 +469,6 @@ export const de = {
   'toast.sendSkipped_one': '{{count}} Element übersprungen',
   'toast.sendSkipped_other': '{{count}} Elemente übersprungen',
   'toast.sendFailed': 'Die Übertragung konnte nicht gestartet werden',
+  'toast.relayPartialRemoved': 'Unvollständige Kopie von {{name}} auf {{server}} entfernt',
   'toast.retryFailed': 'Wiederholung nicht möglich'
 } satisfies LocaleMessages

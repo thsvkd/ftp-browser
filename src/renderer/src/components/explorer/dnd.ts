@@ -114,8 +114,9 @@ export function useDropTarget(
     handlers: {
       onDragOver: (e) => {
         if (!dest) return
-        if (useDnd.getState().items)
-          enter(e, valid ? (plan?.transfer.length || dest === 'shelf' ? 'copy' : 'move') : 'none')
+        // 다른 쪽 전송과 다른 서버로의 복사(relay)는 복사 커서, 같은 쪽 원격은 이동
+        const copies = plan?.transfer.length || plan?.relay.length || dest === 'shelf'
+        if (useDnd.getState().items) enter(e, valid ? (copies ? 'copy' : 'move') : 'none')
         else if (hasFiles(e)) enter(e, 'copy')
       },
       onDrop: (e) => {

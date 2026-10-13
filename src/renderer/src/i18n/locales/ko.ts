@@ -400,6 +400,7 @@ export const ko = {
   'activity.remaining': '{{time}} 남음',
   'activity.preparing': '{{label}} 준비 중…',
   'activity.labelMany_other': '{{name}} 외 {{count}}개',
+  'activity.relay': '서버 간 복사',
   'duration.seconds': '{{number}}초',
   'duration.minutes': '{{number}}분',
   'duration.hours': '{{number}}시간',
@@ -430,5 +431,6 @@ export const ko = {
   'toast.shelfEmpty': '선반이 비어 있습니다. 항목을 고르고 Shift+S를 누르세요.',
   'toast.sendSkipped_other': '항목 {{count}}개를 건너뛰었습니다',
   'toast.sendFailed': '전송을 시작하지 못했습니다',
+  'toast.relayPartialRemoved': '{{server}}에서 {{name}}의 불완전한 복사본을 지웠습니다',
   'toast.retryFailed': '다시 시도하지 못했습니다'
 } satisfies LocaleMessages

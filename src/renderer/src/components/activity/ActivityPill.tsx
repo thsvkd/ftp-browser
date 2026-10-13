@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDownToLine, ArrowUpFromLine, Loader } from 'lucide-react'
+import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Loader } from 'lucide-react'
 import { useT } from '@renderer/i18n'
 import { cn } from '@renderer/lib/utils'
 import { batchProgress } from '@renderer/lib/transferRate'
@@ -74,8 +74,10 @@ export function ActivityPill(): React.JSX.Element {
 
   const active = running.length > 0
   const progress = batchProgress(running)
-  const Icon =
-    running.every((j) => j.direction === 'upload') && active ? ArrowUpFromLine : ArrowDownToLine
+  // 모두 서버 간 복사면 그 아이콘(팝오버 행과 같다), 모두 업로드면 올리기, 그 밖은 받기(MC32)
+  const every = (direction: TransferJob['direction']): boolean =>
+    active && running.every((j) => j.direction === direction)
+  const Icon = every('relay') ? ArrowLeftRight : every('upload') ? ArrowUpFromLine : ArrowDownToLine
 
   return (
     <>

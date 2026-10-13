@@ -72,4 +72,43 @@ describe('TransferRing', () => {
     render(<TransferRing entry={{ side: 'local', path: 'C:\\dl\\a.jpg' }} />)
     expect(ring()).toBeNull()
   })
+
+  it("draws a remote ring only on the job's own server, and on the sending side of a relay", () => {
+    // covers: Test-1038
+    const A = 'me@a.example:21'
+    const B = 'you@b.example:2121'
+    useTransferStore.setState({
+      jobs: [job('a.jpg', { server: A, remotePath: '/photos/a.jpg', status: 'active' })]
+    })
+    render(<TransferRing entry={{ side: 'remote', path: '/photos/a.jpg', server: B }} />)
+    expect(ring()).toBeNull()
+    cleanup()
+    render(<TransferRing entry={{ side: 'remote', path: '/photos/a.jpg', server: A }} />)
+    expect(ring()).not.toBeNull()
+    cleanup()
+
+    useTransferStore.setState({
+      jobs: [
+        job('r', {
+          direction: 'relay',
+          server: B,
+          sourceServer: A,
+          sourcePath: '/photos/a.jpg',
+          remotePath: '/in/a.jpg',
+          localPath: '',
+          status: 'active'
+        })
+      ]
+    })
+    for (const path of ['/photos/a.jpg', '/photos']) {
+      render(<TransferRing entry={{ side: 'remote', path, server: A }} />)
+      expect(ring()).not.toBeNull()
+      cleanup()
+    }
+    for (const path of ['/in/a.jpg', '/photos/a.jpg']) {
+      render(<TransferRing entry={{ side: 'remote', path, server: B }} />)
+      expect(ring()).toBeNull()
+      cleanup()
+    }
+  })
 })

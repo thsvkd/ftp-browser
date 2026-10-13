@@ -431,6 +431,7 @@ export const fr = {
   'activity.preparing': 'Préparation de {{label}}…',
   'activity.labelMany_one': '{{name}} et {{count}} autre',
   'activity.labelMany_other': '{{name}} et {{count}} autres',
+  'activity.relay': 'Copie entre serveurs',
   'duration.seconds': '{{number}} s',
   'duration.minutes': '{{number}} min',
   'duration.hours': '{{number}} h',
@@ -467,5 +468,6 @@ export const fr = {
   'toast.sendSkipped_one': '{{count}} élément ignoré',
   'toast.sendSkipped_other': '{{count}} éléments ignorés',
   'toast.sendFailed': 'Impossible de démarrer le transfert',
+  'toast.relayPartialRemoved': 'Copie incomplète de {{name}} supprimée sur {{server}}',
   'toast.retryFailed': 'Impossible de réessayer'
 } satisfies LocaleMessages
