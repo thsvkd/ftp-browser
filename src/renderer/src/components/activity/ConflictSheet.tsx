@@ -6,6 +6,7 @@ import { cn, formatBytes, formatDate } from '@renderer/lib/utils'
 import { categoryOf, parentPath, type ExplorerEntry } from '@renderer/lib/explorerEntry'
 import { EntryThumb } from '@renderer/components/thumbnail/EntryThumb'
 import { isImageFile } from '@shared/constants'
+import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { useTransferStore, type ConflictPrompt } from '@renderer/stores/useTransferStore'
 import type { ConflictDecision, TransferConflict } from '@shared/types/transfer'
 
@@ -46,11 +47,16 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
   const sameSide = prompt.direction === 'move' || prompt.direction === 'copy' || relay
   const newer = newerSide(conflict)
 
-  // 닫히면 연 곳으로 포커스를 돌려준다. 그곳이 사라졌으면 목록으로.
+  // 닫히면 연 곳으로 포커스를 돌려준다. 그곳이 사라졌으면 활성 패널의 목록(split-view §4 14행),
+  // 없으면 첫 목록으로.
   useEffect(() => {
     const back = document.activeElement as HTMLElement | null
     return () =>
-      (back?.isConnected ? back : document.querySelector<HTMLElement>('[role="listbox"]'))?.focus()
+      (back?.isConnected
+        ? back
+        : (document.getElementById(`explorer-list-${useTabsStore.getState().activeId}`) ??
+          document.querySelector<HTMLElement>('[role="listbox"]'))
+      )?.focus()
   }, [])
   useEffect(() => firstButton.current?.focus(), [index])
 

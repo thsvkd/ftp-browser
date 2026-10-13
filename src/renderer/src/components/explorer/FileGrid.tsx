@@ -9,9 +9,10 @@ import { currentPlatform, isZoomModifier } from '@renderer/lib/platform'
 import { viewportThumbnailTargets } from '@renderer/lib/thumbnailViewport'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
+import { usePaneId } from './paneContext'
 import { Tile } from './Tile'
 import type { ItemProps } from './useItem'
-import { MAIN_VIEWER, type ConnKey } from '@shared/connKey'
+import type { ConnKey } from '@shared/connKey'
 
 /** Ctrl+휠·Ctrl+= / Ctrl+− 한 번에 바뀌는 타일 크기(px) */
 export const ZOOM_STEP = 16
@@ -41,6 +42,8 @@ export function FileGrid({
 }: ViewProps & { layout: GridLayout; server: ConnKey | undefined }): React.JSX.Element {
   const { cols, cellWidth, imageHeight, rowHeight } = layout
   const rowCount = Math.ceil(items.length / cols)
+  // 이 패널의 뷰어(split-view P2). 두 패널이 같은 서버여도 서로의 배치를 교체하지 않는다.
+  const viewerId = usePaneId()
 
   const virtualizer = useVirtualizer({
     count: rowCount,
@@ -83,8 +86,8 @@ export function FileGrid({
       .map((x) => x.request)
     // 창을 벗어난 실패 항목은 에러를 지워, 다시 보일 때 재요청되게 한다.
     for (const key of Object.keys(errors)) if (!windowKeys.has(key)) clearError(key)
-    window.api.invoke('thumbnail:requestBatch', server, MAIN_VIEWER, requests)
-  }, [server, visibleStart, visibleEnd, items, cols])
+    window.api.invoke('thumbnail:requestBatch', server, viewerId, requests)
+  }, [server, viewerId, visibleStart, visibleEnd, items, cols])
 
   useEffect(() => {
     const el = scrollRef.current

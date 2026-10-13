@@ -183,7 +183,11 @@ describe('GUI accessibility — regression guard', () => {
 describe('GUI accessibility — explorer', () => {
   let h: ExplorerHarness
   beforeEach(() => shell.restore())
-  afterEach(() => h.restore())
+  // 언마운트(사라지는 원격 패널의 뷰어 취소, split-view §4 17행)가 목을 되돌리기 전에 일어나야 한다.
+  afterEach(() => {
+    cleanup()
+    h.restore()
+  })
 
   it('names the one explorer region after the active tab’s side and exposes a multiselect listbox of options', async () => {
     // covers: Test-800

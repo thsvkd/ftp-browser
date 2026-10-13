@@ -32,12 +32,14 @@ export function endDrag(): void {
 }
 
 export function startDrag(e: DragEvent, items: ExplorerEntry[]): void {
+  // 같은 폴더를 연 다른 패널이 아니라 끌기 시작한 패널에서 썸네일을 찾는다(split-view P9).
+  const root =
+    (e.currentTarget instanceof Element && e.currentTarget.closest('[data-tab-pane]')) || document
   const thumbs = items
     .slice(0, 3)
     .map(
       (it) =>
-        document.querySelector(`[data-path="${CSS.escape(it.path)}"] img`)?.getAttribute('src') ??
-        ''
+        root.querySelector(`[data-path="${CSS.escape(it.path)}"] img`)?.getAttribute('src') ?? ''
     )
   // 고스트가 지금 그려져 있어야 setDragImage가 찍을 수 있다.
   flushSync(() => useDnd.setState({ items, over: null, thumbs }))

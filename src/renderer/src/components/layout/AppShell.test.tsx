@@ -8,6 +8,7 @@ import { useServerStore } from '@renderer/stores/useServerStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { useLayoutStore } from '@renderer/stores/useLayoutStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
+import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { emptyDraft } from '@renderer/lib/serverAddress'
 import {
   activeTab,
@@ -323,5 +324,39 @@ describe('AppShell — collapsed panes', () => {
     } finally {
       delete (HTMLElement.prototype as { animate?: unknown }).animate
     }
+  })
+})
+
+describe('AppShell — split view', () => {
+  it('returns focus from the conflict sheet to the active right pane list when its opener is gone', async () => {
+    // covers: Test-1085
+    render(<AppShell />)
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
+    const L = activeTab().id
+    const R = useTabsStore.getState().openTab({ side: 'local', path: HOME }, false)
+    act(() => useTabsStore.setState({ split: { leftId: L, rightId: R, ratio: 0.5 }, activeId: R }))
+    await flush()
+    expect(screen.getAllByRole('listbox')).toHaveLength(2)
+
+    const opener = document.createElement('button')
+    document.body.appendChild(opener)
+    opener.focus()
+    act(() => {
+      void useTransferStore.getState().askConflicts('copy', [
+        {
+          target: `${HOME}\\a.txt`,
+          source: 'C:\\in\\a.txt',
+          name: 'a.txt',
+          incoming: { size: 2048, modifiedAt: '2024-05-02T10:00:00.000Z' },
+          existing: { size: 1024, modifiedAt: '2024-05-01T10:00:00.000Z' }
+        }
+      ])
+    })
+    await screen.findByRole('alertdialog')
+    opener.remove()
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(document.activeElement).toBe(document.getElementById(`explorer-list-${R}`))
+    expect(useTabsStore.getState().activeId).toBe(R)
   })
 })

@@ -64,7 +64,7 @@ function PathInput({ tab, onDone }: { tab: Tab; onDone: () => void }): React.JSX
       toast.error(t('toast.navigateFailed', { path: typed }), { description: listing?.error })
       return
     }
-    useTabsStore.getState().navigate(loc)
+    useTabsStore.getState().navigate(loc, { tabId: tab.id })
     onDone()
   }
   return (
@@ -85,19 +85,25 @@ function PathInput({ tab, onDone }: { tab: Tab; onDone: () => void }): React.JSX
 }
 
 /**
- * 놓기 대상인 경로 조각(Test-827): 놓으면 그 폴더로 보내고, 머무르면 연다. 지금 폴더의 조각은 받지 않는다.
- * 끄는 동안 무엇을 할지(동사)를 조각 안에 보인다.
+ * 놓기 대상인 경로 조각(Test-827): 놓으면 그 폴더로 보내고, 머무르면 그 탭(`tabId`)을 연다. 지금 폴더의
+ * 조각은 받지 않는다. 끄는 동안 무엇을 할지(동사)를 조각 안에 보인다. 놓기 키에 탭 id가 있어 두 패널의
+ * 같은 조각이 함께 강조되지 않는다(split-view P9).
  */
 function DropCrumb({
+  tabId,
   loc,
   current,
   className,
   title,
   children,
   ...rest
-}: { loc: Loc; current?: boolean } & ButtonHTMLAttributes<HTMLButtonElement>): React.JSX.Element {
-  const drop = useDropTarget(`crumb:${locKey(loc)}`, current ? null : loc, {
-    spring: () => useTabsStore.getState().navigate(loc),
+}: {
+  tabId: string
+  loc: Loc
+  current?: boolean
+} & ButtonHTMLAttributes<HTMLButtonElement>): React.JSX.Element {
+  const drop = useDropTarget(`crumb:${tabId}:${locKey(loc)}`, current ? null : loc, {
+    spring: () => useTabsStore.getState().navigate(loc, { tabId }),
     springMs: SPRING_MS
   })
   return (
@@ -126,10 +132,12 @@ function DropCrumb({
 
 /** 접힌 조각: 루트 배지 + "…" + 들어가는 만큼의 뒤쪽 조각. 폭을 재어 `fitCrumbs`로 고른다. */
 function Crumbs({
+  tabId,
   loc,
   onEdit,
   onMenu
 }: {
+  tabId: string
   loc: Loc
   onEdit: () => void
   onMenu: (x: number, y: number, hidden: Crumb[]) => void
@@ -161,7 +169,7 @@ function Crumbs({
   const keep = fit?.path === loc.path ? fit.keep : below.length
   const hidden = below.slice(0, below.length - keep)
   const shown = below.slice(below.length - keep)
-  const nav = (path: string): void => useTabsStore.getState().navigate({ ...loc, path })
+  const nav = (path: string): void => useTabsStore.getState().navigate({ ...loc, path }, { tabId })
   const crumbCls =
     'h-7 min-w-0 max-w-[260px] truncate rounded-md px-1.5 text-[13px] text-[var(--mu)] hover:bg-[var(--hv)] hover:text-[var(--tx)]'
 
@@ -175,6 +183,7 @@ function Crumbs({
         onClick={(e) => e.target === e.currentTarget && onEdit()}
       >
         <DropCrumb
+          tabId={tabId}
           loc={{ ...loc, path: crumbs[0].path }}
           current={crumbs.length === 1}
           onClick={() => nav(crumbs[0].path)}
@@ -209,6 +218,7 @@ function Crumbs({
             >
               <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--mu)]" aria-hidden />
               <DropCrumb
+                tabId={tabId}
                 loc={{ ...loc, path: c.path }}
                 current={current}
                 onClick={() => !current && nav(c.path)}
@@ -244,6 +254,8 @@ function Crumbs({
 
 export interface PathBarProps {
   tab: Tab
+  /** 분할 보기의 비활성 패널: 글자를 흐리게(split-view F13) */
+  dim?: boolean
   editing: boolean
   onEditingChange: (editing: boolean) => void
   /** 현재 폴더의 목록(숨김 파일 설정 반영, 찾기·필터 전). 필터 드롭다운의 개수 기준이다. */
@@ -258,6 +270,7 @@ export interface PathBarProps {
 /** 경로 막대: ‹ › ↑, 접히는 조각(빈 곳·Ctrl+L로 입력), 찾기, 파일 종류 필터, 정렬, 보기, 새 폴더, 세부 정보. */
 export function PathBar({
   tab,
+  dim = false,
   editing,
   onEditingChange,
   entries,
@@ -317,12 +330,13 @@ export function PathBar({
   return (
     <div
       ref={barRef}
-      className="relative flex h-[52px] shrink-0 items-center gap-1.5 border-b border-[var(--bd)] px-3"
+      data-dim={dim ? 'true' : undefined}
+      className="path-bar relative flex h-[52px] shrink-0 items-center gap-1.5 border-b border-[var(--bd)] px-3"
     >
       <button
         className={iconBtn}
         disabled={!tab.back.length}
-        onClick={() => useTabsStore.getState().goBack()}
+        onClick={() => useTabsStore.getState().goBack(tab.id)}
         title={t('path.backTooltip')}
         aria-label={t('explorer.back')}
       >
@@ -331,7 +345,7 @@ export function PathBar({
       <button
         className={iconBtn}
         disabled={!tab.fwd.length}
-        onClick={() => useTabsStore.getState().goForward()}
+        onClick={() => useTabsStore.getState().goForward(tab.id)}
         title={t('path.forwardTooltip')}
         aria-label={t('explorer.forward')}
       >
@@ -340,7 +354,7 @@ export function PathBar({
       <button
         className={iconBtn}
         disabled={parentPath(loc.side, loc.path) === null}
-        onClick={() => useTabsStore.getState().goUp()}
+        onClick={() => useTabsStore.getState().goUp(tab.id)}
         title={t('path.upTooltip')}
         aria-label={t('path.up')}
       >
@@ -352,6 +366,7 @@ export function PathBar({
           <PathInput tab={tab} onDone={() => onEditingChange(false)} />
         ) : (
           <Crumbs
+            tabId={tab.id}
             loc={loc}
             onEdit={() => onEditingChange(true)}
             onMenu={(x, y, hidden) =>
@@ -362,7 +377,8 @@ export function PathBar({
                 items: hidden.map((c) => ({
                   label: c.name,
                   icon: FolderOpen,
-                  onSelect: () => useTabsStore.getState().navigate({ ...loc, path: c.path })
+                  onSelect: () =>
+                    useTabsStore.getState().navigate({ ...loc, path: c.path }, { tabId: tab.id })
                 }))
               })
             }

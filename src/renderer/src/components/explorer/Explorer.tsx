@@ -35,6 +35,7 @@ import { EMPTY_FILTER, filterLabel } from '@renderer/lib/fileCategories'
 import { flyTo, sourcesFor } from '@renderer/lib/flyTo'
 import { gridLayout } from '@renderer/lib/gridGeometry'
 import { currentPlatform } from '@renderer/lib/platform'
+import { clampRatio } from '@renderer/lib/splitLayout'
 import {
   clearSelection,
   clickSelect,
@@ -69,8 +70,7 @@ import { useListingStore } from '@renderer/stores/useListingStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
-import { useActiveTab, useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
-import { MAIN_VIEWER } from '@shared/connKey'
+import { useTabsStore, visiblePanes, type Split, type Tab } from '@renderer/stores/useTabsStore'
 import { isSafeLocalName, isSafeRemoteName, uniqueLocalNames } from '@shared/entryName'
 import type { IpcResult } from '@shared/types/ipc'
 import { startDrag, useDnd, useDropTarget } from './dnd'
@@ -89,8 +89,10 @@ import { FileList } from './FileList'
 import { ItemMenu, type MenuItem } from './ItemMenu'
 import { Lightbox } from './Lightbox'
 import { ListHeader } from './ListHeader'
+import { PaneIdContext, usePaneId } from './paneContext'
 import { PathBar } from './PathBar'
 import { PropertiesDialog } from './PropertiesDialog'
+import { SplitDivider } from './SplitDivider'
 import type { ItemProps } from './useItem'
 
 const isTyping = (target: EventTarget | null): boolean =>
@@ -126,17 +128,110 @@ function useAutoConnect(tab: Tab): void {
   }, [tab.id, server])
 }
 
-/**
- * 활성 탭의 탐색 영역. 탭이 바뀌면 다시 마운트되어(탭 id가 key) 메뉴·이름 바꾸기 같은
- * 지역 상태가 다른 탭으로 새지 않는다. 시작 직후 탭이 없으면 아무것도 그리지 않는다.
- */
-export function Explorer(): React.JSX.Element | null {
-  const tab = useActiveTab()
-  return tab ? <TabExplorer key={tab.id} tab={tab} /> : null
+/** 분할 루트의 폭. 분할이 보이기 시작할 때와 크기가 바뀔 때 잰다(비율을 자르는 기준, P8). */
+function useSplitWidth(ref: React.RefObject<HTMLElement | null>, shown: boolean): number {
+  const [width, setWidth] = useState(0)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || !shown) return
+    const measure = (): void => setWidth(el.getBoundingClientRect().width)
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    measure()
+    return () => observer.disconnect()
+  }, [ref, shown])
+  return width
 }
 
-function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
+type Entering = Record<string, 'grow' | 'in'>
+
+/**
+ * 탐색 영역: 보이는 패널(`visiblePanes`)마다 `TabExplorer` 하나. 분할이 보이면 두 패널 사이에 구분선을
+ * 둔다(split-view §3.4). 렌더 순서는 탭 id로 고정하고 좌우는 `style.order`로만 정해, 좌우 바꾸기·분할
+ * 진입에도 패널을 다시 마운트하지 않는다(P10, 함정 5). 탭이 바뀌어 다시 마운트되면(탭 id가 key) 메뉴·이름
+ * 바꾸기 같은 지역 상태가 다른 탭으로 새지 않는다. 시작 직후 탭이 없으면 아무것도 그리지 않는다.
+ */
+export function Explorer(): React.JSX.Element | null {
+  const tabs = useTabsStore((s) => s.tabs)
+  const activeId = useTabsStore((s) => s.activeId)
+  const split = useTabsStore((s) => s.split)
+  const panes = visiblePanes({ tabs, activeId, split }).flatMap((p) => {
+    const tab = tabs.find((x) => x.id === p.tabId)
+    return tab ? [{ ...p, tab }] : []
+  })
+  const shown = panes.length === 2
+  const rootRef = useRef<HTMLDivElement>(null)
+  const width = useSplitWidth(rootRef, shown)
+
+  // 새 분할이 생기면 원래 보이던 패널은 100%에서, 새 패널은 0에서 비율로 한 번 자리 잡는다(§5).
+  const ids = panes.map((p) => p.tab.id).join('|')
+  const [seen, setSeen] = useState<{ split: Split | null; ids: string }>({ split, ids })
+  const [entering, setEntering] = useState<Entering | null>(null)
+  if (seen.split !== split || seen.ids !== ids) {
+    const before = seen.ids.split('|')
+    setSeen({ split, ids })
+    setEntering(
+      shown && before.length === 1 && seen.split !== split
+        ? Object.fromEntries(
+            panes.map((p) => [p.tab.id, before.includes(p.tab.id) ? 'grow' : 'in'])
+          )
+        : null
+    )
+  }
+
+  if (!panes.length) return null
+  // 그리는 비율은 저장값을 지금 폭으로 자른 값이다(창이 다시 커지면 원래 비율이 살아난다).
+  const ratio = shown && split ? clampRatio(split.ratio, width) : 1
+  const leftPct = Math.round(ratio * 10000) / 100
+  return (
+    <div ref={rootRef} data-split-root className="relative flex min-h-0 min-w-0 flex-1">
+      {[...panes]
+        .sort((a, b) => (a.tab.id < b.tab.id ? -1 : 1))
+        .map(({ pane, tab }) => (
+          <PaneIdContext.Provider key={tab.id} value={pane}>
+            <TabExplorer
+              tab={tab}
+              split={shown}
+              active={tab.id === activeId}
+              basis={
+                shown ? (pane === 'left' ? leftPct : Math.round((100 - leftPct) * 100) / 100) : null
+              }
+              entering={entering?.[tab.id]}
+              onSettled={() => setEntering(null)}
+            />
+          </PaneIdContext.Provider>
+        ))}
+      {shown && <SplitDivider ratio={ratio} rootRef={rootRef} order={1} />}
+      <DragGhost />
+    </div>
+  )
+}
+
+/** 패널 id는 `PaneIdContext`(`usePaneId`)로 받는다(P2). */
+interface TabExplorerProps {
+  tab: Tab
+  /** 분할이 보인다: 항목 id에 탭 범위를 붙이고 영역 이름을 패널 이름으로(P9·P12) */
+  split: boolean
+  /** 활성 패널(분할이 아니면 늘 참) */
+  active: boolean
+  /** 분할에서의 flex-basis(%) */
+  basis: number | null
+  entering: 'grow' | 'in' | undefined
+  onSettled: () => void
+}
+
+function TabExplorer({
+  tab,
+  split,
+  active,
+  basis,
+  entering,
+  onSettled
+}: TabExplorerProps): React.JSX.Element {
   const t = useT()
+  const paneId = usePaneId()
+  // DOM id 범위(P9): 분할이 보일 때만 탭 id. 단일 보기의 id는 지금과 같다.
+  const scope = split ? tab.id : undefined
   const { loc } = tab
   const key = locKey(loc)
   const remote = loc.side === 'remote'
@@ -258,10 +353,24 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
   useLayoutEffect(() => {
     if (!remoteKey || !remoteServer) return
     // 이 패널(뷰어)의 대기만 취소한다. 서버가 바뀌는 이동일 수 있어 모든 연결에서(null) 뺀다(§4.3-4)
-    window.api.invoke('thumbnail:cancelAll', null, MAIN_VIEWER)
-    window.api.invoke('gallery:cancelAll', null, MAIN_VIEWER)
+    window.api.invoke('thumbnail:cancelAll', null, paneId)
+    window.api.invoke('gallery:cancelAll', null, paneId)
     useGalleryStore.getState().clearRemote(remoteServer)
-  }, [remoteKey, remoteServer])
+  }, [remoteKey, remoteServer, paneId])
+  // 뷰어 수명(split-view §4 17행 (b)): 패널이 사라지거나 패널 id가 바뀌면(좌우 바꾸기, 오른쪽이 활성인 채
+  // 해제) 원격·live였던 옛 뷰어를 취소한다. layout 정리라 같은 커밋의 새 배치(passive)보다 먼저다(함정 7).
+  const liveRemote = useRef(remoteKey)
+  useLayoutEffect(() => {
+    liveRemote.current = remoteKey
+  })
+  useLayoutEffect(
+    () => () => {
+      if (!liveRemote.current) return
+      window.api.invoke('thumbnail:cancelAll', null, paneId)
+      window.api.invoke('gallery:cancelAll', null, paneId)
+    },
+    [paneId]
+  )
 
   useEffect(() => {
     void loadPlaces()
@@ -290,9 +399,12 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     }
   }, [loc.path, tab.id])
 
-  // 다른 것이 포커스를 갖고 있지 않으면 목록이 받는다(탭 전환 뒤, 함정 13).
+  // 다른 것이 포커스를 갖고 있지 않으면 목록이 받는다(탭 전환 뒤, 함정 13). 두 패널이 함께 마운트되면
+  // 활성 패널만 받는다(P7): 아니면 나중 패널이 포커스로 활성을 빼앗는다.
   useEffect(() => {
-    if (document.activeElement === document.body) scrollRef.current?.focus({ preventScroll: true })
+    if (active && document.activeElement === document.body)
+      scrollRef.current?.focus({ preventScroll: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 마운트 때만 본다
   }, [])
 
   // ---------- 로딩 표시: 150ms 뒤 2px 막대, 1초 뒤 "Listing…" ----------
@@ -337,7 +449,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     ...(e.server ? { server: e.server } : {})
   })
   const open = (e: ExplorerEntry): void => {
-    if (e.type === 'directory') useTabsStore.getState().navigate(locOf(e))
+    if (e.type === 'directory') useTabsStore.getState().navigate(locOf(e), { tabId: tab.id })
     else {
       const i = files.indexOf(e)
       if (i >= 0) setLightbox(i)
@@ -345,7 +457,10 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
   }
   const shelve = (entries: ExplorerEntry[]): void => {
     if (!entries.length) return
-    const from = sourcesFor(entries.map((e) => e.path))
+    const from = sourcesFor(
+      entries.map((e) => e.path),
+      scrollRef.current ?? document
+    )
     if (!useShelfStore.getState().add(entries)) {
       toast(t('toast.alreadyOnShelf'))
       return
@@ -548,7 +663,8 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     }
   ]
   const openMenuAtCursor = (cur: ExplorerEntry | null): void => {
-    const el = cur && document.querySelector(`[data-path="${CSS.escape(cur.path)}"]`)
+    // 다른 패널의 같은 경로가 아니라 이 패널의 항목에서 연다(P9).
+    const el = cur && scrollRef.current?.querySelector(`[data-path="${CSS.escape(cur.path)}"]`)
     const r = (el ?? scrollRef.current)?.getBoundingClientRect()
     if (!r) return
     setMenu({ x: r.left + 24, y: r.top + Math.min(r.height, 40), target: targetOf() })
@@ -574,9 +690,9 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     }
     if (e.altKey) {
       const run = {
-        ArrowUp: () => useTabsStore.getState().goUp(),
-        ArrowLeft: () => useTabsStore.getState().goBack(),
-        ArrowRight: () => useTabsStore.getState().goForward(),
+        ArrowUp: () => useTabsStore.getState().goUp(tab.id),
+        ArrowLeft: () => useTabsStore.getState().goBack(tab.id),
+        ArrowRight: () => useTabsStore.getState().goForward(tab.id),
         Enter: () => cur && setProps(cur)
       }[e.key]
       if (run) {
@@ -607,7 +723,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
         return
       case 'Backspace':
         handled()
-        useTabsStore.getState().goUp()
+        useTabsStore.getState().goUp(tab.id)
         return
       case 'F2':
         handled()
@@ -679,6 +795,8 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
 
   const itemProps = (entry: ExplorerEntry): ItemProps => ({
     entry,
+    tabId: tab.id,
+    scope,
     selected: selSet.has(entry.path),
     shelved: shelved.has(locKey(entry)),
     renaming: renaming === entry.path,
@@ -689,7 +807,8 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     onContext: (e, it) => {
       if (shouldDeferToNativeContextMenu(e, window.api?.debugToolsEnabled ?? false)) return
       e.preventDefault()
-      e.stopPropagation()
+      // 전파는 막지 않는다: 목록의 빈 곳 메뉴는 항목 위를 거르고, 문서까지 가야 다른 패널에 열린 메뉴가
+      // 바깥 우클릭으로 닫힌다(메뉴는 한 번에 하나, split-view §4 18행).
       const inSelection = selSet.has(it.path)
       if (!inSelection) selectOnly(it.path)
       setMenu({ x: e.clientX, y: e.clientY, target: inSelection ? selected : [it] })
@@ -709,14 +828,43 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     if (loc.server) connectToServer(loc.server)
   }
 
+  // 패널 안 pointerdown·포커스 → 그 패널이 활성(P7). capture라 같은 이벤트의 목록 처리보다 먼저다(함정 3).
+  const activateHere = (): void => {
+    if (useTabsStore.getState().activeId !== tab.id) useTabsStore.getState().activate(tab.id)
+  }
+
   return (
     <section
       role="region"
-      aria-label={t(remote ? 'explorer.remote' : 'explorer.local')}
+      aria-label={
+        split
+          ? t(paneId === 'left' ? 'split.paneLeft' : 'split.paneRight', { name: sourceLabel(loc) })
+          : t(remote ? 'explorer.remote' : 'explorer.local')
+      }
+      data-pane={paneId}
+      data-tab-pane={tab.id}
+      data-active={active ? '' : undefined}
+      data-entering={entering}
+      onPointerDownCapture={activateHere}
+      onFocusCapture={activateHere}
+      onAnimationEnd={(e) => e.target === e.currentTarget && onSettled()}
+      style={
+        basis === null
+          ? undefined
+          : { order: paneId === 'left' ? 0 : 2, flexGrow: 0, flexShrink: 1, flexBasis: `${basis}%` }
+      }
       className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--sf)]"
     >
+      {split && active && (
+        <div
+          data-testid="pane-active-bar"
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5 bg-[var(--ac)]"
+        />
+      )}
       <PathBar
         tab={tab}
+        dim={split && !active}
         editing={editingPath}
         onEditingChange={(v) => {
           setEditingPath(v)
@@ -747,7 +895,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
               role: 'listbox',
               'aria-multiselectable': true,
               'aria-label': t('explorer.items', { location: locLabel(loc) }),
-              'aria-activedescendant': focusPath ? optId(focusPath) : undefined
+              'aria-activedescendant': focusPath ? optId(focusPath, scope) : undefined
             }
           : { 'aria-label': t('explorer.items', { location: locLabel(loc) }) })}
         aria-busy={busy}
@@ -756,8 +904,8 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
           lastTop.current = e.currentTarget.scrollTop
         }}
         onMouseUp={(e) => {
-          if (e.button === 3) useTabsStore.getState().goBack()
-          if (e.button === 4) useTabsStore.getState().goForward()
+          if (e.button === 3) useTabsStore.getState().goBack(tab.id)
+          if (e.button === 4) useTabsStore.getState().goForward(tab.id)
         }}
         onContextMenu={(e) => {
           if ((e.target as Element).closest('[data-path]')) return
@@ -819,7 +967,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
             code={listing?.code}
             error={listing?.error}
             onRetry={reload}
-            onUp={() => useTabsStore.getState().goUp()}
+            onUp={() => useTabsStore.getState().goUp(tab.id)}
             onReconnect={reconnect}
           />
         )}
@@ -926,7 +1074,6 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
           }}
         />
       )}
-      <DragGhost />
     </section>
   )
 }

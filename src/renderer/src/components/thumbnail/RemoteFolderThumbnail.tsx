@@ -5,9 +5,10 @@ import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
 import { FolderCountBadge } from './FolderCountBadge'
 import { useT } from '@renderer/i18n'
+import { usePaneId } from '@renderer/components/explorer/paneContext'
 import type { IpcResult } from '@shared/types/ipc'
 import type { RemoteFolderPreview } from '@shared/types/gallery'
-import { MAIN_VIEWER, type ConnKey } from '@shared/connKey'
+import type { ConnKey } from '@shared/connKey'
 
 /** 미리보기가 없을 때의 폴더 글리프(이모지 대신 lucide, 기준선 #16). */
 function FolderGlyph({ size }: { size: number }): React.JSX.Element {
@@ -40,6 +41,9 @@ export function RemoteFolderThumbnail({
   const setResolved = useGalleryStore((s) => s.setRemoteResolved)
   const setError = useGalleryStore((s) => s.setRemoteError)
 
+  // 이 타일이 있는 패널의 뷰어(split-view P2)
+  const viewerId = usePaneId()
+
   const ref = useRef<HTMLDivElement>(null)
   const requestedRef = useRef(false)
 
@@ -51,7 +55,7 @@ export function RemoteFolderThumbnail({
       const result = await window.api.invoke<IpcResult<RemoteFolderPreview | null>>(
         'gallery:remoteFolderPreview',
         server,
-        { remotePath: folderPath, viewerId: MAIN_VIEWER }
+        { remotePath: folderPath, viewerId }
       )
       if (result.success) {
         setResolved(storeKey, result.data)
@@ -61,10 +65,12 @@ export function RemoteFolderThumbnail({
     } catch (err) {
       setError(storeKey, err instanceof Error ? err.message : String(err))
     }
-  }, [server, folderPath, storeKey, setPending, setResolved, setError])
+  }, [server, folderPath, viewerId, storeKey, setPending, setResolved, setError])
 
   useEffect(() => {
     if (previewState) return
+    // 항목이 없으면 (다시) 요청한다: 같은 서버의 다른 패널이 이동하며 clearRemote로 지웠을 수 있다(P17).
+    requestedRef.current = false
 
     const observer = new IntersectionObserver(
       (entries) => {
