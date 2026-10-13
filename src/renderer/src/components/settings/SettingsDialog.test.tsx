@@ -46,6 +46,15 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/**
+ * 업데이트 섹션. 대화 상자 전체(버튼 ~130개)에 byRole을 걸면 시도마다 모든 버튼의 접근 가능한 이름을
+ * 계산하고(약 25 ms), findByRole은 렌더가 끝날 때까지 DOM이 바뀔 때마다 그것을 되풀이한다. 느린 CI 러너에서는
+ * 그것만으로 기본 5초를 넘겼으므로(경쟁 조건이 아니라 CPU 작업) 업데이트 버튼은 이 섹션 안에서만 찾는다.
+ */
+function updatesSection(): ReturnType<typeof within> {
+  return within(screen.getByText(en['settings.updates']).closest('section')!)
+}
+
 describe('SettingsDialog updates', () => {
   it('shows the current version and lets the user check explicitly', async () => {
     // covers: Test-204
@@ -82,9 +91,10 @@ describe('SettingsDialog updates', () => {
     })
     const user = userEvent.setup()
     render(<SettingsDialog open={true} onClose={vi.fn()} />)
+    const updates = updatesSection()
 
-    await user.click(await screen.findByRole('button', { name: 'Download 1.0.6' }))
-    await user.click(await screen.findByRole('button', { name: 'Restart and update' }))
+    await user.click(await updates.findByRole('button', { name: 'Download 1.0.6' }))
+    await user.click(await updates.findByRole('button', { name: 'Restart and update' }))
 
     expect(invokeCalls(mockInvoke, 'update:download')).toHaveLength(1)
     expect(invokeCalls(mockInvoke, 'update:install')).toHaveLength(1)
@@ -127,9 +137,9 @@ describe('SettingsDialog updates', () => {
       </>
     )
 
-    await user.click(await screen.findByRole('button', { name: 'Restart and update' }))
-    await screen.findByRole('alertdialog')
-    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(await updatesSection().findByRole('button', { name: 'Restart and update' }))
+    const confirm = await screen.findByRole('alertdialog')
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }))
 
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(invokeCalls(mockInvoke, 'update:install')).toHaveLength(0)
@@ -172,9 +182,9 @@ describe('SettingsDialog updates', () => {
       </>
     )
 
-    await user.click(await screen.findByRole('button', { name: 'Restart and update' }))
-    await screen.findByRole('alertdialog')
-    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(await updatesSection().findByRole('button', { name: 'Restart and update' }))
+    const confirm = await screen.findByRole('alertdialog')
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }))
 
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(invokeCalls(mockInvoke, 'update:install')).toHaveLength(0)

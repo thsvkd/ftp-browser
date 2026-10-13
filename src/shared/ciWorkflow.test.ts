@@ -87,7 +87,7 @@ describe('cross-platform CI workflow contract', () => {
 
   it('should use read-only permissions and the repository Node version', () => {
     expect(body).toContain('contents: read')
-    expect(body).toContain('node-version: 24.15.0')
+    expect(body).toContain('node-version: 24.21.0')
     expect(body).toContain('cache: npm')
   })
 

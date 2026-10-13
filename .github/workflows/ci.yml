@@ -41,7 +41,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 24.15.0
+          # 24.15.0(libuv 1.51.0) crashes on Windows TCP connects with 0xC0000409 (libuv #5106, fixed in 24.16.0+).
+          node-version: 24.21.0
           cache: npm
 
       - name: Verify runner architecture
