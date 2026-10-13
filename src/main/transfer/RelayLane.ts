@@ -129,6 +129,13 @@ export class RelayLane extends EventEmitter {
   private aborts = new Map<string, AbortController>()
   /** 실행 중인 작업의 두 클라이언트. 취소는 이것을 닫아 시도를 끝낸다 */
   private clients = new Map<string, Client[]>()
+  /**
+   * 이번 실행(넣은 뒤 또는 사용자 재시도 뒤)의 어느 시도에서든 받는 쪽에 1바이트 이상 보낸 작업. 앞 시도가
+   * 남긴 잘린 파일도 최종 실패 때 지운다(MC26: 그 STOR가 이미 원래 파일을 덮었다).
+   */
+  private everSent = new WeakSet<TransferJob>()
+  /** 진행 중인 부분 정리. 사용자 재시도는 이것이 끝난 뒤에 시작한다(새로 보낸 파일을 지우지 않게) */
+  private cleanups = new Map<string, Promise<void>>()
   private dirty = new Set<TransferJob>()
   private removedIds: string[] = []
   private flushTimer: ReturnType<typeof setTimeout> | null = null
@@ -206,13 +213,22 @@ export class RelayLane extends EventEmitter {
       job.startedAt = undefined
       job.completedAt = undefined
       job.partialRemoved = undefined
+      this.everSent.delete(job)
       const batch = job.batchId ?? job.id
       const old = this.dirs.get(job)!
       const memo = memos.get(batch) ?? { dirSet: old.dirSet, created: new Map() }
       memos.set(batch, memo)
       this.dirs.set(job, memo)
-      this.waiting.push(job)
       this.markDirty(job)
+      const cleanup = this.cleanups.get(job.id)
+      if (!cleanup) {
+        this.waiting.push(job)
+        continue
+      }
+      void cleanup.then(() => {
+        if (job.status === 'pending' && this.byId.has(job.id)) this.waiting.push(job)
+        this.pump()
+      })
     }
     this.pump()
   }
@@ -265,7 +281,7 @@ export class RelayLane extends EventEmitter {
             'Download the files, then upload them.'
         )
       }
-      return this.retryOrFail(job, borrowed.key, borrowed.err, 0)
+      return this.retryOrFail(job, borrowed.key, borrowed.err)
     }
 
     const source = leases.get(job.sourceServer!)!.client
@@ -276,13 +292,11 @@ export class RelayLane extends EventEmitter {
     job.transferredBytes = 0
     this.markDirty(job)
 
-    // 이번 시도에서 받는 쪽에 보낸 바이트. 1 이상일 때만 부분 정리를 한다(MC26)
-    let sent = 0
     let failure: unknown
     try {
       await this.ensureDir(dest, job, posix.dirname(job.remotePath))
       await relayOnce(source, dest, job.sourcePath!, job.remotePath, (bytes) => {
-        sent = bytes
+        if (bytes > 0) this.everSent.add(job)
         job.transferredBytes = bytes
         this.markDirty(job)
       })
@@ -305,12 +319,12 @@ export class RelayLane extends EventEmitter {
       return
     }
     if (isCancelled(job)) {
-      if (sent > 0) void this.removePartial(job)
+      this.cleanUpPartial(job)
       return
     }
     const side = failure instanceof RelayError && failure.side === 'source' ? 'source' : 'dest'
     const key = side === 'source' ? job.sourceServer! : job.server
-    this.retryOrFail(job, key, failure instanceof RelayError ? failure.error : failure, sent)
+    this.retryOrFail(job, key, failure instanceof RelayError ? failure.error : failure)
   }
 
   /**
@@ -366,7 +380,7 @@ export class RelayLane extends EventEmitter {
   }
 
   /** 재시도 가능하고 횟수가 남았으면 지연 뒤 처음부터, 아니면 실패(MC25). 오류 앞에 실패한 쪽 서버를 붙인다. */
-  private retryOrFail(job: TransferJob, key: ConnKey, err: unknown, sent: number): void {
+  private retryOrFail(job: TransferJob, key: ConnKey, err: unknown): void {
     const message = `${key}: ${jobError(err)}`
     const count = job.retryCount ?? 0
     if (isRetryableError(err) && count < MAX_RETRIES) {
@@ -384,13 +398,22 @@ export class RelayLane extends EventEmitter {
       return
     }
     this.fail(job, message)
-    if (sent > 0) void this.removePartial(job)
+    this.cleanUpPartial(job)
   }
 
   private fail(job: TransferJob, error: string): void {
     job.status = 'failed'
     job.error = error
     this.markDirty(job)
+  }
+
+  /** 이번 실행에서 받는 쪽에 보낸 적이 있으면(`everSent`) 부분 정리를 시작하고 재시도가 기다리게 둔다. */
+  private cleanUpPartial(job: TransferJob): void {
+    if (!this.everSent.has(job)) return
+    const done: Promise<void> = this.removePartial(job).finally(() => {
+      if (this.cleanups.get(job.id) === done) this.cleanups.delete(job.id)
+    })
+    this.cleanups.set(job.id, done)
   }
 
   /**

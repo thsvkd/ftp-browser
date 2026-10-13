@@ -360,6 +360,23 @@ describe('RelayLane', () => {
     )
   })
 
+  it('removes the file an earlier attempt cut short when the last attempt sends nothing', async () => {
+    // covers: Test-988
+    remote(B).addDir('/in').addFile('/in/a.bin')
+    file(A, 'a.bin', ['part'], reset)
+    const [id] = hub.enqueueRelay(A, B, [item('a.bin', 8)], [])
+    await settle()
+    expect(jobOf(id)).toMatchObject({ status: 'pending', retryCount: 1 })
+
+    // 다음 시도는 받는 쪽 빌림부터 거절당해 한 바이트도 보내지 못하고 끝난다
+    servers[B].borrow.mockRejectedValue(denied())
+    await vi.advanceTimersByTimeAsync(2000 + 10)
+
+    expect(jobOf(id).status).toBe('failed')
+    expect(remote(B).deleteFile.mock.calls).toEqual([['/in/a.bin']])
+    expect(jobOf(id).partialRemoved).toBe(true)
+  })
+
   it('withdraws a waiting borrow on a pending cancel and closes both clients on an active cancel', async () => {
     // covers: Test-989
     servers[A].limit = MAX_RELAY_RUNNING
@@ -430,6 +447,35 @@ describe('RelayLane', () => {
     expect(servers[B].clients[1].sendIgnoringError.mock.calls).toEqual([['MKD /in/sub']])
     expect(servers[B].stored['/in/sub/a.bin'].toString()).toBe('data')
     expect(jobOf(id)).toMatchObject({ id, status: 'completed', transferredBytes: 4 })
+  })
+
+  it('starts a retry only after the cleanup of the failed attempt has settled', async () => {
+    // covers: Test-990
+    remote(B).addDir('/in').addFile('/in/a.bin')
+    let release!: () => void
+    remote(B).deleteFile.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (release = resolve))
+    )
+    file(A, 'a.bin', ['da'], denied)
+    const [id] = hub.enqueueRelay(A, B, [item('a.bin', 4)], [])
+    await settle()
+    expect(jobOf(id).status).toBe('failed')
+    expect(remote(B).deleteFile).toHaveBeenCalledTimes(1)
+
+    // 지우기가 끝나기 전의 재시도는 STOR를 열지 않는다: 늦은 DELE가 새로 받은 파일을 지우게 된다
+    file(A, 'a.bin', ['data'])
+    hub.retry([id])
+    await settle()
+    expect(jobOf(id).status).toBe('pending')
+    expect(servers[B].stors).toEqual(['/in/a.bin'])
+
+    release()
+    await settle()
+    expect(servers[B].stors).toEqual(['/in/a.bin', '/in/a.bin'])
+    expect(servers[B].stored['/in/a.bin'].toString()).toBe('data')
+    expect(jobOf(id)).toMatchObject({ status: 'completed', transferredBytes: 4 })
+    expect(jobOf(id).partialRemoved).toBeUndefined()
+    expect(remote(B).deleteFile).toHaveBeenCalledTimes(1)
   })
 
   it('fails at once without retrying when a side lends no secondary connection', async () => {
