@@ -34,6 +34,16 @@
   --acw: #ddf2f1;
   --acx: #ffffff;
   --spring: 600ms;
+  --sidebar-left-min: 180px;
+  --sidebar-left-default: 220px;
+  --sidebar-left-max: 360px;
+  --sidebar-right-min: 240px;
+  --sidebar-right-default: 288px;
+  --sidebar-right-max: 480px;
+  --handle-hit: 6px;
+  --handle-line: 2px;
+  --handle-hover-delay: 300ms;
+  --pane-anim: 200ms;
   color-scheme: light dark;
 }
 
@@ -230,7 +240,70 @@
   transform: scale(1.025);
 }
 
+/* 접이식 사이드바(docs/handoff/collapsible-sidebars.md). 폭 전환은 접힘이 바뀔 때만(data-animate). */
+.side-pane {
+  overflow: hidden;
+}
+.side-pane[data-side='left'] {
+  max-width: var(--sidebar-left-max);
+}
+.side-pane[data-side='right'] {
+  max-width: var(--sidebar-right-max);
+}
+.side-pane[data-animate='true'] {
+  transition: width var(--pane-anim) ease-out;
+}
+.pane-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 20;
+  width: var(--handle-hit);
+  cursor: col-resize;
+  touch-action: none;
+}
+.pane-handle[data-side='left'] {
+  right: calc(var(--handle-hit) / -2);
+}
+.pane-handle[data-side='right'] {
+  left: calc(var(--handle-hit) / -2);
+}
+.pane-handle[data-side='left'][data-collapsed='true'] {
+  right: auto;
+  left: 0;
+}
+.pane-handle[data-side='right'][data-collapsed='true'] {
+  left: auto;
+  right: 0;
+}
+.pane-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc((var(--handle-hit) - var(--handle-line)) / 2);
+  width: var(--handle-line);
+  background: var(--ac);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.pane-handle:hover::after {
+  opacity: 1;
+  transition-delay: var(--handle-hover-delay);
+}
+.pane-handle:focus-visible::after,
+.pane-handle[data-dragging='true']::after {
+  opacity: 1;
+  transition-delay: 0s;
+}
+.pane-handle:focus-visible {
+  outline: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .side-pane {
+    transition: none;
+  }
   *,
   *::before,
   *::after {
@@ -258,5 +331,11 @@
   }
   .ring-focus {
     outline: 2px solid CanvasText;
+  }
+  .pane-handle::after {
+    background: Highlight;
+  }
+  .pane-handle:focus-visible::after {
+    background: CanvasText;
   }
 }
