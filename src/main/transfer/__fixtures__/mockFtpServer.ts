@@ -16,6 +16,13 @@ export interface MockFtpServerOptions {
    * 보내는 서버를 루프백에서 흉내 낸다. 그 사이 데이터가 오면 log에 "! early data"를 남긴다.
    */
   delay150Ms?: number
+  /**
+   * 이 경로들의 첫 STOR는 delay150Ms 대신 첫 업로드 데이터(또는 데이터 연결의 끝)까지 150을 미룬다. 빠른 경로를
+   * 탈 업로드에 쓴다: 시간 창이 없으므로 머신이 바빠 첫 데이터가 늦어도 "! early data"를 놓치지 않는다.
+   * 150을 기다리는 표준 경로가 이 STOR를 보내면 전송이 멈추므로, 같은 경로의 재시도(두 번째 STOR부터)는
+   * delay150Ms를 따른다.
+   */
+  hold150UntilData?: string[]
   /** 150 전에 업로드 데이터가 오면 데이터 연결을 끊고 425로 답한다(delay150Ms와 함께 쓴다). */
   rejectEarlyData?: boolean
   /** STOR를 이 코드로 거부한다. 대기 중이던 데이터 연결을 먼저 RST로 끊어 RST가 응답보다 먼저 도착한다. */
@@ -79,6 +86,7 @@ export function startMockFtpServer(options: MockFtpServerOptions): Promise<MockF
   const dataServers = new Set<net.Server>()
   let pasvRejectsLeft = options.rejectPasv ?? 0
   let finsLeft = options.finDuringRetr ?? 0
+  const holdPaths = new Set(options.hold150UntilData)
 
   const track = (socket: net.Socket): void => {
     sockets.add(socket)
@@ -236,7 +244,9 @@ export function startMockFtpServer(options: MockFtpServerOptions): Promise<MockF
         }, pace.ms)
         void ended.then(() => clearInterval(timer))
       }
-      if (options.delay150Ms) await new Promise((r) => setTimeout(r, options.delay150Ms))
+      if (holdPaths.delete(name)) {
+        await Promise.race([new Promise((r) => data.once('data', r)), ended])
+      } else if (options.delay150Ms) await new Promise((r) => setTimeout(r, options.delay150Ms))
       if (early) {
         log.push('! early data')
         if (options.rejectEarlyData) {

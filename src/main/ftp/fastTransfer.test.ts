@@ -26,6 +26,14 @@ function sha256(data: Buffer): string {
 // 빠른 경로는 데이터 연결이 열리면 150을 기다리지 않고 쓴다. 루프백에서는 150이 바로 오므로 서버가 150을
 // 늦게 보내게 해야, 빠른 경로를 탔는지("! early data")를 서버 쪽에서 볼 수 있다.
 const LATE_150 = { delay150Ms: 30 }
+/**
+ * paths의 업로드는 빠른 경로를 탄다: 서버가 첫 데이터까지 150을 미루므로, 머신이 바빠 첫 데이터가 30 ms보다
+ * 늦어도 150 전에 보냈는지를 그대로 본다. 나머지(표준 경로)는 LATE_150을 따른다.
+ */
+const fastAt = (...paths: string[]): MockFtpServerOptions => ({
+  ...LATE_150,
+  hold150UntilData: paths
+})
 
 describe('fastUpload against a mock FTP server', () => {
   let server: MockFtpServer
@@ -75,7 +83,7 @@ describe('fastUpload against a mock FTP server', () => {
   })
 
   it('should use the standard path until basic-ftp has chosen a passive mode, then the fast one', async () => {
-    await connect(LATE_150)
+    await connect(fastAt('/b.bin'))
     const first = localFile('a.bin', 300_000)
     const second = localFile('b.bin', 300_000)
 
@@ -91,7 +99,7 @@ describe('fastUpload against a mock FTP server', () => {
   })
 
   it('should report the uploaded bytes through trackProgress', async () => {
-    await connect(LATE_150)
+    await connect(fastAt('/c.bin'))
     await prime()
     const file = localFile('c.bin', 200_000)
     const onProgress = vi.fn()
@@ -139,7 +147,7 @@ describe('fastUpload against a mock FTP server', () => {
   })
 
   it('should reject with a suspect 425 when the server refuses data before its 150', async () => {
-    await connect({ ...LATE_150, rejectEarlyData: true })
+    await connect({ ...fastAt('/e.bin'), rejectEarlyData: true })
     await prime()
     const file = localFile('e.bin', 100_000)
 
@@ -203,9 +211,10 @@ describe('fastUpload against a mock FTP server', () => {
 
     for (const tls of [false, true]) {
       it(`should upload boundary sizes byte-identical on the standard and the fast path (tls=${tls})`, async () => {
-        await connect({ ...LATE_150, tls })
-        const alloc = vi.spyOn(Buffer, 'allocUnsafeSlow')
         const sizes = [0, 1, B - 1, B, B + 1, 3 * B + 17]
+        // 빈 파일은 표준 경로로 간다
+        await connect({ ...fastAt(...sizes.slice(1).map((_, i) => `/fast${i + 1}.bin`)), tls })
+        const alloc = vi.spyOn(Buffer, 'allocUnsafeSlow')
 
         for (const [i, size] of sizes.entries()) {
           const file = localFile(`r${i}.bin`, size)
@@ -422,7 +431,7 @@ describe('fastUpload against a mock FTP server', () => {
   })
 
   it('should upload over FTPS reusing the control connection TLS session', async () => {
-    await connect({ ...LATE_150, tls: true })
+    await connect({ ...fastAt('/h.bin'), tls: true })
     await prime()
     const file = localFile('h.bin', 300_000)
 
