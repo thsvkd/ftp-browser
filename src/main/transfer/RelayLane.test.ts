@@ -276,6 +276,70 @@ describe('RelayLane', () => {
     expect(jobOf(id).error!.startsWith(`${A}: `)).toBe(true)
   })
 
+  it('retries a source FIN from zero without recording the truncated file', async () => {
+    // covers: Test-1136
+    const fin = (): Error => new Error('Server sent FIN packet unexpectedly, closing connection.')
+    file(A, 'a.bin', ['ab', 'cd'], fin)
+    const [id] = hub.enqueueRelay(A, B, [item('a.bin', 4)], [])
+    await settle()
+
+    expect(servers[B].stored['/in/a.bin']).toBeUndefined()
+    expect(jobOf(id)).toMatchObject({ status: 'pending', transferredBytes: 0, retryCount: 1 })
+    expect(jobOf(id).error).toBe(
+      `Retry 1/3: ${A}: Server sent FIN packet unexpectedly, closing connection.`
+    )
+
+    servers[A].files['/src/a.bin'].error = undefined
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(jobOf(id)).toMatchObject({ status: 'completed', transferredBytes: 4 })
+    expect(servers[B].stored['/in/a.bin'].toString()).toBe('abcd')
+  })
+
+  it('removes the truncated target file when a retry after a source FIN finds no second connection', async () => {
+    // covers: Test-1140
+    const fin = (): Error => new Error('Server sent FIN packet unexpectedly, closing connection.')
+    remote(B).addDir('/in').addFile('/in/a.bin')
+    file(A, 'a.bin', ['ab', 'cd'], fin)
+    const [id] = hub.enqueueRelay(A, B, [item('a.bin', 4)], [])
+    await settle()
+
+    expect(jobOf(id)).toMatchObject({ status: 'pending', retryCount: 1 })
+    expect(remote(B).deleteFile).not.toHaveBeenCalled()
+
+    servers[A].lendNull = true
+    await vi.advanceTimersByTimeAsync(2000)
+    await settle()
+
+    expect(jobOf(id)).toMatchObject({ status: 'failed', partialRemoved: true })
+    expect(jobOf(id).error).toMatch(/allows only one connection/)
+    expect(remote(B).deleteFile.mock.calls).toEqual([['/in/a.bin']])
+  })
+
+  it('retries a target 425 without deleting the partial file between attempts', async () => {
+    // covers: Test-1137
+    const refused = (): Error =>
+      new Error(
+        "None of the available transfer strategies work. Last error response was 'FTPError: 425 Too many connections. Can't open data channel.'"
+      )
+    file(A, 'a.bin', ['ab', 'cd'])
+    servers[B].storError = refused
+    const [id] = hub.enqueueRelay(A, B, [item('a.bin', 4)], [])
+    await settle()
+
+    expect(jobOf(id)).toMatchObject({ status: 'pending', retryCount: 1 })
+    expect(
+      jobOf(id).error!.startsWith(
+        `Retry 1/3: ${B}: None of the available transfer strategies work. Last error response was 'FTPError: 425 `
+      )
+    ).toBe(true)
+
+    servers[B].storError = undefined
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(jobOf(id).status).toBe('completed')
+    expect(servers[B].stored['/in/a.bin'].toString()).toBe('abcd')
+    expect(remote(B).deleteFile).not.toHaveBeenCalled()
+  })
+
   it('closes the source when the target refuses the upload and fails at once', async () => {
     // covers: Test-987
     const hold = deferred()

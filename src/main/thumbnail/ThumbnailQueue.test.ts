@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import type { Writable } from 'stream'
+import { FTPError } from 'basic-ftp'
 import { ThumbnailQueue, type ThumbnailRequest } from './ThumbnailQueue'
 import { generateCacheKey } from '../utils/cacheKey'
 import { MAIN_VIEWER } from '@shared/connKey'
@@ -53,19 +54,24 @@ interface Harness {
   /** 다운로드가 시작된 원격 경로(시작 순서) */
   started: string[]
   counts: { created: number; closed: number }
+  runOnMainClient: ReturnType<typeof vi.fn>
   onReady: ReturnType<typeof vi.fn>
   onError: ReturnType<typeof vi.fn>
   drain: () => Promise<void>
   finish: (path: string) => Promise<void>
-  fail: (path: string) => Promise<void>
+  fail: (path: string, err?: Error) => Promise<void>
   releaseConnect: () => void
 }
 
-function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
+function createHarness(
+  options: { holdFirstConnect?: boolean; connectError?: Error } = {}
+): Harness {
   const started: string[] = []
   const downloads = new Map<string, Download>()
   const counts = { created: 0, closed: 0 }
   let releaseConnect: (() => void) | null = null
+  /** 메인 클라이언트 작업은 실제처럼 하나씩 직렬로 돈다 */
+  let mainChain: Promise<unknown> = Promise.resolve()
 
   function makeClient(): { downloadTo: unknown; close: () => void } {
     const pending = new Set<(err: Error) => void>()
@@ -102,6 +108,7 @@ function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
     getConnKey: () => CONN,
     createSecondaryClient: vi.fn(async () => {
       counts.created++
+      if (options.connectError) throw options.connectError
       if (options.holdFirstConnect && counts.created === 1) {
         await new Promise<void>((resolve) => {
           releaseConnect = resolve
@@ -109,7 +116,11 @@ function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
       }
       return makeClient()
     }),
-    runOnMainClient: vi.fn()
+    runOnMainClient: vi.fn((task: (client: unknown) => Promise<unknown>) => {
+      const run = mainChain.then(() => task(makeClient()))
+      mainChain = run.catch(() => undefined)
+      return run
+    })
   }
   const generator = {
     getFormat: vi.fn(async () => 'jpeg'),
@@ -146,8 +157,11 @@ function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
     await flush()
   }
 
-  async function fail(path: string): Promise<void> {
-    downloads.get(path)?.fail(new Error('550 Permission denied'))
+  async function fail(
+    path: string,
+    err: Error = new Error('550 Permission denied')
+  ): Promise<void> {
+    downloads.get(path)?.fail(err)
     await flush()
   }
 
@@ -155,6 +169,7 @@ function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
     queue,
     started,
     counts,
+    runOnMainClient: ftp.runOnMainClient,
     onReady,
     onError,
     drain,
@@ -166,7 +181,7 @@ function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
 
 let current: Harness | null = null
 
-function harness(options?: { holdFirstConnect?: boolean }): Harness {
+function harness(options?: { holdFirstConnect?: boolean; connectError?: Error }): Harness {
   current = createHarness(options)
   return current
 }
@@ -409,6 +424,62 @@ describe('ThumbnailQueue — batches are scoped per viewer', () => {
     await h.drain()
 
     expect(h.started).toEqual([10, 11, 12].map(remotePath))
+    expect(h.onError).not.toHaveBeenCalled()
+  })
+})
+
+describe('ThumbnailQueue — transient FTP errors are not retried automatically', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('reports a 425 once and downloads the file again only when it is requested again', async () => {
+    // covers: Test-1138
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const h = harness()
+    h.queue.request(req(0))
+    await flush()
+    await h.fail(
+      remotePath(0),
+      new FTPError({ code: 425, message: "425 Too many connections. Can't open data channel." })
+    )
+
+    expect(h.onError).toHaveBeenCalledTimes(1)
+    expect(h.onError.mock.calls[0][0]).toBe(keyOf(0))
+    await vi.advanceTimersByTimeAsync(10_000)
+    await flush()
+    expect(h.started.filter((path) => path === remotePath(0))).toHaveLength(1)
+
+    // 사용자의 재시도 아이콘: 같은 요청을 다시 넣으면 다시 내려받는다
+    h.queue.request(req(0))
+    await flush()
+    expect(h.started.filter((path) => path === remotePath(0))).toHaveLength(2)
+  })
+
+  it('caps refused secondary logins at the queue concurrency and serves every thumbnail through the main client after a 421', async () => {
+    // covers: Test-1139
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const h = harness({
+      connectError: new FTPError({
+        code: 421,
+        message: '421 Too many connections. Service temporarily unavailable.'
+      })
+    })
+    // 한꺼번에 들어온 항목은 첫 거절을 알기 전에 각자 로그인하므로(동시 수까지) 상한은 동시 수다.
+    // 큐가 보조 연결을 포기한 뒤에는 시간이 지나도 다시 로그인하지 않는다.
+    h.queue.requestBatch(
+      MAIN_VIEWER,
+      range(0, 5).map((i) => req(i))
+    )
+    await flush()
+    const afterGivingUp = h.counts.created
+    await vi.advanceTimersByTimeAsync(10_000)
+    await h.drain()
+
+    expect(afterGivingUp).toBeLessThanOrEqual(3)
+    expect(h.counts.created).toBe(afterGivingUp)
+    expect(h.runOnMainClient).toHaveBeenCalledTimes(5)
+    expect(h.onReady).toHaveBeenCalledTimes(5)
     expect(h.onError).not.toHaveBeenCalled()
   })
 })
