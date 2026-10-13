@@ -301,6 +301,7 @@ export const en = {
   'path.editHint': 'Click empty space to type a path (Ctrl+L)',
   'path.edit': 'Type a path',
   'path.hidden': 'Hidden path segments',
+  'path.moreTools': 'More tools',
 
   'filter.find': 'Find in this folder',
   'filter.findTooltip': 'Find in this folder (Ctrl+F)',

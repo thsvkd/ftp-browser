@@ -1,14 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, ListFilter, X } from 'lucide-react'
 import { useLocale, useT } from '@renderer/i18n'
-import { useAllCategories, useCategories, useCategoryName } from '@renderer/hooks/useFileFilter'
+import { useCategories, useCategoryName, useFilterSummary } from '@renderer/hooks/useFileFilter'
 import type { ExplorerEntry } from '@renderer/lib/explorerEntry'
 import {
   EMPTY_FILTER,
-  activeCount,
   countByCategory,
   extensionCounts,
-  filterLabel,
   orphanExtensions,
   parseExtensionInput,
   type TabFilter
@@ -245,49 +243,108 @@ function Popover({
   )
 }
 
+/** 트리거 버튼의 모양 */
+function filterTriggerClass(compact: boolean, count: number): string {
+  return cn(
+    'flex h-9 shrink-0 items-center gap-1.5 rounded-full border text-[12.5px] font-semibold',
+    compact ? 'px-2.5' : 'px-3',
+    count > 0
+      ? 'border-transparent bg-[var(--acw)] text-[var(--ac)]'
+      : 'border-[var(--bd)] text-[var(--mu)] hover:bg-[var(--hv)]'
+  )
+}
+
+/** 트리거 안쪽: 아이콘, 넓은 막대의 라벨, 켜진 개수 배지 */
+function FilterTriggerFace({
+  compact,
+  count
+}: {
+  compact: boolean
+  count: number
+}): React.JSX.Element {
+  const t = useT()
+  return (
+    <>
+      <ListFilter className="h-4 w-4" aria-hidden />
+      {!compact && <span aria-hidden>{t('filter.button')}</span>}
+      {count > 0 && (
+        <span aria-hidden className="mono rounded-full bg-[var(--sf)] px-1.5 text-[10.5px]">
+          {count}
+        </span>
+      )}
+    </>
+  )
+}
+
+/** 경로 막대의 측정 줄에 그리는 트리거와 같은 모양의 자리표시자(explorer-ux-polish X5) */
+export function FilterTriggerPlaceholder({
+  compact,
+  count
+}: {
+  compact: boolean
+  count: number
+}): React.JSX.Element {
+  return (
+    <span data-measure="filter" className={filterTriggerClass(compact, count)}>
+      <FilterTriggerFace compact={compact} count={count} />
+    </span>
+  )
+}
+
 /**
  * 경로 막대의 파일 종류 필터(E23): 트리거 버튼 + 팝오버. 카테고리를 여러 개 체크하고(현재 폴더 기준 개수),
  * "고급…"에서 이 폴더의 확장자와 직접 입력한 확장자로 거른다. 카테고리와 확장자는 OR이다.
  * `ItemMenu`는 버튼 행만 표현하므로 쓰지 않는다. `entries`는 숨김 파일 설정을 반영한 현재 폴더 목록이다.
+ * `folded`면 막대의 ⋯ 안에 접힌 것이다: 트리거 없이 주어진 열림 상태로 같은 팝오버를 기준 요소(⋯) 아래에
+ * 연다. 바깥 판정은 기준 요소를 안쪽으로 치고, Esc는 기준 요소로 포커스를 돌려준다(explorer-ux-polish X8).
  */
 export function FileFilterMenu({
   tab,
   entries,
   hiddenCount,
-  compact
+  compact,
+  folded
 }: {
   tab: Tab
   entries: readonly ExplorerEntry[]
   /** 찾기를 통과했지만 이 필터로 빠진 수 */
   hiddenCount: number
   compact: boolean
+  folded?: {
+    /** 팝오버의 기준 요소(⋯ 버튼) */
+    anchor: HTMLElement | null
+    open: boolean
+    onOpenChange: (open: boolean) => void
+  }
 }): React.JSX.Element {
   const t = useT()
-  const all = useAllCategories()
-  const nameOf = useCategoryName()
-  const [open, setOpen] = useState(false)
+  const [ownOpen, setOwnOpen] = useState(false)
+  const open = folded ? folded.open : ownOpen
+  const setOpen = folded ? folded.onOpenChange : setOwnOpen
   const [placement, setPlacement] = useState<MenuPlacement | null>(null)
-  const triggerRef = useRef<HTMLButtonElement>(null)
+  // 닫힌 동안 자리를 잊는다. 다시 열면 숨긴 채 재고 나서 보인다.
+  if (!open && placement) setPlacement(null)
+  const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null)
+  const anchor = folded ? folded.anchor : trigger
   const rootRef = useRef<HTMLDivElement>(null)
   const id = `filter-menu-${tab.id}`
-  const count = activeCount(tab.filter, all)
+  const { count, title } = useFilterSummary(tab.filter, hiddenCount)
 
   const measure = useMemo(
     () => (): void => {
-      const trigger = triggerRef.current
       const root = rootRef.current
-      if (!trigger || !root) return
-      const anchor = trigger.getBoundingClientRect()
+      if (!anchor || !root) return
+      const at = anchor.getBoundingClientRect()
       const size = root.getBoundingClientRect()
       setPlacement(
         clampMenuPosition(
-          { x: anchor.right - POPOVER_WIDTH, y: anchor.bottom + 4 },
+          { x: at.right - POPOVER_WIDTH, y: at.bottom + 4 },
           { width: size.width, height: size.height },
           { width: window.innerWidth, height: window.innerHeight }
         )
       )
     },
-    []
+    [anchor]
   )
 
   useEffect(() => {
@@ -296,17 +353,14 @@ export function FileFilterMenu({
     // click이 아니라 pointerdown으로 바깥을 판정한다. 열려는 클릭이 자신을 닫지 않게 트리거는 안쪽으로 친다.
     const onPointerDown = (e: Event): void => {
       const target = e.target
-      if (
-        target instanceof Node &&
-        (rootRef.current?.contains(target) || triggerRef.current?.contains(target))
-      )
+      if (target instanceof Node && (rootRef.current?.contains(target) || anchor?.contains(target)))
         return
       close()
     }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
       close()
-      triggerRef.current?.focus()
+      anchor?.focus()
     }
     document.addEventListener('pointerdown', onPointerDown, true)
     document.addEventListener('keydown', onKey)
@@ -316,46 +370,28 @@ export function FileFilterMenu({
       document.removeEventListener('keydown', onKey)
       window.removeEventListener('blur', close)
     }
-  }, [open])
-
-  const title =
-    count > 0
-      ? t('filter.activeTooltip', {
-          what: filterLabel(tab.filter, all, nameOf, t('filter.noExtension')),
-          n: hiddenCount
-        })
-      : t('filter.buttonTooltip')
+  }, [open, anchor, setOpen])
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-controls={id}
-        aria-label={t('filter.button')}
-        title={title}
-        data-active={count > 0 ? 'true' : undefined}
-        onClick={() => {
-          setPlacement(null)
-          setOpen(!open)
-        }}
-        className={cn(
-          'flex h-9 shrink-0 items-center gap-1.5 rounded-full border text-[12.5px] font-semibold',
-          compact ? 'px-2.5' : 'px-3',
-          count > 0
-            ? 'border-transparent bg-[var(--acw)] text-[var(--ac)]'
-            : 'border-[var(--bd)] text-[var(--mu)] hover:bg-[var(--hv)]'
-        )}
-      >
-        <ListFilter className="h-4 w-4" aria-hidden />
-        {!compact && <span aria-hidden>{t('filter.button')}</span>}
-        {count > 0 && (
-          <span aria-hidden className="mono rounded-full bg-[var(--sf)] px-1.5 text-[10.5px]">
-            {count}
-          </span>
-        )}
-      </button>
+      {!folded && (
+        <button
+          ref={setTrigger}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls={id}
+          aria-label={t('filter.button')}
+          title={title}
+          data-active={count > 0 ? 'true' : undefined}
+          onClick={() => {
+            setPlacement(null)
+            setOpen(!open)
+          }}
+          className={filterTriggerClass(compact, count)}
+        >
+          <FilterTriggerFace compact={compact} count={count} />
+        </button>
+      )}
       {open && (
         <Popover
           id={id}

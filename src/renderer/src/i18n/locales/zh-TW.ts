@@ -279,6 +279,7 @@ export const zhTW = {
   'path.editHint': '點擊空白處即可輸入路徑 (Ctrl+L)',
   'path.edit': '輸入路徑',
   'path.hidden': '已摺疊的路徑',
+  'path.moreTools': '更多工具',
 
   'filter.find': '在此資料夾中尋找',
   'filter.findTooltip': '在此資料夾中尋找 (Ctrl+F)',

@@ -306,6 +306,7 @@ export const de = {
   'path.editHint': 'Auf eine freie Stelle klicken, um einen Pfad einzugeben (Strg+L)',
   'path.edit': 'Pfad eingeben',
   'path.hidden': 'Ausgeblendete Pfadteile',
+  'path.moreTools': 'Weitere Werkzeuge',
 
   'filter.find': 'In diesem Ordner suchen',
   'filter.findTooltip': 'In diesem Ordner suchen (Strg+F)',

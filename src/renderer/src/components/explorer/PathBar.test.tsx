@@ -18,6 +18,7 @@ import {
   remoteLoc,
   renderExplorer,
   server,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from './explorerTestHarness'
@@ -47,6 +48,32 @@ afterEach(() => {
 
 const pathNav = (): HTMLElement => screen.getByRole('navigation', { name: en['path.label'] })
 const textbox = (): HTMLElement => screen.getByRole('textbox', { name: en['path.edit'] })
+
+/** 막대 폭을 정하고(측정 줄은 하네스가 40px로 둔다) 그 위치로 다시 그린다. */
+async function renderAt(width: number, path = '/a/b/c'): Promise<void> {
+  cleanup()
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: width })
+  await renderExplorer(remoteLoc(path))
+}
+const moreButton = (): HTMLElement => screen.getByRole('button', { name: en['path.moreTools'] })
+const moreMenu = (): HTMLElement => screen.getByRole('menu', { name: en['path.moreTools'] })
+const moreItem = (name: string): HTMLElement =>
+  within(moreMenu()).getByRole('menuitem', { name: new RegExp(`^${name}`) })
+/** ⋯ 메뉴를 마우스로 열고 그 항목을 누른다. */
+function pickMore(name: string): void {
+  fireEvent.click(moreButton(), { detail: 1 })
+  fireEvent.click(moreItem(name))
+}
+const FOLDED = [
+  en['explorer.forward'],
+  en['toolbar.refresh'],
+  en['filter.button'],
+  en['sort.label'],
+  en['view.grid'],
+  en['view.list'],
+  en['explorer.newFolder'],
+  en['explorer.details']
+]
 
 describe('PathBar — crumbs and typing a path', () => {
   it('navigates by crumb, edits by empty-space click or Ctrl+L, and collapses the middle when narrow', async () => {
@@ -203,6 +230,148 @@ describe('PathBar — dropping on a crumb', () => {
   })
 })
 
+describe('PathBar — one line with a ⋯ menu', () => {
+  it('keeps the bar on one line and folds the tools that do not fit into ⋯ in bar order', async () => {
+    // covers: Test-1165
+    // 스텁 기본 폭 1200: 접히는 도구가 없다.
+    expect(screen.queryByRole('button', { name: en['path.moreTools'] })).toBeNull()
+    // 넓은 막대의 찾기는 칸이다.
+    expect(screen.getByRole('textbox', { name: en['filter.find'] })).toBeTruthy()
+    for (const name of FOLDED) expect(screen.getByRole('button', { name })).toBeTruthy()
+
+    await renderAt(400)
+    const bar = document.querySelector<HTMLElement>('.path-bar')
+    const tools = document.querySelector<HTMLElement>('[data-path-tools]')
+    expect(bar?.classList.contains('flex-wrap')).toBe(false)
+    expect(tools?.classList.contains('flex-wrap')).toBe(false)
+    expect(screen.getByRole('button', { name: en['filter.find'] })).toBeTruthy()
+    for (const name of FOLDED) expect(screen.queryByRole('button', { name })).toBeNull()
+
+    expect(moreButton().getAttribute('aria-haspopup')).toBe('menu')
+    expect(moreButton().getAttribute('aria-expanded')).not.toBe('true')
+    fireEvent.click(moreButton(), { detail: 1 })
+    const all = within(moreMenu()).getAllByRole('menuitem')
+    expect(all).toHaveLength(FOLDED.length)
+    expect(FOLDED.map((name) => all.indexOf(moreItem(name)))).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    expect(moreItem(en['explorer.forward'])).toHaveProperty('disabled', true)
+    expect(moreButton().getAttribute('aria-expanded')).toBe('true')
+    expect(moreItem(en['explorer.forward']).getAttribute('aria-keyshortcuts')).toBe('Alt+→')
+    expect(moreItem(en['toolbar.refresh']).getAttribute('aria-keyshortcuts')).toBe('F5')
+    expect(moreItem(en['explorer.newFolder']).getAttribute('aria-keyshortcuts')).toBe(
+      'Ctrl+Shift+N'
+    )
+    expect(moreItem(en['explorer.details']).getAttribute('aria-keyshortcuts')).toBe('Alt+Shift+P')
+  })
+
+  it('runs refresh, sort, view, details, new folder and forward from the ⋯ menu', async () => {
+    // covers: Test-1166
+    await renderAt(300)
+    const lists = (): number =>
+      invokeCalls(h.invoke, 'ftp:list').filter((c) => c[1] === '/a/b/c').length
+    const before = lists()
+    pickMore(en['toolbar.refresh'])
+    await flush()
+    expect(lists()).toBe(before + 1)
+
+    fireEvent.click(moreButton(), { detail: 1 })
+    fireEvent.click(moreItem(en['sort.label']))
+    fireEvent.click(
+      within(screen.getAllByRole('menu')[1]).getByRole('menuitem', { name: en['file.size'] })
+    )
+    expect(activeTab().sort.key).toBe('size')
+
+    pickMore(en['view.list'])
+    expect(activeTab().view).toBe('list')
+    fireEvent.click(moreButton(), { detail: 1 })
+    expect(moreItem(en['view.list']).querySelector('.lucide-check')).toBeTruthy()
+    expect(moreItem(en['view.grid']).querySelector('.lucide-check')).toBeNull()
+    fireEvent.click(moreItem(en['explorer.details']))
+    expect(useShelfStore.getState().railTab).toBe('info')
+
+    pickMore(en['explorer.newFolder'])
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:mkdir')).toEqual([[server(), '/a/b/c/New folder']])
+
+    // 앞으로는 뒤로 간 뒤에만 켜진다.
+    act(() => useTabsStore.getState().navigate(remoteLoc('/z'), { tabId: activeTab().id }))
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: en['explorer.back'] }))
+    await flush()
+    expect(activeTab().loc.path).toBe('/a/b/c')
+    fireEvent.click(moreButton(), { detail: 1 })
+    expect(moreItem(en['explorer.forward'])).toHaveProperty('disabled', false)
+    fireEvent.click(moreItem(en['explorer.forward']))
+    await flush()
+    expect(activeTab().loc.path).toBe('/z')
+
+    // 연결이 끊긴(쓸 수 없는) 탭에서는 새 폴더가 비활성이다.
+    act(() => setConnection(server(), 'disconnected'))
+    await flush()
+    fireEvent.click(moreButton(), { detail: 1 })
+    expect(moreItem(en['explorer.newFolder'])).toHaveProperty('disabled', true)
+  })
+
+  it('marks ⋯ when the folded filter is on and opens the filter popover under it', async () => {
+    // covers: Test-1167
+    await renderAt(300)
+    expect(moreButton().getAttribute('data-active')).toBeNull()
+    act(() =>
+      useTabsStore.getState().patchTab(activeTab().id, {
+        filter: { categories: ['image'], extensions: [], noExtension: false }
+      })
+    )
+    expect(moreButton().getAttribute('data-active')).toBe('true')
+    fireEvent.click(moreButton(), { detail: 1 })
+    expect(moreItem(en['filter.button']).getAttribute('aria-description')).toBe(
+      'Filter: Images · 1 hidden'
+    )
+    fireEvent.click(moreItem(en['filter.button']))
+    const dialog = screen.getByRole('dialog', { name: en['filter.menuLabel'] })
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Videos/ }))
+    expect(activeTab().filter.categories).toEqual(['image', 'video'])
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(moreButton())
+  })
+
+  it('opens a folded find field in the crumb slot with Ctrl+F or the ⋯ menu', async () => {
+    // covers: Test-1168
+    await renderAt(300)
+    const find = (): HTMLElement | null =>
+      screen.queryByRole('textbox', { name: en['filter.find'] })
+    const nav = (): HTMLElement | null =>
+      screen.queryByRole('navigation', { name: en['path.label'] })
+    expect(find()).toBeNull()
+    fireEvent.keyDown(listbox(), { key: 'f', ctrlKey: true })
+    expect(find()).toBeTruthy()
+    expect(document.activeElement).toBe(find())
+    expect(nav()).toBeNull()
+    fireEvent.change(find() as HTMLElement, { target: { value: 'x' } })
+    expect(activeTab().query).toBe('x')
+    act(() => listbox().focus())
+    expect(find()).toBeTruthy()
+    expect(nav()).toBeNull()
+    act(() => (find() as HTMLElement).focus())
+    fireEvent.keyDown(find() as HTMLElement, { key: 'Escape' })
+    expect(activeTab().query).toBe('')
+    expect(document.activeElement).toBe(listbox())
+    expect(find()).toBeNull()
+    expect(nav()).toBeTruthy()
+
+    pickMore(en['filter.find'])
+    expect(find()).toBeTruthy()
+    expect(document.activeElement).toBe(find())
+    expect(nav()).toBeNull()
+
+    // 돋보기만 보이는 좁은 막대(Test-826과 같은 800): 칸이 막대의 찾기 자리에 열린다.
+    await renderAt(800)
+    expect(find()).toBeNull()
+    fireEvent.keyDown(listbox(), { key: 'f', ctrlKey: true })
+    expect(document.activeElement).toBe(find())
+    expect(nav()).toBeTruthy()
+  })
+})
+
 describe('PathBar — menus opened from the keyboard', () => {
   it('focuses the first entry of the sort and hidden-crumbs menus opened by Enter or Space and returns focus on Esc', async () => {
     // covers: Test-1176
@@ -241,6 +410,14 @@ describe('PathBar — menus opened from the keyboard', () => {
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     expect(screen.queryByRole('menu')).toBeNull()
     expect(document.activeElement).toBe(hiddenButton)
+
+    // 막대 폭 300의 ⋯: 비활성인 앞으로를 건너뛴 새로 고침에 포커스, Esc → ⋯
+    await renderAt(300)
+    fireEvent.click(moreButton(), { detail: 0 })
+    expect(document.activeElement).toBe(moreItem(en['toolbar.refresh']))
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(document.activeElement).toBe(moreButton())
   })
 })
 
@@ -296,6 +473,15 @@ describe('PathBar — menus opened by a real click stay open', () => {
     nativeClick(sortButton())
     await settle()
     expect(names()).toEqual([en['sort.label']])
+
+    // 막대 폭 400: "…" 메뉴를 연 채 ⋯
+    await renderAt(400)
+    nativeClick(hiddenButton())
+    await settle()
+    expect(names()).toEqual([en['path.hidden']])
+    nativeClick(screen.getByRole('button', { name: en['path.moreTools'] }))
+    await settle()
+    expect(names()).toEqual([en['path.moreTools']])
 
     nativeClick(document.body)
     await settle()

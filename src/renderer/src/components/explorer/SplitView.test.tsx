@@ -126,14 +126,8 @@ describe('SplitView — panes', () => {
     expect(
       within(paneEl('left')).getAllByRole('button', { name: en['explorer.back'] })
     ).toHaveLength(1)
-    // 좁은 패널(최소 280px)에도 찾기·필터·정렬·보기·새 폴더·정보가 보여야 한다(F13). 한 줄에 다
-    // 들어가지 않으므로 경로 막대는 줄을 바꾸고, 도구는 한 묶음으로 다음 줄에 내려간다.
-    // (R3: 고정 높이 한 줄이던 막대가 346px 패널에서 새로 고침 뒤의 도구를 모두 잘라 냈다.)
     for (const pane of ['left', 'right'] as const) {
       const tools = paneEl(pane).querySelector<HTMLElement>('[data-path-tools]')
-      expect(tools?.parentElement?.classList.contains('flex-wrap')).toBe(true)
-      expect(tools?.parentElement?.classList.contains('h-[52px]')).toBe(false)
-      expect(tools?.classList.contains('flex-wrap')).toBe(true)
       for (const name of [en['sort.label'], en['view.grid'], en['explorer.details']])
         expect(within(tools as HTMLElement).getByRole('button', { name })).toBeTruthy()
       // 막대 높이가 바뀌므로 바쁨 막대·놓기 테두리는 고정 52px 대신 패널에 알린 높이를 따른다.
@@ -156,6 +150,34 @@ describe('SplitView — panes', () => {
     expect(document.querySelectorAll('section[data-pane]')).toHaveLength(1)
     expect(paneEl('left').getAttribute('data-tab-pane')).toBe(X)
     expect(screen.queryByRole('separator')).toBeNull()
+  })
+
+  it('gives each narrow pane its own ⋯ menu and find field', async () => {
+    // covers: Test-1169
+    h = setupExplorer({
+      local: { [LDIR]: [local(LDIR, 'l.txt')] },
+      remote: { [DIR]: [ftp('r.jpg')] }
+    })
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 300 })
+    const { L, R } = await renderSplit(localLoc(LDIR), remoteLoc(DIR))
+    const more = (pane: PaneId): HTMLElement =>
+      within(paneEl(pane)).getByRole('button', { name: en['path.moreTools'] })
+    expect(more('left')).toBeTruthy()
+    expect(more('right')).toBeTruthy()
+
+    fireEvent.click(more('right'), { detail: 1 })
+    fireEvent.click(
+      within(screen.getByRole('menu', { name: en['path.moreTools'] })).getByRole('menuitem', {
+        name: en['view.list']
+      })
+    )
+    expect(tabOf(R).view).toBe('list')
+    expect(tabOf(L).view).toBe('grid')
+
+    fireEvent.keyDown(listOf(R), { key: 'f', ctrlKey: true })
+    const find = { name: en['filter.find'] }
+    expect(within(paneEl('right')).getByRole('textbox', find)).toBeTruthy()
+    expect(within(paneEl('left')).queryByRole('textbox', find)).toBeNull()
   })
 
   it('marks only the active pane, dims the other path bar, and activates a pane on pointerdown or focus', async () => {

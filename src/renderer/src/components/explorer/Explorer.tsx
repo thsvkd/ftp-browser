@@ -446,6 +446,8 @@ function TabExplorer({
   const [lightbox, setLightbox] = useState<number | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [editingPath, setEditingPath] = useState(false)
+  // 찾기 칸의 열림. Ctrl+F가 연다. 찾기가 ⋯에 접혀도 막대가 칸을 그린다(explorer-ux-polish X7).
+  const [searchOpen, setSearchOpen] = useState(false)
   const refocus = (): void => scrollRef.current?.focus({ preventScroll: true })
 
   // ---------- 선택 ----------
@@ -784,12 +786,7 @@ function TabExplorer({
         a: () => patch(selectAll(selection, paths)),
         r: reload,
         l: () => setEditingPath(true),
-        f: () => {
-          // 좁은 경로 막대에서는 돋보기 버튼이다: 누르면 칸이 열리며 포커스를 받는다.
-          const find = document.getElementById(`explorer-filter-${tab.id}`)
-          if (find instanceof HTMLButtonElement) find.click()
-          else find?.focus()
-        },
+        f: () => setSearchOpen(true),
         n: e.shiftKey ? () => void newFolder() : undefined,
         '=': zoom(ZOOM_STEP),
         '+': zoom(ZOOM_STEP),
@@ -893,6 +890,8 @@ function TabExplorer({
           setEditingPath(v)
           if (!v) refocus()
         }}
+        searchOpen={searchOpen}
+        onSearchOpenChange={setSearchOpen}
         entries={listable}
         filterHidden={filtered.filterCount}
         canWrite={mode === 'live'}

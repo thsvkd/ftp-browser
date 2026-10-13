@@ -304,6 +304,7 @@ export const it = {
   'path.editHint': 'Clicca in uno spazio vuoto per digitare un percorso (Ctrl+L)',
   'path.edit': 'Digita un percorso',
   'path.hidden': 'Segmenti di percorso nascosti',
+  'path.moreTools': 'Altri strumenti',
 
   'filter.find': 'Cerca in questa cartella',
   'filter.findTooltip': 'Cerca in questa cartella (Ctrl+F)',
