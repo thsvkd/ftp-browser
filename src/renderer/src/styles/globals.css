@@ -276,6 +276,10 @@
   left: auto;
   right: 0;
 }
+/* 접힌 오른쪽 끌기 영역(창 가장자리 6px)이 본문 스크롤바를 가리지 않게 본문 오른쪽에 여백을 둔다(D17). */
+main[data-region='content']:has(+ div > #rail-pane[data-collapsed='true']) {
+  padding-right: var(--handle-hit);
+}
 .pane-handle::after {
   content: '';
   position: absolute;
