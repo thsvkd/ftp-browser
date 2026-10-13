@@ -891,7 +891,7 @@ function TabExplorer({
       {busyLevel > 0 && (
         <div
           data-testid="explorer-busy"
-          className="absolute inset-x-0 top-[52px] z-10 h-0.5 overflow-hidden bg-[var(--acw)]"
+          className="absolute inset-x-0 top-[var(--path-bar-h,52px)] z-10 h-0.5 overflow-hidden bg-[var(--acw)]"
         >
           <div className="indet h-full w-1/3 bg-[var(--ac)]" />
         </div>
@@ -1026,7 +1026,7 @@ function TabExplorer({
         <>
           <div
             className={cn(
-              'pointer-events-none absolute inset-x-2 bottom-2 top-[56px] z-20 rounded-xl border-2',
+              'pointer-events-none absolute inset-x-2 bottom-2 top-[calc(var(--path-bar-h,52px)+4px)] z-20 rounded-xl border-2',
               paneDrop.valid ? 'border-[var(--ac)]' : 'border-dashed border-[var(--dg)]'
             )}
           />

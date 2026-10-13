@@ -126,6 +126,19 @@ describe('SplitView — panes', () => {
     expect(
       within(paneEl('left')).getAllByRole('button', { name: en['explorer.back'] })
     ).toHaveLength(1)
+    // 좁은 패널(최소 280px)에도 찾기·필터·정렬·보기·새 폴더·정보가 보여야 한다(F13). 한 줄에 다
+    // 들어가지 않으므로 경로 막대는 줄을 바꾸고, 도구는 한 묶음으로 다음 줄에 내려간다.
+    // (R3: 고정 높이 한 줄이던 막대가 346px 패널에서 새로 고침 뒤의 도구를 모두 잘라 냈다.)
+    for (const pane of ['left', 'right'] as const) {
+      const tools = paneEl(pane).querySelector<HTMLElement>('[data-path-tools]')
+      expect(tools?.parentElement?.classList.contains('flex-wrap')).toBe(true)
+      expect(tools?.parentElement?.classList.contains('h-[52px]')).toBe(false)
+      expect(tools?.classList.contains('flex-wrap')).toBe(true)
+      for (const name of [en['sort.label'], en['view.grid'], en['explorer.details']])
+        expect(within(tools as HTMLElement).getByRole('button', { name })).toBeTruthy()
+      // 막대 높이가 바뀌므로 바쁨 막대·놓기 테두리는 고정 52px 대신 패널에 알린 높이를 따른다.
+      expect(paneEl(pane).style.getPropertyValue('--path-bar-h')).toMatch(/^\d+px$/)
+    }
     expect(paneOption('left', 'l.txt')).toBeTruthy()
     expect(paneOption('right', 'r.jpg')).toBeTruthy()
     expect(() => paneOption('left', 'r.jpg')).toThrow()
