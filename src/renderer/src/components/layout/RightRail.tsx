@@ -50,7 +50,7 @@ export function RightRail(): React.JSX.Element {
       role="region"
       aria-label={t(shelf ? 'shelf.title' : 'rail.info')}
       data-region="shelf"
-      className="flex w-[288px] shrink-0 flex-col border-l border-[var(--bd)] bg-[var(--sb)]"
+      className="flex w-full shrink-0 flex-col border-l border-[var(--bd)] bg-[var(--sb)]"
     >
       <div className="flex h-12 shrink-0 items-center border-b border-[var(--bd)] px-3">
         <div

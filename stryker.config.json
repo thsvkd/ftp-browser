@@ -7,8 +7,13 @@
   "concurrency": 4,
   "_comment": "범위는 이번 변경분으로 한정한다. 신규 파일은 통째로, 기존 파일은 추가한 라인 범위만 넣는다. 파일 전체를 넣으면 이번 테스트 케이스 리스트의 대상이 아닌 기존 로직(가상 스크롤, 마퀴 선택, 스트림 복사 등)이 분모에 들어가 점수가 실제 단언 강도를 반영하지 못한다. 범위를 넓혀 측정할 때는 CLI에서 --mutate로 덮어쓴다.",
   "_comment_maintenance": "아래 라인 범위는 해당 파일이 수정되면 조용히 어긋난다. 이 파일들을 건드린 커밋은 `git diff --unified=0 -- <file> | grep '^@@'`로 범위를 재확인할 것.",
-  "_comment_scope": "탐색기 메뉴·포커스 모델(docs/handoff/explorer-menu-and-focus.md §13-4) 변경분. 순수 모듈 selectionModel(새 clearSelection·selectMany·selectAll, 바뀐 moveFocus·toggleSelect 포함)만 통째로 넣는다. 제외: 컴포넌트(ItemMenu·Explorer·Tile·Row, jsdom 테스트는 렌더 결과만 고정해 뮤턴트 점수가 단언 강도를 반영하지 못한다, shelf 스펙 §14-4 방침).",
-  "mutate": ["src/renderer/src/lib/selectionModel.ts"],
+  "_comment_scope": "explorer-v2 통합 변경분. (1) 탐색기 메뉴·포커스 모델(docs/handoff/explorer-menu-and-focus.md §13-4): 순수 모듈 selectionModel(새 clearSelection·selectMany·selectAll, 바뀐 moveFocus·toggleSelect 포함)만 통째로. (2) 접이식·리사이즈 사이드바(docs/handoff/collapsible-sidebars.md §10-4): 신규 파일 sidebarLayout.ts·useLayoutStore.ts·useResizableSidebar.ts를 통째로, 훅의 줄은 SidePane.test.tsx(Test-904~911·917)가 닫는다. 제외: import 라인, 컴포넌트(ItemMenu·Explorer·Tile·Row·SidePane·ResizeHandle·Toolbar·AppShell: jsdom 테스트는 렌더 결과만 고정해 뮤턴트 점수가 단언 강도를 반영하지 못한다, shelf 스펙 §14-4 방침). 다른 스펙의 항목은 합칠 때 함께 남긴다.",
+  "mutate": [
+    "src/renderer/src/lib/selectionModel.ts",
+    "src/renderer/src/lib/sidebarLayout.ts",
+    "src/renderer/src/stores/useLayoutStore.ts",
+    "src/renderer/src/hooks/useResizableSidebar.ts"
+  ],
   "thresholds": {
     "high": 85,
     "low": 70,
