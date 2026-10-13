@@ -81,6 +81,7 @@ describe('shelveOsFiles', () => {
     invoke.mockClear()
     expect(await shelveOsFiles([])).toBe(0)
     expect(invoke).not.toHaveBeenCalled()
+    expect(toast).not.toHaveBeenCalled()
   })
 
   it('drops duplicates by locKey and only toasts when everything was already shelved', async () => {
