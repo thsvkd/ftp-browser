@@ -283,6 +283,18 @@ export const ptBR = {
   'tabs.closeTooltip': 'Fechar guia (Ctrl+W)',
   'tabs.duplicate': 'Duplicar esta guia',
 
+  'split.splitLeft': 'Dividir à esquerda · {{name}}',
+  'split.splitRight': 'Dividir à direita · {{name}}',
+  'split.replace': 'Abrir aqui · {{name}}',
+  'split.remaining': 'Restante: {{name}}',
+  'split.menuSplitRight': 'Dividir à direita',
+  'split.unsplit': 'Desfazer divisão',
+  'split.swap': 'Trocar os lados',
+  'split.pair': 'Visualização dividida: {{left}} e {{right}}',
+  'split.divider': 'Redimensionar painéis',
+  'split.paneLeft': 'Painel esquerdo: {{name}}',
+  'split.paneRight': 'Painel direito: {{name}}',
+
   'path.backTooltip': 'Voltar (Alt+←)',
   'path.forwardTooltip': 'Avançar (Alt+→)',
   'path.up': 'Pasta superior',

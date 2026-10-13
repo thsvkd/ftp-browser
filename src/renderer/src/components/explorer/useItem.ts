@@ -7,6 +7,10 @@ import { endDrag, useDropTarget, type DropState } from './dnd'
 
 export interface ItemProps {
   entry: ExplorerEntry
+  /** 항목이 있는 패널의 탭. 스프링이 이 탭을 옮기고 놓기 키를 가른다(split-view P9·P13) */
+  tabId: string
+  /** 항목 id 범위(분할이 보일 때만 탭 id, P9) */
+  scope?: string
   /** 선택됨 = 포커스 상태(항목의 시각 상태는 idle·hover·focus 셋) */
   selected: boolean
   shelved: boolean
@@ -46,15 +50,15 @@ export function useItem(p: ItemProps): ItemWiring {
   const { entry } = p
   const isDir = entry.type === 'directory'
   const loc = isDir ? { side: entry.side, path: entry.path, server: entry.server } : null
-  const drop = useDropTarget(`dir:${entry.side}:${entry.path}`, loc, {
-    spring: () => loc && useTabsStore.getState().navigate(loc),
+  const drop = useDropTarget(`dir:${p.tabId}:${entry.side}:${entry.path}`, loc, {
+    spring: () => loc && useTabsStore.getState().navigate(loc, { tabId: p.tabId }),
     springMs: SPRING_MS
   })
   return {
     drop,
     dropOver: drop.over && isDir,
     attrs: {
-      id: optId(entry.path),
+      id: optId(entry.path, p.scope),
       role: 'option',
       'aria-selected': p.selected,
       'data-path': entry.path,

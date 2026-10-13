@@ -23,11 +23,15 @@ import { currentPlatform } from '@renderer/lib/platform'
 import { matchPaneShortcut } from '@renderer/lib/sidebarLayout'
 import type { IpcResult } from '@shared/types/ipc'
 
-/** F6 순서. 지역마다 앞의 것부터 처음 맞는 요소에 포커스를 준다(랩 V2). */
+/**
+ * F6 순서. 지역마다 앞의 것부터 처음 맞는 요소에 포커스를 준다(랩 V2). 콘텐츠는 패널마다 한 지역이다:
+ * 왼쪽 목록 → 오른쪽 목록(P11). 단일 보기는 오른쪽 패널이 없어 건너뛴다.
+ */
 const REGIONS = [
   ['[data-region="sidebar"] [aria-current]', '[data-region="sidebar"] button'],
   ['[data-region="tabs"] [role="tab"][aria-selected="true"]'],
-  ['[data-region="content"] [id^="explorer-list-"]'],
+  ['[data-region="content"] [data-pane="left"] [id^="explorer-list-"]'],
+  ['[data-region="content"] [data-pane="right"] [id^="explorer-list-"]'],
   [
     '[data-region="shelf"] li[tabindex]',
     '[data-region="shelf"] [role="tab"][aria-selected="true"]',
@@ -72,9 +76,12 @@ export function AppShell(): React.JSX.Element {
       const els = REGIONS.map((qs) =>
         qs.map((q) => root.querySelector<HTMLElement>(q)).find(Boolean)
       ).filter((el): el is HTMLElement => !!el && !el.closest('[inert]')) // 접힌 패널은 건너뛴다(.focus()가 조용히 실패한다)
-      const cur = els.findIndex((el) =>
-        el.closest('[data-region]')?.contains(document.activeElement)
+      // 포커스가 있는 지역: 패널이 있으면 그 패널, 없으면 data-region. 패널 밖 본문(구분선)이면 지역으로 찾는다.
+      const at = document.activeElement
+      let cur = els.findIndex((el) =>
+        (el.closest('[data-pane]') ?? el.closest('[data-region]'))?.contains(at)
       )
+      if (cur < 0) cur = els.findIndex((el) => el.closest('[data-region]')?.contains(at))
       els[cur < 0 && delta < 0 ? els.length - 1 : (cur + delta + els.length) % els.length]?.focus()
     }
     const onKey = (e: KeyboardEvent): void => {
@@ -101,6 +108,9 @@ export function AppShell(): React.JSX.Element {
       if (e.key === 'F6') run = () => cycleRegion(e.shiftKey ? -1 : 1)
       else if (pane) run = () => useLayoutStore.getState().toggle(pane)
       else if (typing) return
+      // macOS 한국어 자판의 그 키는 '₩'라 code도 본다(P5)
+      else if (ctrl && (e.key === '\\' || e.code === 'Backslash'))
+        run = () => useTabsStore.getState().toggleSplit()
       else if (ctrl && e.key === 'Enter') run = () => tab && void dropShelf(tab.loc)
       else if (e.key === 'F5' || (ctrl && key === 'r')) run = reloadActiveTab
       else if (e.altKey && e.shiftKey && key === 'p')

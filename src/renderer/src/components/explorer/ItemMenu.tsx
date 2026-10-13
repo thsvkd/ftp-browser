@@ -148,10 +148,14 @@ function menuKeys(
   }
 }
 
+/** 메뉴가 새로 열릴 때 window에 보내는 이벤트. 다른 메뉴는 이것을 듣고 닫힌다(메뉴는 한 번에 하나). */
+const MENU_OPEN = 'itemmenu:open'
+
 /**
  * 탐색기의 메뉴(항목·빈 곳·정렬·숨은 경로). 열린 자리를 화면 안으로 보정하고(menuPosition),
- * 바깥 좌·우클릭, Esc, 창 포커스 잃음, 바깥 스크롤에 닫힌다(D20). "보내기 ▸" 같은 하위 메뉴는
- * 항목 옆에 따로 뜬다(메뉴 안에는 menuitem과 separator만 있다).
+ * 바깥 좌·우클릭, Esc, 창 포커스 잃음, 바깥 스크롤에 닫힌다(D20). 다른 메뉴가 열려도 닫힌다: 그때
+ * `onClose('replaced')`라 연 쪽은 포커스를 되돌리지 않는다(새 메뉴가 포커스를 갖는다, split-view §4 18행).
+ * "보내기 ▸" 같은 하위 메뉴는 항목 옆에 따로 뜬다(메뉴 안에는 menuitem과 separator만 있다).
  */
 export function ItemMenu({
   x,
@@ -164,7 +168,8 @@ export function ItemMenu({
   y: number
   label: string
   items: MenuItem[]
-  onClose: () => void
+  /** `reason`은 다른 메뉴가 열려 닫힐 때만 `'replaced'`다 */
+  onClose: (reason?: 'replaced') => void
 }): React.JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
   const subRef = useRef<HTMLDivElement>(null)
@@ -254,7 +259,15 @@ export function ItemMenu({
     window.addEventListener('blur', close)
     // 안쪽 스크롤 컨테이너의 scroll은 버블링되지 않으므로 capture로 듣는다.
     window.addEventListener('scroll', onScroll, true)
+    // 다른 메뉴가 열리면 닫힌다. 메뉴를 여는 우클릭은 전파를 막으므로 바깥 우클릭 닫힘에 기대지 않는다.
+    const me = {}
+    const onOtherOpen = (e: Event): void => {
+      if ((e as CustomEvent).detail !== me) closeRef.current('replaced')
+    }
+    window.addEventListener(MENU_OPEN, onOtherOpen)
+    window.dispatchEvent(new CustomEvent(MENU_OPEN, { detail: me }))
     return () => {
+      window.removeEventListener(MENU_OPEN, onOtherOpen)
       window.removeEventListener('click', mark, true)
       document.removeEventListener('click', onOutside)
       document.removeEventListener('keydown', onKey)

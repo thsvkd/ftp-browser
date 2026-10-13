@@ -259,6 +259,18 @@ export const zhTW = {
   'tabs.closeTooltip': '關閉分頁 (Ctrl+W)',
   'tabs.duplicate': '複製此分頁',
 
+  'split.splitLeft': '分割到左側 · {{name}}',
+  'split.splitRight': '分割到右側 · {{name}}',
+  'split.replace': '在此開啟 · {{name}}',
+  'split.remaining': '剩餘分頁: {{name}}',
+  'split.menuSplitRight': '分割到右側',
+  'split.unsplit': '取消分割',
+  'split.swap': '交換左右',
+  'split.pair': '分割檢視: {{left}} 和 {{right}}',
+  'split.divider': '調整窗格大小',
+  'split.paneLeft': '左窗格: {{name}}',
+  'split.paneRight': '右窗格: {{name}}',
+
   'path.backTooltip': '上一頁 (Alt+←)',
   'path.forwardTooltip': '下一頁 (Alt+→)',
   'path.up': '上層資料夾',

@@ -284,6 +284,18 @@ export const it = {
   'tabs.closeTooltip': 'Chiudi scheda (Ctrl+W)',
   'tabs.duplicate': 'Duplica questa scheda',
 
+  'split.splitLeft': 'Dividi a sinistra · {{name}}',
+  'split.splitRight': 'Dividi a destra · {{name}}',
+  'split.replace': 'Apri qui · {{name}}',
+  'split.remaining': 'Rimanente: {{name}}',
+  'split.menuSplitRight': 'Dividi a destra',
+  'split.unsplit': 'Rimuovi divisione',
+  'split.swap': 'Scambia i lati',
+  'split.pair': 'Vista divisa: {{left}} e {{right}}',
+  'split.divider': 'Ridimensiona i pannelli',
+  'split.paneLeft': 'Pannello sinistro: {{name}}',
+  'split.paneRight': 'Pannello destro: {{name}}',
+
   'path.backTooltip': 'Indietro (Alt+←)',
   'path.forwardTooltip': 'Avanti (Alt+→)',
   'path.up': 'Cartella superiore',

@@ -285,6 +285,18 @@ export const fr = {
   'tabs.closeTooltip': 'Fermer l’onglet (Ctrl+W)',
   'tabs.duplicate': 'Dupliquer cet onglet',
 
+  'split.splitLeft': 'Diviser à gauche · {{name}}',
+  'split.splitRight': 'Diviser à droite · {{name}}',
+  'split.replace': 'Ouvrir ici · {{name}}',
+  'split.remaining': 'Restant : {{name}}',
+  'split.menuSplitRight': 'Diviser à droite',
+  'split.unsplit': 'Annuler la division',
+  'split.swap': 'Inverser les côtés',
+  'split.pair': 'Vue divisée : {{left}} et {{right}}',
+  'split.divider': 'Redimensionner les volets',
+  'split.paneLeft': 'Volet gauche : {{name}}',
+  'split.paneRight': 'Volet droit : {{name}}',
+
   'path.backTooltip': 'Précédent (Alt+←)',
   'path.forwardTooltip': 'Suivant (Alt+→)',
   'path.up': 'Dossier parent',

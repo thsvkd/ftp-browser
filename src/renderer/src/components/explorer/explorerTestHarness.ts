@@ -15,7 +15,7 @@ import { useListingStore } from '@renderer/stores/useListingStore'
 import { useLocalThumbnailStore } from '@renderer/stores/useLocalThumbnailStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
-import { useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
+import { useTabsStore, type PaneId, type Tab } from '@renderer/stores/useTabsStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { makeApiMock, stubGridLayout, type ApiMock } from '@renderer/test/rendererTestUtils'
@@ -166,7 +166,7 @@ export function setupExplorer(
 
   useFtpStore.setState({ connections: {} })
   if (opts.connected !== false) setConnection(server(), 'connected')
-  useTabsStore.setState({ tabs: [], activeId: '', recent: [] })
+  useTabsStore.setState({ tabs: [], activeId: '', recent: [], split: null })
   useFileCategoryStore.setState({ overrides: EMPTY_OVERRIDES })
   useListingStore.setState({ byKey: {} })
   useShelfStore.setState({ items: [], railTab: 'shelf' })
@@ -228,3 +228,35 @@ export const selectedNames = (): string[] =>
   activeTab()
     .sel.map((p) => p.slice(Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) + 1))
     .sort()
+
+/** 분할 보기의 그 패널(`section[data-pane]`). */
+export function paneEl(pane: PaneId): HTMLElement {
+  const el = document.querySelector<HTMLElement>(`[data-pane="${pane}"]`)
+  if (!el) throw new Error(`no pane "${pane}"`)
+  return el
+}
+
+/**
+ * 요소 하나의 `getBoundingClientRect`·`clientWidth`·`clientHeight`를 인스턴스 속성으로 고정한다.
+ * `stubGridLayout`은 모든 요소를 0,0~1200×800으로 두므로 탭줄·분할 루트·타일을 구별할 때 쓴다.
+ */
+export function stubRect(
+  el: Element,
+  rect: { left: number; top: number; width: number; height: number }
+): void {
+  const { left, top, width, height } = rect
+  const box = {
+    x: left,
+    y: top,
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    toJSON: () => ({})
+  }
+  Object.defineProperty(el, 'getBoundingClientRect', { configurable: true, value: () => box })
+  Object.defineProperty(el, 'clientWidth', { configurable: true, value: width })
+  Object.defineProperty(el, 'clientHeight', { configurable: true, value: height })
+}

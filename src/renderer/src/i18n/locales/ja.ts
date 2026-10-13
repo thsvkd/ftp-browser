@@ -271,6 +271,18 @@ export const ja = {
   'tabs.closeTooltip': 'タブを閉じる (Ctrl+W)',
   'tabs.duplicate': 'このタブを複製',
 
+  'split.splitLeft': '左に分割 · {{name}}',
+  'split.splitRight': '右に分割 · {{name}}',
+  'split.replace': 'ここで開く · {{name}}',
+  'split.remaining': '残るタブ: {{name}}',
+  'split.menuSplitRight': '右に分割',
+  'split.unsplit': '分割を解除',
+  'split.swap': '左右を入れ替え',
+  'split.pair': '分割表示: {{left}} と {{right}}',
+  'split.divider': 'ペインのサイズを変更',
+  'split.paneLeft': '左ペイン: {{name}}',
+  'split.paneRight': '右ペイン: {{name}}',
+
   'path.backTooltip': '戻る (Alt+←)',
   'path.forwardTooltip': '進む (Alt+→)',
   'path.up': '親フォルダー',

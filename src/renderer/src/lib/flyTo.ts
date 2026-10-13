@@ -8,11 +8,14 @@ export interface FlySource {
 export const reducedMotion = (): boolean =>
   typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
 
-/** 화면에 있는 경로들의 출발점(타일·행은 `data-path`를 갖는다). 많아야 8개. */
-export function sourcesFor(paths: readonly string[]): FlySource[] {
+/**
+ * 화면에 있는 경로들의 출발점(타일·행은 `data-path`를 갖는다). 많아야 8개. `root` 안에서 찾는다:
+ * 분할 보기에서는 탐색기가 자기 목록을 넘겨 다른 패널의 같은 경로를 집지 않는다(split-view P9).
+ */
+export function sourcesFor(paths: readonly string[], root: ParentNode = document): FlySource[] {
   const out: FlySource[] = []
   for (const p of paths.slice(0, 8)) {
-    const el = document.querySelector(`[data-path="${CSS.escape(p)}"]`)
+    const el = root.querySelector(`[data-path="${CSS.escape(p)}"]`)
     if (!el) continue
     const img = el.querySelector('img')
     out.push({ rect: (img ?? el).getBoundingClientRect(), src: img?.getAttribute('src') ?? null })

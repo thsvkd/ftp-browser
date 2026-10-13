@@ -268,6 +268,18 @@ export const ko = {
   'tabs.closeTooltip': '탭 닫기 (Ctrl+W)',
   'tabs.duplicate': '현재 탭 복제',
 
+  'split.splitLeft': '왼쪽에 분할 · {{name}}',
+  'split.splitRight': '오른쪽에 분할 · {{name}}',
+  'split.replace': '여기에서 열기 · {{name}}',
+  'split.remaining': '남는 탭: {{name}}',
+  'split.menuSplitRight': '오른쪽에 분할',
+  'split.unsplit': '분할 해제',
+  'split.swap': '좌우 바꾸기',
+  'split.pair': '분할 보기: {{left}}, {{right}}',
+  'split.divider': '패널 크기 조절',
+  'split.paneLeft': '왼쪽 패널: {{name}}',
+  'split.paneRight': '오른쪽 패널: {{name}}',
+
   'path.backTooltip': '뒤로 (Alt+←)',
   'path.forwardTooltip': '앞으로 (Alt+→)',
   'path.up': '상위 폴더',

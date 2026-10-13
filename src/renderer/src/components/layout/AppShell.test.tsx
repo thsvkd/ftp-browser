@@ -8,16 +8,24 @@ import { useServerStore } from '@renderer/stores/useServerStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { useLayoutStore } from '@renderer/stores/useLayoutStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
+import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { emptyDraft } from '@renderer/lib/serverAddress'
 import {
   activeTab,
   flush,
   ftp,
   local,
+  localLoc,
   option,
+  paneEl,
+  remoteLoc,
+  server,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from '@renderer/components/explorer/explorerTestHarness'
+import { fromLocalEntry, type Loc } from '@renderer/lib/explorerEntry'
+import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import { AppShell } from './AppShell'
 
 const HOME = 'C:\\Users\\me\\Downloads'
@@ -323,5 +331,257 @@ describe('AppShell — collapsed panes', () => {
     } finally {
       delete (HTMLElement.prototype as { animate?: unknown }).animate
     }
+  })
+})
+
+describe('AppShell — split view', () => {
+  it('returns focus from the conflict sheet to the active right pane list when its opener is gone', async () => {
+    // covers: Test-1085
+    render(<AppShell />)
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
+    const L = activeTab().id
+    const R = useTabsStore.getState().openTab({ side: 'local', path: HOME }, false)
+    act(() => useTabsStore.setState({ split: { leftId: L, rightId: R, ratio: 0.5 }, activeId: R }))
+    await flush()
+    expect(screen.getAllByRole('listbox')).toHaveLength(2)
+
+    const opener = document.createElement('button')
+    document.body.appendChild(opener)
+    opener.focus()
+    act(() => {
+      void useTransferStore.getState().askConflicts('copy', [
+        {
+          target: `${HOME}\\a.txt`,
+          source: 'C:\\in\\a.txt',
+          name: 'a.txt',
+          incoming: { size: 2048, modifiedAt: '2024-05-02T10:00:00.000Z' },
+          existing: { size: 1024, modifiedAt: '2024-05-01T10:00:00.000Z' }
+        }
+      ])
+    })
+    await screen.findByRole('alertdialog')
+    opener.remove()
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(document.activeElement).toBe(document.getElementById(`explorer-list-${R}`))
+    expect(useTabsStore.getState().activeId).toBe(R)
+  })
+})
+
+/** 탭 두 개의 짝을 만들고 AppShell을 그린다. 기본은 왼쪽이 활성. */
+async function startSplit(
+  rightLoc: Loc = localLoc(HOME),
+  active: 'left' | 'right' = 'left'
+): Promise<{ L: string; R: string }> {
+  render(<AppShell />)
+  await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
+  const L = activeTab().id
+  const R = useTabsStore.getState().openTab(rightLoc, false)
+  act(() =>
+    useTabsStore.setState({
+      split: { leftId: L, rightId: R, ratio: 0.5 },
+      activeId: active === 'right' ? R : L
+    })
+  )
+  await flush()
+  return { L, R }
+}
+
+const backslash = (init: Partial<KeyboardEventInit>): Partial<KeyboardEventInit> => ({
+  key: '\\',
+  code: 'Backslash',
+  ...init
+})
+
+describe('AppShell — split view shortcuts', () => {
+  it('toggles the split view with Ctrl+backslash or Cmd+backslash on any layout, but not from a text field or with one tab', async () => {
+    // covers: Test-1081
+    render(<AppShell />)
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
+    const split = (): unknown => useTabsStore.getState().split
+
+    // 탭이 하나면 아무 일 없다
+    fireEvent.keyDown(screen.getByRole('listbox'), backslash({ ctrlKey: true }))
+    expect(split()).toBeNull()
+
+    act(() => {
+      useTabsStore.getState().openTab(localLoc(HOME))
+    })
+    await flush()
+    const active = useTabsStore.getState().activeId
+    expect(fireEvent.keyDown(screen.getAllByRole('listbox')[0], backslash({ ctrlKey: true }))).toBe(
+      false
+    )
+    expect(split()).not.toBeNull()
+    expect(useTabsStore.getState().activeId).toBe(active)
+    expect(screen.getAllByRole('listbox')).toHaveLength(2)
+
+    fireEvent.keyDown(document.body, backslash({ ctrlKey: true }))
+    expect(split()).toBeNull()
+    expect(screen.getAllByRole('listbox')).toHaveLength(1)
+
+    // macOS 한국어 자판: Cmd + ₩ (code는 Backslash)
+    fireEvent.keyDown(document.body, backslash({ key: '₩', metaKey: true }))
+    expect(split()).not.toBeNull()
+    fireEvent.keyDown(document.body, backslash({ key: '₩', metaKey: true }))
+    expect(split()).toBeNull()
+
+    // 경로 입력 칸에서는 무시한다
+    fireEvent.keyDown(screen.getAllByRole('listbox')[0], { key: 'l', ctrlKey: true })
+    const path = screen.getByRole('textbox', { name: en['path.edit'] })
+    fireEvent.keyDown(path, backslash({ ctrlKey: true }))
+    expect(split()).toBeNull()
+  })
+
+  it('cycles F6 sidebar, tabs, left list, right list, rail and activates the right pane on reaching it', async () => {
+    // covers: Test-1082
+    const { L, R } = await startSplit()
+    const f6 = (shiftKey = false): void => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'F6', shiftKey })
+    }
+    const sidebarCurrent = within(
+      screen.getByRole('navigation', { name: en['sidebar.label'] })
+    ).getByRole('button', { name: 'Downloads' })
+    const shelfTab = screen.getByRole('tab', { name: new RegExp(`^${en['shelf.title']}`) })
+    const activeTabButton = (): Element | null =>
+      document.querySelector('[data-region="tabs"] [role="tab"][aria-selected="true"]')
+    const listOf = (id: string): HTMLElement => document.getElementById(`explorer-list-${id}`)!
+    expect(document.activeElement).toBe(listOf(L))
+
+    f6() // 왼쪽 목록 → (다음) 오른쪽 목록
+    expect(document.activeElement).toBe(listOf(R))
+    expect(useTabsStore.getState().activeId).toBe(R)
+    f6()
+    expect(document.activeElement).toBe(shelfTab)
+    f6()
+    expect(document.activeElement).toBe(sidebarCurrent)
+    f6()
+    expect(document.activeElement).toBe(activeTabButton())
+    expect(useTabsStore.getState().activeId).toBe(R)
+    f6()
+    expect(document.activeElement).toBe(listOf(L))
+    expect(useTabsStore.getState().activeId).toBe(L)
+    f6()
+    expect(document.activeElement).toBe(listOf(R))
+
+    // 반대 방향
+    f6(true)
+    expect(document.activeElement).toBe(listOf(L))
+    expect(useTabsStore.getState().activeId).toBe(L)
+    f6(true)
+    expect(document.activeElement).toBe(activeTabButton())
+    f6(true)
+    expect(document.activeElement).toBe(sidebarCurrent)
+    f6(true)
+    expect(document.activeElement).toBe(shelfTab)
+    f6(true)
+    expect(document.activeElement).toBe(listOf(R))
+    expect(useTabsStore.getState().activeId).toBe(R)
+  })
+
+  it('runs window shortcuts on the active pane tab: reload, send the shelf, edit the path', async () => {
+    // covers: Test-1083
+    // jsdom에는 Element.animate가 없다. 날아가는 효과(flyTo)가 그것을 부른다.
+    ;(HTMLElement.prototype as { animate?: unknown }).animate = vi.fn(() => ({}))
+    setConnection(server(), 'connected')
+    const LDIR = HOME
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['1'], skipped: [], conflicts: [], totalBytes: 1 }
+    })
+    const { R } = await startSplit(remoteLoc('/photos'))
+    act(() => {
+      useShelfStore.getState().add([fromLocalEntry(local(LDIR, 'a.txt'))])
+    })
+    fireEvent.pointerDown(paneEl('right'))
+    expect(useTabsStore.getState().activeId).toBe(R)
+
+    // F5: 오른쪽 경로만 다시 읽는다
+    h.invoke.mockClear()
+    fireEvent.keyDown(document.body, { key: 'F5' })
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([[server(), '/photos']])
+    expect(invokeCalls(h.invoke, 'local:list')).toEqual([])
+
+    // Ctrl+Enter: 오른쪽 위치로 보낸다
+    fireEvent.keyDown(document.body, { key: 'Enter', ctrlKey: true })
+    await flush()
+    const [conn, req] = invokeCalls(h.invoke, 'transfer:send')[0]
+    expect(conn).toBe(server())
+    expect(req).toMatchObject({
+      direction: 'upload',
+      sources: [`${LDIR}\\a.txt`],
+      destDir: '/photos'
+    })
+
+    // Ctrl+L: 오른쪽 경로 막대만 입력 모드
+    fireEvent.keyDown(document.body, { key: 'l', ctrlKey: true })
+    const boxes = screen.getAllByRole('textbox', { name: en['path.edit'] })
+    expect(boxes).toHaveLength(1)
+    expect(paneEl('right').contains(boxes[0])).toBe(true)
+    delete (HTMLElement.prototype as { animate?: unknown }).animate
+  })
+
+  it('follows the active pane in the status bar, sidebar, shelf destination and info panel', async () => {
+    // covers: Test-1084
+    h.remote['/photos'] = [ftp('x.jpg'), ftp('y.jpg'), ftp('z.jpg')]
+    setConnection(server(), 'connected')
+    await startSplit(remoteLoc('/photos'))
+    act(() => {
+      useShelfStore.getState().add([fromLocalEntry(local('C:\\other', 's.txt'))])
+      useShelfStore.getState().setRailTab('shelf')
+    })
+    const status = (): HTMLElement => screen.getByRole('contentinfo')
+    const sidebar = (): HTMLElement => screen.getByRole('navigation', { name: en['sidebar.label'] })
+    const rail = (): HTMLElement => document.querySelector<HTMLElement>('[data-region="shelf"]')!
+    const current = (): Element | null => sidebar().querySelector('[aria-current="location"]')
+
+    const expectLeft = (): void => {
+      expect(within(status()).getByText('1 item')).toBeTruthy()
+      expect(current()?.textContent).toContain('Downloads')
+      expect(within(rail()).getByText(/to Downloads$/)).toBeTruthy()
+    }
+    const expectRight = (): void => {
+      expect(within(status()).getByText('3 items')).toBeTruthy()
+      expect(current()?.textContent ?? '').not.toContain('Downloads')
+      expect(within(rail()).getByText(/to photos$/)).toBeTruthy()
+    }
+    expectLeft()
+    fireEvent.pointerDown(paneEl('right'))
+    expectRight()
+    fireEvent.pointerDown(paneEl('left'))
+    expectLeft()
+    fireEvent.pointerDown(paneEl('right'))
+    expectRight()
+
+    // 정보 패널의 폴더 요약
+    act(() => useShelfStore.getState().setRailTab('info'))
+    expect(within(rail()).getByRole('heading', { name: 'photos' })).toBeTruthy()
+    fireEvent.pointerDown(paneEl('left'))
+    expect(within(rail()).getByRole('heading', { name: 'Downloads' })).toBeTruthy()
+  })
+})
+
+describe('AppShell — collapsing a side pane in the split view', () => {
+  it('moves focus to the active pane list, not the first one, and keeps the active tab', async () => {
+    // covers: Test-1128
+    const { L, R } = await startSplit(localLoc(HOME), 'right')
+    const nav = screen.getByRole('navigation', { name: en['sidebar.label'] })
+    within(nav).getByRole('button', { name: 'Downloads' }).focus()
+    act(() => useLayoutStore.getState().toggle('left'))
+    expect(layout().left.collapsed).toBe(true)
+    expect(document.activeElement).toBe(document.getElementById(`explorer-list-${R}`))
+    expect(useTabsStore.getState().activeId).toBe(R)
+
+    // 단일 보기에서는 지금처럼 그 탭의 목록
+    act(() => useLayoutStore.getState().toggle('left'))
+    act(() => useTabsStore.getState().unsplit())
+    act(() => useTabsStore.getState().activate(L))
+    await flush()
+    within(screen.getByRole('navigation', { name: en['sidebar.label'] }))
+      .getByRole('button', { name: 'Downloads' })
+      .focus()
+    act(() => useLayoutStore.getState().toggle('left'))
+    expect(document.activeElement).toBe(document.getElementById(`explorer-list-${L}`))
   })
 })

@@ -259,6 +259,18 @@ export const zhCN = {
   'tabs.closeTooltip': '关闭标签页 (Ctrl+W)',
   'tabs.duplicate': '复制此标签页',
 
+  'split.splitLeft': '拆分到左侧 · {{name}}',
+  'split.splitRight': '拆分到右侧 · {{name}}',
+  'split.replace': '在此打开 · {{name}}',
+  'split.remaining': '剩余标签页: {{name}}',
+  'split.menuSplitRight': '拆分到右侧',
+  'split.unsplit': '取消拆分',
+  'split.swap': '交换左右',
+  'split.pair': '拆分视图: {{left}} 和 {{right}}',
+  'split.divider': '调整窗格大小',
+  'split.paneLeft': '左窗格: {{name}}',
+  'split.paneRight': '右窗格: {{name}}',
+
   'path.backTooltip': '后退 (Alt+←)',
   'path.forwardTooltip': '前进 (Alt+→)',
   'path.up': '上级文件夹',

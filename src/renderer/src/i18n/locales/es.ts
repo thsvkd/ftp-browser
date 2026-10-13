@@ -285,6 +285,18 @@ export const es = {
   'tabs.closeTooltip': 'Cerrar pestaña (Ctrl+W)',
   'tabs.duplicate': 'Duplicar esta pestaña',
 
+  'split.splitLeft': 'Dividir a la izquierda · {{name}}',
+  'split.splitRight': 'Dividir a la derecha · {{name}}',
+  'split.replace': 'Abrir aquí · {{name}}',
+  'split.remaining': 'Restante: {{name}}',
+  'split.menuSplitRight': 'Dividir a la derecha',
+  'split.unsplit': 'Quitar división',
+  'split.swap': 'Intercambiar lados',
+  'split.pair': 'Vista dividida: {{left}} y {{right}}',
+  'split.divider': 'Cambiar tamaño de los paneles',
+  'split.paneLeft': 'Panel izquierdo: {{name}}',
+  'split.paneRight': 'Panel derecho: {{name}}',
+
   'path.backTooltip': 'Atrás (Alt+←)',
   'path.forwardTooltip': 'Adelante (Alt+→)',
   'path.up': 'Carpeta superior',

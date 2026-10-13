@@ -307,6 +307,18 @@ export const ru = {
   'tabs.closeTooltip': 'Закрыть вкладку (Ctrl+W)',
   'tabs.duplicate': 'Дублировать вкладку',
 
+  'split.splitLeft': 'Разделить слева · {{name}}',
+  'split.splitRight': 'Разделить справа · {{name}}',
+  'split.replace': 'Открыть здесь · {{name}}',
+  'split.remaining': 'Остаётся: {{name}}',
+  'split.menuSplitRight': 'Разделить справа',
+  'split.unsplit': 'Отменить разделение',
+  'split.swap': 'Поменять стороны',
+  'split.pair': 'Разделённый вид: {{left}} и {{right}}',
+  'split.divider': 'Изменить размер панелей',
+  'split.paneLeft': 'Левая панель: {{name}}',
+  'split.paneRight': 'Правая панель: {{name}}',
+
   'path.backTooltip': 'Назад (Alt+←)',
   'path.forwardTooltip': 'Вперёд (Alt+→)',
   'path.up': 'Родительская папка',
