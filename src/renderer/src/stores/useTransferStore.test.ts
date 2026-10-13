@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fallbackBatchMeta, useTransferStore } from './useTransferStore'
+import { currentConn } from './useFtpStore'
 import { useListingStore } from './useListingStore'
 import { useSettingsStore } from './useSettingsStore'
 import type { Loc } from '@renderer/lib/explorerEntry'
@@ -117,7 +118,7 @@ describe('useTransferStore.send', () => {
     ])
     const result = await sent
 
-    expect(invoke).toHaveBeenCalledWith('transfer:send', request)
+    expect(invoke).toHaveBeenCalledWith('transfer:send', currentConn(), request)
     expect(result?.batchId).toBe('b1')
     expect(useTransferStore.getState().batchMeta).toEqual({ b1: { label: 'a.jpg', to } })
     expect(useTransferStore.getState().pendingSends).toEqual([])

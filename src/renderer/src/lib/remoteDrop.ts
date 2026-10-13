@@ -1,6 +1,6 @@
 import { toast } from 'sonner'
 import { t } from '@renderer/i18n'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { currentConn, useFtpStore } from '@renderer/stores/useFtpStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { connectedServer } from './sendItems'
 import type { IpcResult } from '@shared/types/ipc'
@@ -46,7 +46,7 @@ export function planRemoteMoves(items: RemoteFileDragItem[], targetPath: string)
 
 /** One RNFR/RNTO. Resolves the failure reason, or null on success. */
 async function rename(from: string, to: string): Promise<string | null> {
-  const result = await window.api.invoke<IpcResult<void>>('ftp:rename', from, to)
+  const result = await window.api.invoke<IpcResult<void>>('ftp:rename', currentConn(), from, to)
   return result.success ? null : result.error
 }
 
@@ -68,7 +68,7 @@ async function replaceRemote(move: RemoteMove): Promise<string | null> {
     const back = await rename(aside, move.newPath)
     return back ? `${moved} (${aside}: ${back})` : moved
   }
-  const result = await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', [
+  const result = await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', currentConn(), [
     { path: aside, isDirectory: false }
   ])
   return result.success ? null : result.error

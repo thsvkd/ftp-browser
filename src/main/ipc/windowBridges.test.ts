@@ -9,12 +9,17 @@ vi.mock('electron', () => ({
 import { registerFtpHandlers } from './ftpHandlers'
 import { registerOperationHandlers } from './operationHandlers'
 import { registerTransferHandlers } from './transferHandlers'
+import { ConnectionRegistry } from '../ftp/ConnectionRegistry'
+import { fakeSession, payloadOf, remoteOf } from '../ftp/__fixtures__/fakeSessions'
+import { TransferHub } from '../transfer/TransferHub'
 import type { BrowserWindow } from 'electron'
 import type { PasswordVault } from '../db/passwordVault'
 import type { LocalFileSystem } from '../local/LocalFileSystem'
 
+const K = 'me@nas.local:21'
+
 describe('event bridges after the window is closed', () => {
-  it('drops ftp, transfer and operation events instead of sending to a destroyed window', () => {
+  it('drops ftp, transfer and operation events instead of sending to a destroyed window', async () => {
     // covers: Test-634
     let destroyed = false
     const send = vi.fn((channel: string) => {
@@ -23,11 +28,16 @@ describe('event bridges after the window is closed', () => {
     })
     const win = { isDestroyed: () => destroyed, webContents: { send } } as unknown as BrowserWindow
     const operations = registerOperationHandlers(win)
-    const { manager, fileOps } = registerFtpHandlers(win, operations, {} as PasswordVault)
-    const queue = registerTransferHandlers(win, fileOps, manager, {} as LocalFileSystem)
+    const registry = new ConnectionRegistry((key) => fakeSession(key))
+    const hub = new TransferHub(registry)
+    registerFtpHandlers(win, operations, {} as PasswordVault, registry)
+    registerTransferHandlers(win, registry, hub, {} as LocalFileSystem)
+    await registry.connect(payloadOf(K))
+    send.mockClear()
+    const session = registry.get(K)!
     const emitAll = (): void => {
-      manager.emit('connectionStatus', { status: 'connected', host: 'h' })
-      queue.emit('queue:updated', { upserts: [], removedIds: [] })
+      remoteOf(session).setStatus('connected', 'h')
+      session.queue.emit('queue:updated', { upserts: [], removedIds: [] })
       operations.emit('operation:updated', [])
       operations.emit('operation:progress', { id: 'op', completed: 1, total: 2 })
     }
@@ -47,17 +57,16 @@ describe('event bridges after the window is closed', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
-  it('forwards every FTP mutation as ftp:remoteChanged until the window is closed', () => {
+  it('forwards every FTP mutation as ftp:remoteChanged until the window is closed', async () => {
     // covers: Test-412
     let destroyed = false
     const send = vi.fn()
     const win = { isDestroyed: () => destroyed, webContents: { send } } as unknown as BrowserWindow
-    const { manager } = registerFtpHandlers(
-      win,
-      registerOperationHandlers(win),
-      {} as PasswordVault
-    )
-    vi.spyOn(manager, 'getConnKey').mockReturnValue('me@nas.local:21')
+    const registry = new ConnectionRegistry((key) => fakeSession(key))
+    registerFtpHandlers(win, registerOperationHandlers(win), {} as PasswordVault, registry)
+    await registry.connect(payloadOf(K))
+    send.mockClear()
+    const manager = registry.get(K)!.manager
 
     manager.emit('mutation', { kind: 'upload', remotePath: '/a.jpg' })
     destroyed = true

@@ -7,6 +7,7 @@ import {
   type Loc,
   type Side
 } from '@renderer/lib/explorerEntry'
+import { currentConn } from './useFtpStore'
 import type { ErrorCodeType, IpcResult } from '@shared/types/ipc'
 import type { FtpListResult } from '@shared/types/ftp'
 import type { LocalListResult } from '@shared/types/local'
@@ -38,7 +39,11 @@ const generations = new Map<string, number>()
 export async function fetchEntries(loc: Loc): Promise<IpcResult<ExplorerEntry[]>> {
   try {
     if (loc.side === 'remote') {
-      const r = await window.api.invoke<IpcResult<FtpListResult>>('ftp:list', loc.path)
+      const r = await window.api.invoke<IpcResult<FtpListResult>>(
+        'ftp:list',
+        currentConn(),
+        loc.path
+      )
       return r.success
         ? {
             success: true,

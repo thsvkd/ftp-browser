@@ -21,24 +21,22 @@ vi.mock('electron', () => ({
 
 vi.mock('../db/database', () => ({ getDatabase: () => state.db }))
 
-vi.mock('../ftp/FtpConnectionManager', async () => {
-  const { EventEmitter } = await import('events')
-  return {
-    FtpConnectionManager: class extends EventEmitter {
-      connect = state.connect
-    }
-  }
-})
-
-vi.mock('../ftp/FtpFileOperations', () => ({ FtpFileOperations: class {} }))
-
+import { EventEmitter } from 'events'
 import type { BrowserWindow } from 'electron'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
-import type { FtpServer, FtpServerInput } from '@shared/types/ftp'
+import type { ConnKey } from '@shared/connKey'
+import type {
+  FtpConnectionState,
+  FtpServer,
+  FtpServerInput,
+  RemoteChangedEvent
+} from '@shared/types/ftp'
 import { registerFtpHandlers } from './ftpHandlers'
 import { createPasswordVault } from '../db/passwordVault'
 import { FakeCipher, fakeCipherOf } from '../db/__fixtures__/fakeCipher'
-import type { OperationManager } from '../operation/OperationManager'
+import { ConnectionRegistry, type FtpSession } from '../ftp/ConnectionRegistry'
+import { fakeSession, payloadOf, remoteOf } from '../ftp/__fixtures__/fakeSessions'
+import { OperationManager } from '../operation/OperationManager'
 
 let cipher: FakeCipher
 
@@ -59,9 +57,21 @@ beforeEach(() => {
   registerFtpHandlers(
     { isDestroyed: () => false, webContents: { send: vi.fn() } } as unknown as BrowserWindow,
     {} as OperationManager,
-    createPasswordVault(state.db, cipher)
+    createPasswordVault(state.db, cipher),
+    new ConnectionRegistry(loginOnly)
   )
 })
+
+/** 로그인만 보는 세션: 매니저의 connect가 state.connect이고 늘 끊긴 상태라 매번 다시 로그인한다. */
+function loginOnly(key: ConnKey): FtpSession {
+  const manager = Object.assign(new EventEmitter(), {
+    connect: (...args: unknown[]) => state.connect(...args),
+    disconnect: vi.fn(),
+    isConnected: () => false,
+    getStatus: () => 'disconnected'
+  })
+  return { key, manager } as unknown as FtpSession
+}
 
 afterEach(() => {
   state.db.close()
@@ -445,5 +455,151 @@ describe('ftp:connect — quick connect', () => {
         )
         .get()
     ).toEqual({ username: 'mallory', password_cipher: fakeCipherOf('typed-Secret-745') })
+  })
+})
+
+describe('remote channels with two connections', () => {
+  const A = 'me@a.example:21'
+  const B = 'you@b.example:2121'
+  let registry: ConnectionRegistry
+  let operations: OperationManager
+  let send: ReturnType<typeof vi.fn>
+
+  beforeEach(async () => {
+    state.db.exec(`CREATE TABLE IF NOT EXISTS server_recent_paths (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_host TEXT NOT NULL,
+      server_port INTEGER NOT NULL,
+      path TEXT NOT NULL,
+      last_visited TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(server_host, server_port, path)
+    )`)
+    registry = new ConnectionRegistry((key) => fakeSession(key))
+    operations = new OperationManager()
+    send = vi.fn()
+    registerFtpHandlers(
+      { isDestroyed: () => false, webContents: { send } } as unknown as BrowserWindow,
+      operations,
+      createPasswordVault(state.db, cipher),
+      registry
+    )
+    for (const key of [A, B]) {
+      expect(await invoke('ftp:connect', payloadOf(key))).toEqual({
+        success: true,
+        data: undefined
+      })
+    }
+    remoteOf(registry.get(A)).addDir('/x').addFile('/x/a.txt')
+    remoteOf(registry.get(B)).addDir('/x').addFile('/x/a.txt').addFile('/x/b.txt')
+  })
+
+  it("runs list, rename, mkdir and deleteBatch on that key's connection only", async () => {
+    // covers: Test-967
+    const a = remoteOf(registry.get(A))
+    const b = remoteOf(registry.get(B))
+
+    expect(await invoke('ftp:list', B, '/x')).toMatchObject({
+      success: true,
+      data: { path: '/x', entries: [{ name: 'a.txt' }, { name: 'b.txt' }] }
+    })
+    expect(await invoke('ftp:rename', B, '/x/a.txt', '/x/c.txt')).toEqual({
+      success: true,
+      data: undefined
+    })
+    expect(await invoke('ftp:mkdir', B, '/x/new')).toEqual({ success: true, data: undefined })
+    expect(await invoke('ftp:deleteBatch', B, [{ path: '/x/b.txt', isDirectory: false }])).toEqual({
+      success: true,
+      data: undefined
+    })
+
+    expect(b.list).toHaveBeenCalledWith('/x')
+    expect(b.rename).toHaveBeenCalledWith('/x/a.txt', '/x/c.txt')
+    expect(b.mkdir).toHaveBeenCalledWith('/x/new')
+    expect(b.deleteFile).toHaveBeenCalledWith('/x/b.txt')
+    for (const fn of [a.list, a.rename, a.mkdir, a.deleteFile, a.deleteDirectory]) {
+      expect(fn).not.toHaveBeenCalled()
+    }
+    expect(a.nodes.has('/x/a.txt')).toBe(true)
+  })
+
+  it('returns failure values for a key that is not connected or not a key, calling no manager', async () => {
+    // covers: Test-968
+    await registry.disconnect(A)
+    const managers = [remoteOf(registry.get(A)), remoteOf(registry.get(B))]
+
+    for (const key of [A, 'nobody@nowhere:21']) {
+      for (const [channel, ...args] of [
+        ['ftp:list', '/x'],
+        ['ftp:rename', '/x/a.txt', '/x/c.txt'],
+        ['ftp:mkdir', '/x/new'],
+        ['ftp:deleteBatch', [{ path: '/x/a.txt', isDirectory: false }]]
+      ] as const) {
+        const result = await invoke(channel, key, ...args)
+        expect(result, `${channel} ${key}`).toEqual({
+          success: false,
+          error: `Not connected to ${key}.`,
+          code: ErrorCode.FTP_NOT_CONNECTED
+        })
+      }
+    }
+    for (const bad of ['/x', 42, undefined]) {
+      expect(await invoke('ftp:list', bad, '/x')).toEqual({
+        success: false,
+        error: 'Invalid connection key.'
+      })
+    }
+    for (const m of managers) {
+      for (const fn of [m.list, m.rename, m.mkdir, m.deleteFile]) expect(fn).not.toHaveBeenCalled()
+    }
+    expect(operations.getAll()).toEqual([])
+  })
+
+  it('reports every known session, a disconnected one included', async () => {
+    // covers: Test-969
+    await invoke('ftp:disconnect', A)
+
+    expect(await invoke<FtpConnectionState[]>('ftp:getStatus')).toEqual({
+      success: true,
+      data: [
+        { server: A, status: 'disconnected', host: 'a.example', port: 21, user: 'me' },
+        { server: B, status: 'connected', host: 'b.example', port: 2121, user: 'you' }
+      ]
+    })
+  })
+
+  it("records a successful listing as a recent path of that key's host and port", async () => {
+    // covers: Test-970
+    await invoke('ftp:list', B, '/x')
+
+    expect(
+      state.db.prepare('SELECT server_host, server_port, path FROM server_recent_paths').all()
+    ).toEqual([{ server_host: 'b.example', server_port: 2121, path: '/x' }])
+  })
+
+  it('connects a second server without dropping the first and tags status events', async () => {
+    // covers: Test-971
+    expect(remoteOf(registry.get(A)).disconnect).not.toHaveBeenCalled()
+    expect(registry.connectedKeys()).toEqual([A, B])
+
+    const statuses = send.mock.calls
+      .filter(([channel]) => channel === 'ftp:connectionStatus')
+      .map(([, state]) => [state.server, state.status])
+    expect(statuses).toEqual([
+      [A, 'connecting'],
+      [A, 'connected'],
+      [B, 'connecting'],
+      [B, 'connected']
+    ])
+  })
+
+  it('tags the remote change and the delete job with the key they ran on', async () => {
+    // covers: Test-972
+    await invoke('ftp:deleteBatch', B, [{ path: '/x/b.txt', isDirectory: false }])
+
+    const changes = send.mock.calls
+      .filter(([channel]) => channel === 'ftp:remoteChanged')
+      .map(([, event]) => event as RemoteChangedEvent)
+    expect(changes).toEqual([{ kind: 'delete', remotePath: '/x/b.txt', server: B }])
+    expect(operations.getAll()).toEqual([expect.objectContaining({ kind: 'delete', server: B })])
   })
 })

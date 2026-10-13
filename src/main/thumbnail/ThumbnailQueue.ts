@@ -1,6 +1,6 @@
 import { Client } from 'basic-ftp'
 import { Writable } from 'stream'
-import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
+import type { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { ThumbnailGenerator } from './ThumbnailGenerator'
 import { CacheManager } from './CacheManager'
 import { generateCacheKey } from '../utils/cacheKey'
@@ -26,6 +26,12 @@ export interface ThumbnailResult {
   fromCache: boolean
 }
 
+/** 썸네일을 받는 연결. 세션의 매니저, 또는 MCP 미리보기의 지금 연결(S1 currentConnection) */
+export type ThumbnailSource = Pick<
+  FtpConnectionManager,
+  'getHost' | 'getPort' | 'createSecondaryClient' | 'runOnMainClient'
+>
+
 type ReadyCallback = (result: ThumbnailResult) => void
 type ErrorCallback = (cacheKey: string, error: string) => void
 
@@ -45,7 +51,7 @@ export class ThumbnailQueue {
   private generation = 0
 
   constructor(
-    private ftpManager: FtpConnectionManager,
+    private ftpManager: ThumbnailSource,
     private generator: ThumbnailGenerator,
     private cacheManager: CacheManager,
     private onReady: ReadyCallback,

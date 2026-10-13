@@ -5,7 +5,7 @@ import type {
   FtpConnectionState,
   ConnectionStatus
 } from '@shared/types/ftp'
-import { connKey } from '@shared/connKey'
+import { connKey, type ConnKey } from '@shared/connKey'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
 import { t } from '@renderer/i18n'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
@@ -49,9 +49,9 @@ interface FtpStore {
 let connectGeneration = 0
 
 /** 원격 폴더 하나를 읽는다. 호출이 던지면 실패 값으로 바꾼다. */
-async function listDir(path: string): Promise<IpcResult<FtpListData>> {
+async function listDir(server: ConnKey, path: string): Promise<IpcResult<FtpListData>> {
   try {
-    return await window.api.invoke<IpcResult<FtpListData>>('ftp:list', path)
+    return await window.api.invoke<IpcResult<FtpListData>>('ftp:list', server, path)
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) }
   }
@@ -75,18 +75,19 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
 
   connect: async (config, initialPath = '/') => {
     const generation = ++connectGeneration
-    set({ error: null })
+    // 시도하는 서버를 먼저 둔다: 연결 중에 취소(disconnect)하면 이 키를 끊는다(currentConn).
+    set({ error: null, host: config.host, port: config.port, username: config.user })
+    const server = connKey(config.host, config.port, config.user)
     const result = await window.api.invoke<IpcResult<void>>('ftp:connect', config)
     if (generation !== connectGeneration) return false
     if (result.success) {
-      set({ host: config.host, port: config.port, username: config.user })
       // 시작 폴더를 읽지 못하면 루트로 물러선다.
       let path = initialPath
-      let listed = await listDir(path)
+      let listed = await listDir(server, path)
       if (generation !== connectGeneration) return false
       if (!listed.success && path !== '/') {
         path = '/'
-        listed = await listDir(path)
+        listed = await listDir(server, path)
         if (generation !== connectGeneration) return false
       }
       if (!listed.success) {
@@ -94,7 +95,6 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
         return false
       }
       // 확정된 시작 폴더의 목록을 캐시에 넣고 원격 탭 하나를 그리로 옮겨 활성화한다(D3).
-      const server = connKey(config.host, config.port, config.user)
       useListingStore.getState().put(
         { side: 'remote', path, server },
         listed.data.entries.map((e) => fromFtpEntry(e, path, server))
@@ -113,8 +113,9 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
   },
 
   disconnect: async () => {
+    const server = currentConn()
     connectGeneration++
-    await window.api.invoke('ftp:disconnect')
+    await window.api.invoke('ftp:disconnect', server)
     set(DISCONNECTED)
   },
 
@@ -138,3 +139,12 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
     })
   }
 }))
+
+/**
+ * 원격 IPC의 연결 인자(multi-connection §8-6, S1 임시): 앱은 아직 한 번에 한 서버에만 연결하므로 지금
+ * 연결(연결 중이면 그 시도)의 키다. S2에서 호출부가 탭·항목의 `server`를 넘기고 이 함수는 없어진다.
+ */
+export function currentConn(): ConnKey {
+  const { host, port, username } = useFtpStore.getState()
+  return connKey(host, port, username)
+}

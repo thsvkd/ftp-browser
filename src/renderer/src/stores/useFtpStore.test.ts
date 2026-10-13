@@ -41,7 +41,7 @@ describe('useFtpStore', () => {
     mockInvoke.mockImplementation((channel: string, ...args: unknown[]) => {
       if (channel === 'ftp:connect') return { success: true, data: undefined }
       if (channel === 'ftp:list') {
-        return { success: true, data: { path: args[0], entries: [] } }
+        return { success: true, data: { path: args[1], entries: [] } }
       }
       return { success: true, data: undefined }
     })

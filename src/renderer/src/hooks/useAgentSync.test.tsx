@@ -46,7 +46,7 @@ beforeEach(() => {
   listeners.clear()
   mockInvoke.mockImplementation((channel: string, ...args: unknown[]) => {
     if (channel === 'ftp:list') {
-      return Promise.resolve({ success: true, data: { path: args[0], entries: [] } })
+      return Promise.resolve({ success: true, data: { path: args[1], entries: [] } })
     }
     if (channel === 'ftp:getRecentServers')
       return Promise.resolve({ success: true, data: [OFFICE] })
@@ -98,7 +98,7 @@ describe('useAgentSync — remote changes', () => {
     expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([])
 
     await vi.advanceTimersByTimeAsync(1)
-    expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([['/photos']])
+    expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([[SERVER, '/photos']])
 
     // 읽은 적 없는 폴더는 다시 읽지 않는다. 같은 이름으로 시작하는 형제 폴더도 다른 폴더다.
     emit('ftp:remoteChanged', { kind: 'upload', remotePath: '/photos-old/x.jpg' })
@@ -113,7 +113,11 @@ describe('useAgentSync — remote changes', () => {
       newPath: '/photos/b.jpg'
     })
     await vi.advanceTimersByTimeAsync(300)
-    expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([['/photos'], ['/other'], ['/photos']])
+    expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([
+      [SERVER, '/photos'],
+      [SERVER, '/other'],
+      [SERVER, '/photos']
+    ])
   })
 
   it('moves a tab up when its folder (or one above it) is deleted or renamed', async () => {

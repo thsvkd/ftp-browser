@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { t } from '@renderer/i18n'
 import { parentPath, type Loc } from '@renderer/lib/explorerEntry'
 import { nextRate, type RateSample } from '@renderer/lib/transferRate'
+import { currentConn } from './useFtpStore'
 import { useListingStore } from './useListingStore'
 import type {
   ConflictDecision,
@@ -179,7 +180,11 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
     try {
       let req = request
       for (;;) {
-        const result = await window.api.invoke<IpcResult<TransferSendResult>>('transfer:send', req)
+        const result = await window.api.invoke<IpcResult<TransferSendResult>>(
+          'transfer:send',
+          currentConn(),
+          req
+        )
         if (!result.success) {
           toast.error(t('toast.sendFailed'), { description: result.error })
           return null

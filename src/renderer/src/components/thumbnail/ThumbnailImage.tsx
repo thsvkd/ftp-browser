@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Clock, RotateCcw } from 'lucide-react'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { currentConn, useFtpStore } from '@renderer/stores/useFtpStore'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
 import { useT } from '@renderer/i18n'
 import type { FtpFileEntry } from '@shared/types/ftp'
@@ -88,7 +88,7 @@ export function ThumbnailImage({
   const clearError = useThumbnailStore((s) => s.clearError)
 
   const send = (priority: number): void => {
-    window.api.invoke('thumbnail:request', {
+    window.api.invoke('thumbnail:request', currentConn(), {
       remotePath,
       fileName: entry.name,
       fileSize: entry.size,
@@ -102,7 +102,7 @@ export function ThumbnailImage({
     if (!request) return
     const { thumbnails, errors } = useThumbnailStore.getState()
     if (thumbnails[cacheKey] || errors[cacheKey]) return
-    window.api.invoke('thumbnail:request', {
+    window.api.invoke('thumbnail:request', currentConn(), {
       remotePath,
       fileName: entry.name,
       fileSize: entry.size,

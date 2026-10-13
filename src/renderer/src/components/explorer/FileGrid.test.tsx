@@ -64,7 +64,7 @@ describe('FileGrid — viewport thumbnail batches (migrated)', () => {
   const lastBatch = (): Item[] => {
     const batches = invokeCalls(h.invoke, 'thumbnail:requestBatch')
     if (!batches.length) throw new Error('no thumbnail:requestBatch')
-    return batches[batches.length - 1][0] as Item[]
+    return batches[batches.length - 1][1] as Item[]
   }
   const indexOf = (n: string): number => Number(n.slice(3, 6))
   const scrollTo = async (top: number): Promise<void> => {
@@ -157,6 +157,7 @@ describe('FileGrid — viewport thumbnail batches (migrated)', () => {
     )
     expect(invokeCalls(h.invoke, 'thumbnail:request')).toEqual([
       [
+        server(),
         {
           remotePath: '/img001.jpg',
           fileName: 'img001.jpg',
@@ -188,7 +189,7 @@ describe('FileGrid — viewport thumbnail batches (migrated)', () => {
     expect(lastCancel).toBeGreaterThanOrEqual(0)
     const after = h.invoke.mock.calls.slice(lastCancel + 1)
     const batches = after.filter((call) => call[0] === 'thumbnail:requestBatch')
-    expect(batches.map((call) => (call[1] as Item[]).map((r) => r.remotePath))).toContainEqual([
+    expect(batches.map((call) => (call[2] as Item[]).map((r) => r.remotePath))).toContainEqual([
       '/sub/new000.jpg'
     ])
   })

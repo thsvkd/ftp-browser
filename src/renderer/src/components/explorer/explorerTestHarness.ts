@@ -105,9 +105,10 @@ export function setupExplorer(
     const custom = h.handlers[channel]
     if (custom) return custom(...args)
     if (channel === 'ftp:list') {
-      const entries = h.remote[args[0] as string]
+      // ftp:list(conn, path)
+      const entries = h.remote[args[1] as string]
       return entries
-        ? ok({ path: args[0], entries })
+        ? ok({ path: args[1], entries })
         : { success: false, error: 'No such directory', code: 'FTP_NOT_FOUND' }
     }
     if (channel === 'local:list') {

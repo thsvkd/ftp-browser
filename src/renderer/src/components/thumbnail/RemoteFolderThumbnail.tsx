@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { Folder } from 'lucide-react'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { currentConn, useFtpStore } from '@renderer/stores/useFtpStore'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
@@ -47,6 +47,7 @@ export function RemoteFolderThumbnail({
     try {
       const result = await window.api.invoke<IpcResult<RemoteFolderPreview | null>>(
         'gallery:remoteFolderPreview',
+        currentConn(),
         { remotePath: folderPath }
       )
       if (result.success) {
@@ -122,7 +123,7 @@ function RemoteFolderPreviewImage({
   useEffect(() => {
     if (thumbnailData || requestedRef.current) return
     requestedRef.current = true
-    window.api.invoke('thumbnail:request', {
+    window.api.invoke('thumbnail:request', currentConn(), {
       remotePath: innerPath,
       fileName: preview.name,
       fileSize: preview.size,

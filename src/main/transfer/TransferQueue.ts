@@ -110,11 +110,8 @@ type SegmentItem = WorkItem & Required<Pick<WorkItem, 'segment'>>
 
 /** 큐 생성자 옵션 */
 export interface QueueOptions {
-  /**
-   * 이 큐의 작업이 도는 연결(`TransferJob.server`). 매니저가 하나인 동안은 지금 연결을 돌려주는
-   * 게터를 받는다. 없으면 `''`(기존 테스트).
-   */
-  server?: ConnKey | (() => ConnKey)
+  /** 이 큐의 작업이 도는 연결(`TransferJob.server`). 없으면 `''`(기존 테스트). */
+  server?: ConnKey
 }
 
 /** enqueueBatch 옵션 */
@@ -178,11 +175,6 @@ export class TransferQueue extends EventEmitter {
     super()
   }
 
-  private serverKey(): ConnKey {
-    const { server = '' } = this.queueOptions
-    return typeof server === 'function' ? server() : server
-  }
-
   enqueue(
     direction: TransferDirection,
     localPath: string,
@@ -203,7 +195,7 @@ export class TransferQueue extends EventEmitter {
     if (items.length === 0) return []
 
     const batchId = items.length > 1 || forceBatch ? randomUUID() : undefined
-    const server = this.serverKey()
+    const { server = '' } = this.queueOptions
     const jobs: TransferJob[] = items.map((item) => ({
       id: randomUUID(),
       batchId,

@@ -70,7 +70,7 @@ async function startSend(): Promise<{ pending: Promise<TransferSendResult | null
 function secondDecisions(): Record<string, string> | undefined {
   const sends = invokeCalls(mockInvoke, 'transfer:send')
   expect(sends).toHaveLength(2)
-  return (sends[1][0] as TransferSendRequest).decisions
+  return (sends[1][1] as TransferSendRequest).decisions
 }
 
 beforeEach(() => {
@@ -200,7 +200,7 @@ describe('ConflictSheet', () => {
     // 원격 이동: 있던 것도 보내는 것도 원격 파일이다(원격 썸네일 요청 두 건).
     expect(
       invokeCalls(mockInvoke, 'thumbnail:request').map(
-        ([r]) => (r as { remotePath: string }).remotePath
+        ([, r]) => (r as { remotePath: string }).remotePath
       )
     ).toEqual(['/dst/a.jpg', '/src/a.jpg'])
     await userEvent.setup().click(screen.getByRole('button', { name: 'Overwrite' }))

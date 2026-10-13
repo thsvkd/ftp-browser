@@ -15,8 +15,11 @@ vi.mock('electron', () => ({
 }))
 
 import { registerDragHandlers } from './dragHandlers'
-import type { FtpConnectionManager } from '../ftp/FtpConnectionManager'
+import { ConnectionRegistry } from '../ftp/ConnectionRegistry'
+import { fakeSession, payloadOf, remoteOf } from '../ftp/__fixtures__/fakeSessions'
 import type { IpcResult } from '@shared/types/ipc'
+
+const K = 'me@nas.local:21'
 
 // 렌더러가 이미 이름을 고쳐 보내더라도, 디스크에 쓰는 쪽은 메인 프로세스다. 원격 이름이
 // 임시 폴더 밖을 가리키면 다운로드 자체를 하지 않아야 한다(심층 방어).
@@ -31,23 +34,26 @@ describe('drag:start', () => {
       fileName,
       size: 1
     }))
-    return (await handlers.get('drag:start')!(
-      { sender: { startDrag } },
-      { files }
-    )) as IpcResult<void>
+    return (await handlers.get('drag:start')!({ sender: { startDrag } }, K, {
+      files
+    })) as IpcResult<void>
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     handlers.clear()
     tempRoot = mkdtempSync(join(tmpdir(), 'drag-test-'))
     dragDir = join(tempRoot, 'ftp-browser-drag')
     downloadTo = vi.fn().mockResolvedValue(undefined)
     startDrag = vi.fn()
-    const manager = {
-      isConnected: () => true,
-      createSecondaryClient: vi.fn().mockResolvedValue({ downloadTo, close: vi.fn() })
-    }
-    registerDragHandlers(manager as unknown as FtpConnectionManager)
+    const registry = new ConnectionRegistry((key) => {
+      const session = fakeSession(key)
+      Object.assign(remoteOf(session), {
+        createSecondaryClient: vi.fn().mockResolvedValue({ downloadTo, close: vi.fn() })
+      })
+      return session
+    })
+    await registry.connect(payloadOf(K))
+    registerDragHandlers(registry)
   })
 
   afterEach(() => {

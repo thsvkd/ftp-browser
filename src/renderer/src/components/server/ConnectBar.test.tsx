@@ -100,7 +100,8 @@ describe('ConnectBar — connecting', () => {
     await user.click(screen.getByRole('button', { name: 'Connect' }))
     await user.click(await screen.findByRole('button', { name: 'Cancel' }))
 
-    expect(invokeCalls(mockInvoke, 'ftp:disconnect')).toHaveLength(1)
+    // 연결 중인 시도의 키를 끊는다
+    expect(invokeCalls(mockInvoke, 'ftp:disconnect')).toEqual([['anonymous@ftp.example.com:21']])
     expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
 
     resolveConnect!({ success: true, data: undefined })
@@ -647,7 +648,7 @@ describe('reconnecting — start folder', () => {
         data: paths.map((path) => ({ path, lastVisited: '2026-09-29 10:00:00.000' }))
       })
   }
-  const listedPaths = (): unknown[] => invokeCalls(mockInvoke, 'ftp:list').map((c) => c[0])
+  const listedPaths = (): unknown[] => invokeCalls(mockInvoke, 'ftp:list').map((c) => c[1])
   /** 활성 원격 탭이 보는 경로 */
   const activeRemotePath = (): string | undefined => {
     const { tabs, activeId } = useTabsStore.getState()
@@ -680,7 +681,7 @@ describe('reconnecting — start folder', () => {
   it('falls back to the root when the last folder is gone', async () => {
     mockIpc([NAS], {
       'ftp:getRecentPaths': recent('/gone'),
-      'ftp:list': (path) =>
+      'ftp:list': (_conn, path) =>
         Promise.resolve(
           path === '/gone'
             ? { success: false, error: 'No such directory' }

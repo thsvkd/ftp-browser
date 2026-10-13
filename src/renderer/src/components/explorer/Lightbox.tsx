@@ -4,6 +4,7 @@ import { useEscapeKey } from '@renderer/hooks/useEscapeKey'
 import { useT } from '@renderer/i18n'
 import { locKey, type ExplorerEntry } from '@renderer/lib/explorerEntry'
 import { cn, formatBytes, formatDate } from '@renderer/lib/utils'
+import { currentConn } from '@renderer/stores/useFtpStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { EntryThumb } from '@renderer/components/thumbnail/EntryThumb'
 import type { IpcResult } from '@shared/types/ipc'
@@ -23,7 +24,7 @@ function usePreview(entry: ExplorerEntry): Loaded | null {
     let live = true
     const request =
       entry.side === 'remote'
-        ? window.api.invoke<IpcResult<string>>('ftp:downloadPreview', {
+        ? window.api.invoke<IpcResult<string>>('ftp:downloadPreview', currentConn(), {
             remotePath: entry.path,
             fileSize: entry.size,
             modifiedAt: entry.modifiedAt

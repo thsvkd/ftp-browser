@@ -152,7 +152,10 @@ describe('ItemMenu — contents', () => {
     fireEvent.click(within(sub).getByRole('menuitem', { name: /Downloads/ }))
     await act(async () => undefined)
     expect(invokeCalls(h.invoke, 'transfer:send')).toEqual([
-      [{ direction: 'download', sources: [`${DIR}/a.jpg`], destDir: 'C:\\Users\\me\\Downloads' }]
+      [
+        server(),
+        { direction: 'download', sources: [`${DIR}/a.jpg`], destDir: 'C:\\Users\\me\\Downloads' }
+      ]
     ])
   })
 

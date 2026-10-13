@@ -13,6 +13,7 @@ import {
   PORT,
   ftp,
   local,
+  server,
   setupExplorer,
   type ExplorerHarness
 } from '@renderer/components/explorer/explorerTestHarness'
@@ -49,6 +50,7 @@ describe('EntryThumb', () => {
     render(<EntryThumb entry={remote('b.jpg')} request />)
     expect(invokeCalls(h.invoke, 'thumbnail:request')).toEqual([
       [
+        server(),
         {
           remotePath: '/photos/b.jpg',
           fileName: 'b.jpg',

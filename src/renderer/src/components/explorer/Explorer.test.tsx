@@ -128,7 +128,7 @@ describe('Explorer — keyboard selection', () => {
     act(() => useTabsStore.getState().goBack())
     await flush()
 
-    const lists = (): number => invokeCalls(h.invoke, 'ftp:list').filter((c) => c[0] === DIR).length
+    const lists = (): number => invokeCalls(h.invoke, 'ftp:list').filter((c) => c[1] === DIR).length
     const before = lists()
     key('F5')
     key('r', { ctrlKey: true })
@@ -145,7 +145,7 @@ describe('Explorer — keyboard selection', () => {
     act(() => useTabsStore.getState().navigate(remoteLoc('/other')))
     await act(async () => request?.resolve(true))
     expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toEqual([
-      [[{ path: `${DIR}/a.jpg`, isDirectory: false }]]
+      [server(), [{ path: `${DIR}/a.jpg`, isDirectory: false }]]
     ])
   })
 
@@ -188,10 +188,13 @@ describe('Explorer — lightbox', () => {
       key(' ')
       await flush()
       const dialog = screen.getByRole('dialog', { name: 'Preview: a.jpg' })
-      expect(invokeCalls(h.invoke, channel)[0][0]).toEqual(
+      expect(invokeCalls(h.invoke, channel)[0]).toEqual(
         side === 'remote'
-          ? { remotePath: `${DIR}/a.jpg`, fileSize: 1024, modifiedAt: expect.any(String) }
-          : `${LDIR}\\a.jpg`
+          ? [
+              server(),
+              { remotePath: `${DIR}/a.jpg`, fileSize: 1024, modifiedAt: expect.any(String) }
+            ]
+          : [`${LDIR}\\a.jpg`]
       )
 
       fireEvent.keyDown(dialog, { key: 'ArrowRight' })
@@ -268,7 +271,7 @@ describe('Explorer — loading, errors and empty states', () => {
   it('classifies a permission error with retry and up, and keeps the last listing when the connection drops', async () => {
     // covers: Test-797
     h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
-    h.handlers['ftp:list'] = (path) =>
+    h.handlers['ftp:list'] = (_conn, path) =>
       path === `${DIR}/locked`
         ? { success: false, error: '550 Permission denied', code: 'FTP_PERMISSION_DENIED' }
         : { success: true, data: { path, entries: [ftp('a.jpg')] } }
@@ -405,7 +408,9 @@ describe('Explorer — inline rename and new folder', () => {
       fireEvent.keyDown(input, { key: 'Enter' })
       await flush()
       expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
-      expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([[`${DIR}/a.txt`, `${DIR}/c.txt`]])
+      expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([
+        [server(), `${DIR}/a.txt`, `${DIR}/c.txt`]
+      ])
       expect(document.activeElement).toBe(listbox())
     }
   )
@@ -435,7 +440,9 @@ describe('Explorer — inline rename and new folder', () => {
       key('N', { ctrlKey: true, shiftKey: true })
       await flush()
       await flush()
-      expect(invokeCalls(h.invoke, channel)).toEqual([[made]])
+      expect(invokeCalls(h.invoke, channel)).toEqual([
+        side === 'remote' ? [server(), made] : [made]
+      ])
       expect(within(option('New folder (1)')).getByRole('textbox')).toBeTruthy()
     }
   )
@@ -470,8 +477,8 @@ describe('Explorer — drag and drop', () => {
     fireEvent.drop(option('sub'), { dataTransfer: dt() })
     await flush()
     expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([
-      [`${DIR}/a.jpg`, `${DIR}/sub/a.jpg`],
-      [`${DIR}/b.jpg`, `${DIR}/sub/b.jpg`]
+      [server(), `${DIR}/a.jpg`, `${DIR}/sub/a.jpg`],
+      [server(), `${DIR}/b.jpg`, `${DIR}/sub/b.jpg`]
     ])
 
     // 빈 곳에 놓으면 현재 폴더로 보낸다(다른 곳에서 끌어 온 항목).
@@ -486,7 +493,11 @@ describe('Explorer — drag and drop', () => {
     expect(screen.getByText('Move 1 to photos')).toBeTruthy()
     fireEvent.drop(listbox(), { dataTransfer: dt() })
     await flush()
-    expect(invokeCalls(h.invoke, 'ftp:rename').at(-1)).toEqual(['/elsewhere/x.jpg', `${DIR}/x.jpg`])
+    expect(invokeCalls(h.invoke, 'ftp:rename').at(-1)).toEqual([
+      server(),
+      '/elsewhere/x.jpg',
+      `${DIR}/x.jpg`
+    ])
 
     // 폴더를 자기 위에 놓을 수는 없다. 고스트는 "+ folder contents"를 붙인다.
     fireEvent.dragStart(option('sub'), { dataTransfer: dt() })
@@ -520,7 +531,7 @@ describe('Explorer — drag and drop', () => {
     await flush()
     expect(invokeCalls(h.invoke, channel)[0]).toEqual(
       side === 'remote'
-        ? [{ direction: 'upload', sources: ['C:\\in\\x.jpg'], destDir: DIR }]
+        ? [server(), { direction: 'upload', sources: ['C:\\in\\x.jpg'], destDir: DIR }]
         : [['C:\\in\\x.jpg'], LDIR, ['x.jpg']]
     )
   })
@@ -778,7 +789,9 @@ describe('Explorer — remote rename (migrated)', () => {
   it('renames through ftp:rename with the old and the new path', async () => {
     // covers: Test-89
     await renameTo('b.txt')
-    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([[`${DIR}/a.txt`, `${DIR}/b.txt`]])
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([
+      [server(), `${DIR}/a.txt`, `${DIR}/b.txt`]
+    ])
   })
 
   it('rejects a name with a path separator before IPC', async () => {

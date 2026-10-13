@@ -199,7 +199,7 @@ describe('PathBar — dropping on a crumb', () => {
 
     fireEvent.drop(root, { dataTransfer: dt() })
     await flush()
-    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([['/a/b/c/x.jpg', '/x.jpg']])
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([[server(), '/a/b/c/x.jpg', '/x.jpg']])
   })
 })
 

@@ -22,9 +22,10 @@ let pending: Array<{ channel: string; path: string } & Deferred> = []
 beforeEach(() => {
   pending = []
   invoke.mockReset()
+  // ftp:list(conn, path), local:list(path)
   invoke.mockImplementation(
-    (channel: string, path: string) =>
-      new Promise((resolve) => pending.push({ channel, path, resolve }))
+    (channel: string, ...args: string[]) =>
+      new Promise((resolve) => pending.push({ channel, path: args.at(-1)!, resolve }))
   )
   vi.stubGlobal('window', { api: { invoke } })
   useListingStore.setState({ byKey: {} })

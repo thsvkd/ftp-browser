@@ -7,7 +7,7 @@ import { GAP, LABEL_H, PAD } from '@renderer/lib/explorerLayout'
 import { itemIndicesInRect, type GridLayout } from '@renderer/lib/gridGeometry'
 import { currentPlatform, isZoomModifier } from '@renderer/lib/platform'
 import { viewportThumbnailTargets } from '@renderer/lib/thumbnailViewport'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { currentConn, useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { Tile } from './Tile'
@@ -84,7 +84,7 @@ export function FileGrid({
       .map((x) => x.request)
     // 창을 벗어난 실패 항목은 에러를 지워, 다시 보일 때 재요청되게 한다.
     for (const key of Object.keys(errors)) if (!windowKeys.has(key)) clearError(key)
-    window.api.invoke('thumbnail:requestBatch', requests)
+    window.api.invoke('thumbnail:requestBatch', currentConn(), requests)
   }, [remote, visibleStart, visibleEnd, items, cols, host, port])
 
   useEffect(() => {

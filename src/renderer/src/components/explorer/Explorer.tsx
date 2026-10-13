@@ -58,7 +58,7 @@ import {
 } from '@renderer/lib/sendItems'
 import { cn } from '@renderer/lib/utils'
 import { confirmDelete } from '@renderer/stores/useConfirmStore'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { currentConn, useFtpStore } from '@renderer/stores/useFtpStore'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
@@ -230,8 +230,9 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
   const remoteKey = remote && gate === 'live' ? key : null
   useLayoutEffect(() => {
     if (!remoteKey) return
-    window.api.invoke('thumbnail:cancelAll')
-    window.api.invoke('gallery:cancelAll')
+    // 연결 하나의 대기를 취소한다(null = 모든 연결)
+    window.api.invoke('thumbnail:cancelAll', null)
+    window.api.invoke('gallery:cancelAll', null)
     useGalleryStore.getState().clearRemote()
   }, [remoteKey])
 
@@ -341,10 +342,9 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     // 확인을 기다리는 동안 다른 폴더로 옮겨도 고른 시점의 경로를 지운다.
     const targets = entries.map((e) => ({ path: e.path, isDirectory: e.type === 'directory' }))
     try {
-      const r = await window.api.invoke<IpcResult<void>>(
-        remote ? 'ftp:deleteBatch' : 'local:deleteBatch',
-        targets
-      )
+      const r = remote
+        ? await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', currentConn(), targets)
+        : await window.api.invoke<IpcResult<void>>('local:deleteBatch', targets)
       if (!r.success) toast.error(t('toast.deleteFailed'), { description: r.error })
     } catch (err) {
       toast.error(t('toast.deleteFailed'), { description: errorText(err) })
@@ -371,11 +371,9 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     if (!next || next === entry.name || !validName(next)) return
     const target = joinPath(entry.side, parentPath(entry.side, entry.path) ?? loc.path, next)
     try {
-      const r = await window.api.invoke<IpcResult<void>>(
-        remote ? 'ftp:rename' : 'local:rename',
-        entry.path,
-        target
-      )
+      const r = remote
+        ? await window.api.invoke<IpcResult<void>>('ftp:rename', currentConn(), entry.path, target)
+        : await window.api.invoke<IpcResult<void>>('local:rename', entry.path, target)
       if (r.success) {
         unshelve([entry])
         selectOnly(target)
@@ -397,7 +395,9 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     if (!name) return
     const path = joinPath(loc.side, loc.path, name)
     try {
-      const r = await window.api.invoke<IpcResult<void>>(remote ? 'ftp:mkdir' : 'local:mkdir', path)
+      const r = remote
+        ? await window.api.invoke<IpcResult<void>>('ftp:mkdir', currentConn(), path)
+        : await window.api.invoke<IpcResult<void>>('local:mkdir', path)
       if (!r.success) {
         toast.error(t('toast.createFolderFailed'), { description: r.error })
         return
