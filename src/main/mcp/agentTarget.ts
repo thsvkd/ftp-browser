@@ -43,6 +43,20 @@ function connectionOf(deps: AgentDeps, server: FtpServer): ConnKey {
   )
 }
 
+/** `get_status`가 보인 끊긴 연결의 키면 NOT_FOUND(저장 서버 검색) 대신 NOT_CONNECTED로 알린다. */
+function refuseDisconnectedKey(deps: AgentDeps, ref: string): void {
+  const state = deps.connections.states().find((s) => s.server.toLowerCase() === ref)
+  if (!state) return
+  const saved = savedOf(listServers(deps.db), state.server)
+  throw new AgentError(
+    'NOT_CONNECTED',
+    `${state.server} is not connected. ` +
+      (saved
+        ? `Call connect with server ${saved.id} first.`
+        : 'It is not a saved server; connect to it in FTP Browser first.')
+  )
+}
+
 /**
  * 도구가 쓸 연결(multi-connection MC18). ① `server` 인자: 연결 키(대소문자 무시) 또는 저장 서버의 연결.
  * 그것이 마지막 사용 연결이 된다. ② 인자가 없으면 마지막 사용 연결이 아직 연결돼 있으면 그것.
@@ -52,9 +66,9 @@ export function resolveTarget(deps: AgentDeps, server?: number | string): ConnKe
   const connected = deps.connections.connectedKeys()
   if (server !== undefined) {
     const ref = String(server).trim().toLowerCase()
-    const key =
-      connected.find((k) => k.toLowerCase() === ref) ??
-      connectionOf(deps, resolveServer(deps.db, server))
+    const known = connected.find((k) => k.toLowerCase() === ref)
+    if (known === undefined) refuseDisconnectedKey(deps, ref)
+    const key = known ?? connectionOf(deps, resolveServer(deps.db, server))
     deps.target.last = key
     return key
   }

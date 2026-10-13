@@ -58,6 +58,20 @@ describe('resolveTarget — the server argument (rule 1)', () => {
     expect(offline.message).toContain('Media')
     expect(offline.message).toMatch(new RegExp(`Call connect with server ${media}`))
 
+    // get_status가 보인 끊긴 연결의 키는 NOT_FOUND가 아니라 NOT_CONNECTED
+    h.connections.add('me@media.lan:21').setOffline()
+    const dropped = failure('ME@media.lan:21')
+    expect(dropped.code).toBe('NOT_CONNECTED')
+    expect(dropped.message).toBe(
+      `me@media.lan:21 is not connected. Call connect with server ${media} first.`
+    )
+    h.connections.add('bob@unsaved.lan:21').setOffline()
+    expect(failure('bob@unsaved.lan:21')).toMatchObject({
+      code: 'NOT_CONNECTED',
+      message:
+        'bob@unsaved.lan:21 is not connected. It is not a saved server; connect to it in FTP Browser first.'
+    })
+
     // 모르는 이름은 지금 NOT_FOUND 문구
     const missing = failure('nowhere')
     expect(missing.code).toBe('NOT_FOUND')
