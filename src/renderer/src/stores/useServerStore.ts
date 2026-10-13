@@ -22,6 +22,7 @@ import {
   type RecentPath
 } from '@shared/types/ftp'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
+import { connKey, type ConnKey } from '@shared/connKey'
 
 interface ServerStore {
   /** Saved servers, most recently connected first. */
@@ -49,15 +50,17 @@ interface ServerStore {
 
 /** Bumped by every connect and cancel, so a late result of an abandoned attempt is ignored. */
 let connectAttempt = 0
+/** The connection the attempt in flight logs in to; Cancel disconnects only this one. */
+let attemptKey: ConnKey | null = null
 
-/** The folder last listed on this server, or '/' when there is none (or it can't be read). */
-async function lastVisitedPath(server: { host: string; port: number }): Promise<string> {
+/** The connection a toolbar connect is logging in to, or null when none is in flight. */
+export const connectingKey = (): ConnKey | null =>
+  useServerStore.getState().connecting ? attemptKey : null
+
+/** The folder last listed on this connection, or '/' when there is none (or it can't be read). */
+async function lastVisitedPath(key: ConnKey): Promise<string> {
   try {
-    const result = await window.api.invoke<IpcResult<RecentPath[]>>(
-      'ftp:getRecentPaths',
-      server.host,
-      server.port
-    )
+    const result = await window.api.invoke<IpcResult<RecentPath[]>>('ftp:getRecentPaths', key)
     return (result.success && result.data[0]?.path) || '/'
   } catch (err) {
     console.warn('[useServerStore] Failed to load the last folder:', err)
@@ -155,13 +158,13 @@ export const useServerStore = create<ServerStore>((set, get) => ({
       connecting: true,
       error: ''
     })
-    const ftp = useFtpStore.getState()
-    // 연결된 채로 다른 서버를 고르면 먼저 끊는다.
-    if (ftp.connectionStatus === 'connected') await ftp.disconnect()
-    if (attempt !== connectAttempt) return false
+    // 다른 서버의 연결은 그대로 둔다: 고른 서버를 더한다(multi-connection B1).
+    const user = server.username || 'anonymous'
+    const key = connKey(server.host, server.port, user)
+    attemptKey = key
 
     // 시작 폴더를 따로 정하지 않았으면 이 서버에서 마지막으로 있던 폴더로 연다.
-    const startPath = path ?? (draft.path.trim() || (await lastVisitedPath(server)))
+    const startPath = path ?? (draft.path.trim() || (await lastVisitedPath(key)))
     if (attempt !== connectAttempt) return false
 
     // 저장된 서버를 저장된 계정으로 연결할 때만 id를 보낸다. 그래야 main이 그 서버의
@@ -170,13 +173,13 @@ export const useServerStore = create<ServerStore>((set, get) => ({
     const sameAccount = savedRow !== undefined && savedRow.username === server.username
     // 입력한 비밀번호가 없으면 저장된 비밀번호를 서버 id로 가리킨다. main이 읽어 로그인한다.
     const savedPasswordOf = !server.password && draft.savedPassword ? draft.id : undefined
-    const ok = await ftp.connect(
+    const ok = await useFtpStore.getState().connect(
       {
         ...(sameAccount && { id: savedRow.id }),
         name: server.name,
         host: server.host,
         port: server.port,
-        user: server.username || 'anonymous',
+        user,
         ...(savedPasswordOf !== undefined
           ? { savedPasswordOf }
           : { password: server.password || 'anonymous@' }),
@@ -187,7 +190,10 @@ export const useServerStore = create<ServerStore>((set, get) => ({
     )
     if (attempt !== connectAttempt) return false
     if (!ok) {
-      set({ connecting: false, error: useFtpStore.getState().error || t('connect.failed') })
+      set({
+        connecting: false,
+        error: useFtpStore.getState().connections[key]?.error || t('connect.failed')
+      })
       return false
     }
     set({ connecting: false })
@@ -207,7 +213,7 @@ export const useServerStore = create<ServerStore>((set, get) => ({
     if (!get().connecting) return
     connectAttempt++
     set({ connecting: false })
-    void useFtpStore.getState().disconnect()
+    if (attemptKey) void useFtpStore.getState().disconnect(attemptKey)
   },
 
   save: async (draft) => {

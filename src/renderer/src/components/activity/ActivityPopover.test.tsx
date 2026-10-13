@@ -20,6 +20,7 @@ const onClose = vi.fn()
 function job(id: string, overrides: Partial<TransferJob> = {}): TransferJob {
   return {
     id,
+    server: 'me@nas.local:21',
     direction: 'download',
     localPath: `C:\\dl\\${id}`,
     remotePath: `/photos/${id}`,
@@ -117,6 +118,42 @@ describe('ActivityPopover transfers', () => {
     expect(invokeCalls(mockInvoke, 'transfer:clearCompleted')).toHaveLength(1)
   })
 
+  it('shows a relay batch with the server-to-server icon, receiving bytes, prefixed errors and retry', async () => {
+    // covers: Test-1027
+    const A = 'me@a.example:21'
+    const B = 'you@b.example:2121'
+    const relay = (id: string, overrides: Partial<TransferJob>): TransferJob =>
+      job(id, {
+        batchId: 'r',
+        direction: 'relay',
+        server: B,
+        sourceServer: A,
+        sourcePath: `/photos/${id}`,
+        localPath: '',
+        remotePath: `/in/${id}`,
+        totalBytes: 4000,
+        ...overrides
+      })
+    useTransferStore.setState({
+      batchMeta: { r: { label: 'photos', to: { side: 'remote', path: '/in', server: B } } },
+      jobs: [
+        relay('a.jpg', { status: 'active', transferredBytes: 1000 }),
+        relay('b.jpg', { status: 'failed', error: `${A}: Connection timed out.` })
+      ]
+    })
+    renderPopover()
+
+    const photos = group('photos')
+    expect(within(photos).getByRole('img', { name: 'Copy between servers' })).toBeTruthy()
+    expect(photos.querySelector('.lucide-arrow-left-right')).toBeTruthy()
+    expect(
+      within(photos).getByText(`${formatBytes(1000)} / ${formatBytes(8000)}`, { exact: false })
+    ).toBeTruthy()
+    expect(within(photos).getByText(`${A}: Connection timed out.`)).toBeTruthy()
+    await userEvent.setup().click(within(photos).getByRole('button', { name: 'Retry b.jpg' }))
+    expect(invokeCalls(mockInvoke, 'transfer:retry')).toEqual([[['b.jpg']]])
+  })
+
   it('shows Show in tab on a finished batch that reuses or opens the destination tab and selects the item', async () => {
     // covers: Test-818
     useTransferStore.setState({
@@ -177,7 +214,7 @@ describe('ActivityPopover transfers', () => {
 
     let pending!: Promise<unknown>
     act(() => {
-      pending = useTransferStore.getState().send(request, meta)
+      pending = useTransferStore.getState().send('me@nas.local:21', request, meta)
     })
     expect(screen.getByText('Preparing photos…')).toBeTruthy()
     await act(async () => {
@@ -187,7 +224,7 @@ describe('ActivityPopover transfers', () => {
     expect(screen.queryByText('Preparing photos…')).toBeNull()
 
     act(() => {
-      pending = useTransferStore.getState().send(request, meta)
+      pending = useTransferStore.getState().send('me@nas.local:21', request, meta)
     })
     expect(screen.getByText('Preparing photos…')).toBeTruthy()
     await act(async () => {

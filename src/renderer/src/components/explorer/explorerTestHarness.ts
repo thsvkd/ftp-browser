@@ -5,20 +5,22 @@
 import { createElement } from 'react'
 import { act, render, screen, type RenderResult } from '@testing-library/react'
 import { vi, type Mock } from 'vitest'
-import { connectedServer } from '@renderer/lib/sendItems'
 import type { Loc } from '@renderer/lib/explorerEntry'
+import { EMPTY_OVERRIDES } from '@renderer/lib/fileCategories'
 import { useConfirmStore } from '@renderer/stores/useConfirmStore'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
+import { useFtpStore, type ConnInfo } from '@renderer/stores/useFtpStore'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { useLocalThumbnailStore } from '@renderer/stores/useLocalThumbnailStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
-import { useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
+import { useTabsStore, type PaneId, type Tab } from '@renderer/stores/useTabsStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { makeApiMock, stubGridLayout, type ApiMock } from '@renderer/test/rendererTestUtils'
-import type { FtpFileEntry } from '@shared/types/ftp'
+import { connKey, parseConnKey, type ConnKey } from '@shared/connKey'
+import type { ConnectionStatus, FtpFileEntry } from '@shared/types/ftp'
 import type { LocalFileEntry } from '@shared/types/local'
 import type { IpcResult } from '@shared/types/ipc'
 import { useDnd } from './dnd'
@@ -75,8 +77,30 @@ export interface ExplorerHarness {
   restore: () => void
 }
 
-/** 연결된 서버의 탭 키(`useFtpStore`가 만든다). 사용자 이름 필드가 생겨도 그대로 맞는다. */
-export const server = (): string => connectedServer(useFtpStore.getState()) ?? ''
+/** 기본 연결(익명 `HOST:PORT`)의 키. 원격 탭의 `loc.server`다. */
+export const server = (): ConnKey => connKey(HOST, PORT, '')
+
+/** `useFtpStore.connections`의 한 항목을 둔다(다른 키는 그대로). 호스트·포트·사용자는 키에서. */
+export function setConnection(
+  key: ConnKey,
+  status: ConnectionStatus,
+  extra: Partial<ConnInfo> = {}
+): void {
+  const parsed = parseConnKey(key)
+  useFtpStore.setState((s) => ({
+    connections: {
+      ...s.connections,
+      [key]: {
+        status,
+        host: parsed?.host ?? '',
+        port: parsed?.port ?? 21,
+        user: parsed?.user ?? '',
+        error: null,
+        ...extra
+      }
+    }
+  }))
+}
 
 /** 테스트 하나의 준비. `afterEach`에서 `restore()`를 부른다. */
 export function setupExplorer(
@@ -103,9 +127,10 @@ export function setupExplorer(
     const custom = h.handlers[channel]
     if (custom) return custom(...args)
     if (channel === 'ftp:list') {
-      const entries = h.remote[args[0] as string]
+      // ftp:list(conn, path)
+      const entries = h.remote[args[1] as string]
       return entries
-        ? ok({ path: args[0], entries })
+        ? ok({ path: args[1], entries })
         : { success: false, error: 'No such directory', code: 'FTP_NOT_FOUND' }
     }
     if (channel === 'local:list') {
@@ -139,13 +164,10 @@ export function setupExplorer(
     }
   )
 
-  useFtpStore.setState({
-    connectionStatus: opts.connected === false ? 'disconnected' : 'connected',
-    host: HOST,
-    port: PORT,
-    error: null
-  })
-  useTabsStore.setState({ tabs: [], activeId: '', recent: [] })
+  useFtpStore.setState({ connections: {} })
+  if (opts.connected !== false) setConnection(server(), 'connected')
+  useTabsStore.setState({ tabs: [], activeId: '', recent: [], split: null })
+  useFileCategoryStore.setState({ overrides: EMPTY_OVERRIDES })
   useListingStore.setState({ byKey: {} })
   useShelfStore.setState({ items: [], railTab: 'shelf' })
   useSettingsStore.setState({
@@ -206,3 +228,35 @@ export const selectedNames = (): string[] =>
   activeTab()
     .sel.map((p) => p.slice(Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) + 1))
     .sort()
+
+/** 분할 보기의 그 패널(`section[data-pane]`). */
+export function paneEl(pane: PaneId): HTMLElement {
+  const el = document.querySelector<HTMLElement>(`[data-pane="${pane}"]`)
+  if (!el) throw new Error(`no pane "${pane}"`)
+  return el
+}
+
+/**
+ * 요소 하나의 `getBoundingClientRect`·`clientWidth`·`clientHeight`를 인스턴스 속성으로 고정한다.
+ * `stubGridLayout`은 모든 요소를 0,0~1200×800으로 두므로 탭줄·분할 루트·타일을 구별할 때 쓴다.
+ */
+export function stubRect(
+  el: Element,
+  rect: { left: number; top: number; width: number; height: number }
+): void {
+  const { left, top, width, height } = rect
+  const box = {
+    x: left,
+    y: top,
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    toJSON: () => ({})
+  }
+  Object.defineProperty(el, 'getBoundingClientRect', { configurable: true, value: () => box })
+  Object.defineProperty(el, 'clientWidth', { configurable: true, value: width })
+  Object.defineProperty(el, 'clientHeight', { configurable: true, value: height })
+}

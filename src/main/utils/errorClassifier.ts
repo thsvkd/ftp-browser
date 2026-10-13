@@ -135,8 +135,24 @@ export function ipcError(err: unknown): { success: false; error: string; code: E
   return { success: false, error: message, code }
 }
 
-/** 재시도 가능한 에러인지 판단 (네트워크/일시적 에러만 재시도) */
+/** basic-ftp가 제어 연결에서 서버의 FIN을 받았다. 닫힌 클라이언트의 다음 작업은 "Client is closed because …"로 감싼다 */
+const SERVER_FIN_RE = /Server sent FIN packet unexpectedly/
+/** 새 클라이언트의 첫 전송에서 EPSV·PASV가 모두 실패하고 마지막 응답이 425였다 */
+const WRAPPED_DATA_CHANNEL_REFUSED_RE = /Last error response was 'FTPError: 425 /
+
+/**
+ * 재시도 가능한 에러인지 판단 (네트워크/일시적 에러만 재시도).
+ * 서버의 FIN과 데이터 연결 거부(425)는 classifyError의 코드를 바꾸지 않고(UNKNOWN 그대로) 여기서만 센다.
+ */
 export function isRetryableError(err: unknown): boolean {
+  if (
+    err instanceof Error &&
+    ((err as { code?: unknown }).code === 425 ||
+      SERVER_FIN_RE.test(err.message) ||
+      WRAPPED_DATA_CHANNEL_REFUSED_RE.test(err.message))
+  ) {
+    return true
+  }
   const { code } = classifyError(err)
   return (
     code === ErrorCode.CONNECTION_TIMEOUT ||

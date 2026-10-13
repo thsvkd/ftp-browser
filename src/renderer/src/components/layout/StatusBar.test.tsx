@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { en } from '@renderer/i18n/locales/en'
 import { fromLocalEntry } from '@renderer/lib/explorerEntry'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { EMPTY_FILTER } from '@renderer/lib/fileCategories'
+import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
@@ -11,6 +12,7 @@ import {
   activeTab,
   local,
   localLoc,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from '@renderer/components/explorer/explorerTestHarness'
@@ -65,8 +67,104 @@ describe('StatusBar', () => {
 
     // 연결 상태
     expect(bar.textContent).toContain(en['status.disconnected'])
-    act(() => useFtpStore.setState({ connectionStatus: 'connected', host: 'nas.local' }))
+    act(() => {
+      setConnection('me@nas.local:21', 'connected')
+      useTabsStore.getState().openTab({ side: 'remote', path: '/', server: 'me@nas.local:21' })
+    })
     expect(bar.textContent).toContain(en['status.connected'])
     expect(bar.textContent).toContain('nas.local')
+  })
+
+  it('counts with the same type filter as the explorer, and ignores it once its category is hidden', () => {
+    // covers: Test-947
+    h = setupExplorer({ connected: false })
+    const entries = [
+      local(DIR, 'docs', { dir: true }),
+      local(DIR, 'a.jpg'),
+      local(DIR, 'b.jpg'),
+      local(DIR, 'c.txt'),
+      local(DIR, '.env')
+    ].map(fromLocalEntry)
+    useListingStore.getState().put(localLoc(DIR), entries)
+    useTabsStore.getState().openTab(localLoc(DIR))
+    render(<StatusBar />)
+    const bar = screen.getByRole('contentinfo')
+    expect(bar.textContent).toContain('4 items')
+    expect(bar.textContent).toContain('1 hidden')
+
+    act(() =>
+      useTabsStore
+        .getState()
+        .patchTab(activeTab().id, { filter: { ...EMPTY_FILTER, categories: ['image'] } })
+    )
+    expect(bar.textContent).toContain('3 items')
+    expect(bar.textContent).toContain('2 hidden')
+
+    // 설정에서 그 카테고리를 숨기면 필터가 꺼진 것으로 보인다(E15).
+    act(() => useFileCategoryStore.getState().setHidden('image', true))
+    expect(bar.textContent).toContain('4 items')
+    expect(bar.textContent).toContain('1 hidden')
+  })
+
+  it("follows the active tab's server, or counts the connected servers on a local tab", () => {
+    // covers: Test-1021
+    h = setupExplorer({ connected: false })
+    const A = 'alice@a.example.com:21'
+    const B = 'bob@b.example.com:2121'
+    setConnection(A, 'disconnected')
+    setConnection(B, 'connected')
+    useTabsStore.getState().openTab({ side: 'remote', path: '/', server: B })
+    render(<StatusBar />)
+    const bar = screen.getByRole('contentinfo')
+    expect(bar.textContent).toContain('b.example.com')
+    expect(bar.textContent).toContain(en['status.connected'])
+    expect(bar.textContent).not.toContain('a.example.com')
+
+    act(() => setConnection(B, 'error'))
+    expect(bar.textContent).toContain('b.example.com')
+    expect(bar.textContent).toContain(en['status.error'])
+
+    // 로컬 탭: 연결된 서버 수
+    act(() => {
+      setConnection(A, 'connected')
+      setConnection(B, 'connected')
+      useTabsStore.getState().openTab(localLoc(DIR))
+    })
+    expect(bar.textContent).toContain('2 servers connected')
+    expect(bar.textContent).not.toContain('b.example.com')
+
+    act(() => {
+      setConnection(A, 'disconnected')
+      setConnection(B, 'error')
+    })
+    expect(bar.textContent).toContain(en['status.disconnected'])
+    expect(bar.textContent).not.toContain('servers connected')
+  })
+
+  it("names the active tab's connection by its key so two users on one host differ", () => {
+    // covers: Test-1143
+    h = setupExplorer({ connected: false })
+    const RA = 'ra@127.0.0.1:2121'
+    const RB2 = 'rb2@127.0.0.1:2121'
+    setConnection(RA, 'connected')
+    setConnection(RB2, 'connected')
+    const tabA = useTabsStore.getState().openTab({ side: 'remote', path: '/', server: RA })
+    useTabsStore.getState().openTab({ side: 'remote', path: '/', server: RB2 })
+    render(<StatusBar />)
+    const bar = screen.getByRole('contentinfo')
+    expect(bar.textContent).toContain('rb2@127.0.0.1:2121')
+    expect(bar.textContent).not.toContain('ra@')
+
+    act(() => useTabsStore.getState().activate(tabA))
+    expect(bar.textContent).toContain('ra@127.0.0.1:2121')
+
+    act(() => {
+      setConnection('anonymous@example.org:21', 'connected')
+      useTabsStore
+        .getState()
+        .openTab({ side: 'remote', path: '/', server: 'anonymous@example.org:21' })
+    })
+    expect(bar.textContent).toContain('example.org:21')
+    expect(bar.textContent).not.toContain('anonymous@')
   })
 })

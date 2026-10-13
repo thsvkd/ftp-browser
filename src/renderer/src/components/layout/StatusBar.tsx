@@ -3,10 +3,12 @@ import { useT } from '@renderer/i18n'
 import { useTabEntries } from '@renderer/hooks/useTabEntries'
 import { TILE_MAX, TILE_MIN, TILE_STEP } from '@renderer/lib/explorerLayout'
 import { cn, formatBytes } from '@renderer/lib/utils'
+import { useConnectedKeys } from '@renderer/lib/connections'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useActiveTab } from '@renderer/stores/useTabsStore'
 import { ZOOM_STEP } from '@renderer/components/explorer/FileGrid'
+import { connLabel } from '@shared/connKey'
 
 const fileBytes = (sum: number, e: { type: string; size: number }): number =>
   sum + (e.type === 'file' ? e.size : 0)
@@ -23,15 +25,24 @@ const tileBtn =
 
 /**
  * 상태 표시줄(D19): 선택 수·크기(없으면 보이는 항목 수), 폴더·파일 합계와 크기, 숨긴 수,
- * 그리드일 때 타일 크기, 연결 상태. 캐시 통계는 설정 창에만 있다.
+ * 그리드일 때 타일 크기, 활성 탭 서버의 연결 상태(로컬 탭이면 연결된 서버 수). 캐시 통계는 설정 창에만 있다.
  */
 export function StatusBar(): React.JSX.Element {
   const t = useT()
   const tab = useActiveTab()
   const { all, visible, selected } = useTabEntries(tab)
   const tileSize = useSettingsStore((s) => s.tileSize)
-  const status = useFtpStore((s) => s.connectionStatus)
-  const host = useFtpStore((s) => s.host)
+  // 활성 탭이 원격이면 그 탭 서버의 상태, 로컬이면 연결된 서버 수(MC15)
+  const server = tab?.loc.side === 'remote' ? tab.loc.server : undefined
+  const conn = useFtpStore((s) => (server ? s.connections[server] : undefined))
+  const connectedCount = useConnectedKeys().size
+  const status = server
+    ? (conn?.status ?? 'disconnected')
+    : connectedCount
+      ? 'connected'
+      : 'disconnected'
+  // 같은 호스트의 다른 계정도 구별되게 키 이름표(same-host-accounts SH6)
+  const host = server ? connLabel(server) : ''
   const { setTileSize, adjustTileSize } = useSettingsStore.getState()
 
   const dirs = all.filter((e) => e.type === 'directory').length
@@ -91,7 +102,11 @@ export function StatusBar(): React.JSX.Element {
         {host && status !== 'disconnected' && (
           <span className="mono truncate text-[var(--tx)]">{host}</span>
         )}
-        <span className="shrink-0">{t(`status.${status}`)}</span>
+        <span className="shrink-0">
+          {!server && connectedCount
+            ? t('status.connections', { count: connectedCount })
+            : t(`status.${status}`)}
+        </span>
       </span>
     </footer>
   )

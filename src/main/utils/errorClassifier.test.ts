@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { FTPError } from 'basic-ftp'
 import { classifyError, ipcError, isRetryableError, socketErrorDetail } from './errorClassifier'
 import { ErrorCode } from '@shared/types/ipc'
 
@@ -248,6 +249,64 @@ describe('isRetryableError', () => {
 
   it('should return false for non-Error values', () => {
     expect(isRetryableError('string error')).toBe(false)
+  })
+
+  it('should retry a server FIN and the client closed by it, and keep classifying them UNKNOWN', () => {
+    // covers: Test-1129
+    const fin = new Error('Server sent FIN packet unexpectedly, closing connection.')
+    const closed = Object.assign(
+      new Error(
+        'Client is closed because Server sent FIN packet unexpectedly, closing connection.'
+      ),
+      { code: '0' }
+    )
+
+    expect(isRetryableError(fin)).toBe(true)
+    expect(isRetryableError(closed)).toBe(true)
+    expect(classifyError(fin)).toEqual({ code: ErrorCode.UNKNOWN, message: fin.message })
+    expect(classifyError(closed)).toEqual({ code: ErrorCode.UNKNOWN, message: closed.message })
+  })
+
+  it('should retry a refused data channel (425) however basic-ftp reports it', () => {
+    // covers: Test-1130
+    const refused = new FTPError({
+      code: 425,
+      message: "425 Too many connections. Can't open data channel."
+    })
+    const wrapped = new Error(
+      "None of the available transfer strategies work. Last error response was 'FTPError: 425 Too many connections. Can't open data channel.'"
+    )
+
+    expect(isRetryableError(refused)).toBe(true)
+    expect(isRetryableError(wrapped)).toBe(true)
+    expect(classifyError(refused)).toEqual({ code: ErrorCode.UNKNOWN, message: refused.message })
+    expect(classifyError(wrapped)).toEqual({ code: ErrorCode.UNKNOWN, message: wrapped.message })
+  })
+
+  it('should not retry a 421, a wrapped non-425 error or a file name that contains 425', () => {
+    // covers: Test-1131
+    expect(
+      isRetryableError(
+        new FTPError({
+          code: 421,
+          message: '421 Too many connections. Service temporarily unavailable.'
+        })
+      )
+    ).toBe(false)
+    expect(
+      isRetryableError(
+        new Error(
+          "None of the available transfer strategies work. Last error response was 'Error: connect ECONNREFUSED 127.0.0.1:50000 (data socket)'"
+        )
+      )
+    ).toBe(false)
+    expect(isRetryableError(new Error('Server closed connection unexpectedly.'))).toBe(false)
+    expect(
+      isRetryableError(
+        new FTPError({ code: 550, message: '550 IMG_0425.jpg: No such file or directory' })
+      )
+    ).toBe(false)
+    expect(isRetryableError(new Error('Cannot read /photos/IMG_0425.jpg'))).toBe(false)
   })
 })
 

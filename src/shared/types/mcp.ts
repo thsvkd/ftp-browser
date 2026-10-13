@@ -1,3 +1,4 @@
+import type { ConnKey } from '../connKey'
 import type { ConnectionStatus } from './ftp'
 
 /** 설정 대화상자가 읽는 내장 MCP 서버 상태 */
@@ -17,6 +18,8 @@ export interface McpState {
 
 /** Main → renderer (`agent:session`): an agent connected or disconnected the app's FTP session. */
 export interface AgentSessionEvent {
+  /** The connection the agent connected or disconnected. */
+  server: ConnKey
   status: ConnectionStatus
   serverId?: number
   host?: string

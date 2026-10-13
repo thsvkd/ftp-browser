@@ -10,7 +10,8 @@ import {
 import { useT } from '@renderer/i18n'
 import { locKey, type ExplorerEntry, type Loc } from '@renderer/lib/explorerEntry'
 import { planSend } from '@renderer/lib/sendPlan'
-import { dropShelf, locLabel, planVerb, sourceLabel, useConnection } from '@renderer/lib/sendItems'
+import { useConnectedKeys } from '@renderer/lib/connections'
+import { dropShelf, locLabel, planVerb, sourceLabel } from '@renderer/lib/sendItems'
 import { cn, formatBytes } from '@renderer/lib/utils'
 import { useShelfStore, type ShelfItem } from '@renderer/stores/useShelfStore'
 import { useActiveTab } from '@renderer/stores/useTabsStore'
@@ -153,13 +154,13 @@ export function Shelf(): React.JSX.Element {
   const t = useT()
   const items = useShelfStore((s) => s.items)
   const tab = useActiveTab()
-  const conn = useConnection()
+  const connected = useConnectedKeys()
   const drop = useDropTarget('shelf', 'shelf')
   if (!items.length) return <EmptyShelf drop={drop} />
 
   const entries = items.map((i) => i.entry)
   const dest = tab?.loc
-  const plan = dest ? planSend(entries, dest, conn) : null
+  const plan = dest ? planSend(entries, dest, connected) : null
   const invalid = plan ? plan.invalid : 'send.invalidNothing'
   const Icon =
     plan?.direction === 'upload'

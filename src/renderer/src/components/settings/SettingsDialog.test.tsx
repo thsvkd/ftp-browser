@@ -1,8 +1,12 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
+import { en } from '@renderer/i18n/locales/en'
+import { DEFAULT_CATEGORIES, EMPTY_OVERRIDES } from '@renderer/lib/fileCategories'
+import { useConfirmStore } from '@renderer/stores/useConfirmStore'
+import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useOperationStore } from '@renderer/stores/useOperationStore'
@@ -104,6 +108,7 @@ describe('SettingsDialog updates', () => {
       jobs: [
         {
           id: 'active-transfer',
+          server: 'me@nas.local:21',
           direction: 'download',
           localPath: 'C:\\photo.jpg',
           remotePath: '/photo.jpg',
@@ -467,5 +472,181 @@ describe('SettingsDialog Escape', () => {
     await expect(answer).resolves.toBe(false)
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+describe('SettingsDialog file categories', () => {
+  const overrides = (): ReturnType<typeof useFileCategoryStore.getState>['overrides'] =>
+    useFileCategoryStore.getState().overrides
+  const group = (name: string | RegExp): HTMLElement => screen.getByRole('group', { name })
+  const chips = (name: string | RegExp): string[] =>
+    within(group(name))
+      .queryAllByRole('button', { name: /^Remove / })
+      .map((b) => b.getAttribute('aria-label')!.replace('Remove ', ''))
+  const addBox = (name: string | RegExp): HTMLElement =>
+    within(group(name)).getByRole('textbox', { name: en['settings.categoryExtensionAdd'] })
+  const openSettings = (): void => {
+    render(
+      <>
+        <SettingsDialog open={true} onClose={vi.fn()} />
+        <ConfirmDialog />
+      </>
+    )
+  }
+  const type = (box: HTMLElement, value: string): void => {
+    fireEvent.change(box, { target: { value } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+  }
+  beforeEach(() => {
+    useFileCategoryStore.setState({ overrides: EMPTY_OVERRIDES })
+    useConfirmStore.setState({ request: null })
+  })
+
+  it('shows the seven defaults as editable tags and warns about duplicates', () => {
+    // covers: Test-948
+    openSettings()
+    const names = screen
+      .getAllByRole('group')
+      .map((g) => g.getAttribute('aria-label'))
+      .filter((n) =>
+        ['Images', 'RAW', 'Videos', 'Audio', 'Documents', 'Archives', 'Code'].includes(n!)
+      )
+    expect(names).toEqual(['Images', 'RAW', 'Videos', 'Audio', 'Documents', 'Archives', 'Code'])
+    // 카테고리의 확장자는 하나도 빠지지 않고 칩으로 보인다.
+    expect(DEFAULT_CATEGORIES).toHaveLength(names.length)
+    DEFAULT_CATEGORIES.forEach((c, i) => {
+      expect(chips(names[i]!)).toEqual([...c.extensions])
+    })
+
+    // 이미 있는 확장자는 칩이 늘지 않고 안내만 한다.
+    const before = chips('RAW').length
+    type(addBox('RAW'), 'RAF')
+    expect(chips('RAW')).toHaveLength(before)
+    expect(within(group('RAW')).getByText('.raf is already in this category.')).toBeTruthy()
+
+    // 새 확장자는 칩이 되고 스토어에는 added로 남는다.
+    type(addBox('Images'), 'heics')
+    expect(chips('Images')).toContain('heics')
+    expect(overrides().defaults.image?.added).toEqual(['heics'])
+
+    // 칩을 지우면 removed로 남는다.
+    fireEvent.click(within(group('Images')).getByRole('button', { name: 'Remove jpeg' }))
+    expect(chips('Images')).not.toContain('jpeg')
+    expect(overrides().defaults.image?.removed).toEqual(['jpeg'])
+
+    // 다른 카테고리에 있는 확장자는 넣되 경고한다.
+    type(addBox('Videos'), 'png')
+    expect(chips('Videos')).toContain('png')
+    expect(within(group('Videos')).getByText('.png is also in “Images”.')).toBeTruthy()
+
+    // 잘못된 입력은 거부한다.
+    type(addBox('Audio'), 'a/b')
+    expect(chips('Audio')).not.toContain('a/b')
+    expect(within(group('Audio')).getByText(en['filter.extensionInvalid'])).toBeTruthy()
+    expect((addBox('Audio') as HTMLInputElement).value).toBe('a/b')
+  })
+
+  it('restores one category or all defaults after a confirmation, keeping custom categories', async () => {
+    // covers: Test-949
+    const store = useFileCategoryStore.getState()
+    store.removeExtension('image', 'png')
+    store.removeExtension('raw', 'cr2')
+    store.setHidden('code', true)
+    store.addCustom('Mine')
+    openSettings()
+
+    // 취소하면 그대로다.
+    fireEvent.click(
+      within(group('Images')).getByRole('button', { name: en['settings.categoryRestore'] })
+    )
+    await screen.findByRole('alertdialog')
+    fireEvent.click(screen.getByRole('button', { name: en['common.cancel'] }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(chips('Images')).not.toContain('png')
+
+    // 확인하면 그 카테고리만 되돌린다.
+    fireEvent.click(
+      within(group('Images')).getByRole('button', { name: en['settings.categoryRestore'] })
+    )
+    await screen.findByRole('alertdialog')
+    fireEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', {
+        name: en['settings.categoryRestore']
+      })
+    )
+    await waitFor(() => expect(chips('Images')).toContain('png'))
+    expect(chips('RAW')).not.toContain('cr2')
+
+    // 전체 복원: 기본 7개를 모두 되돌리되 사용자 카테고리는 남는다.
+    fireEvent.click(screen.getByRole('button', { name: en['settings.categoryRestoreAll'] }))
+    await screen.findByRole('alertdialog')
+    expect(screen.getByText(en['settings.categoryRestoreAllTitle'])).toBeTruthy()
+    fireEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', {
+        name: en['settings.categoryRestoreAll']
+      })
+    )
+    await waitFor(() => expect(chips('RAW')).toContain('cr2'))
+    expect(overrides().defaults).toEqual({})
+    expect(overrides().custom.map((c) => c.name)).toEqual(['Mine'])
+
+    // 사용자 카테고리에는 per-카테고리 복원 버튼이 없다.
+    expect(
+      within(group('Mine')).queryByRole('button', { name: en['settings.categoryRestore'] })
+    ).toBeNull()
+  })
+
+  it('adds, renames and deletes custom categories and hides defaults instead of deleting them', async () => {
+    // covers: Test-950
+    openSettings()
+    fireEvent.click(screen.getByRole('button', { name: en['settings.categoryAdd'] }))
+    const nameBox = screen.getByRole('textbox', { name: en['settings.categoryName'] })
+    expect((nameBox as HTMLInputElement).value).toBe(en['settings.categoryNewName'])
+    expect(document.activeElement).toBe(nameBox)
+    fireEvent.change(nameBox, { target: { value: '  Docs  ' } })
+    fireEvent.keyDown(nameBox, { key: 'Enter' })
+    expect(overrides().custom.map((c) => c.name)).toEqual(['Docs'])
+    expect(group('Docs')).toBeTruthy()
+
+    // 이름 변경, 빈 이름은 이전 이름으로 되돌린다.
+    const box = within(group('Docs')).getByRole('textbox', { name: en['settings.categoryName'] })
+    fireEvent.change(box, { target: { value: 'Notes' } })
+    fireEvent.blur(box)
+    expect(overrides().custom.map((c) => c.name)).toEqual(['Notes'])
+    const renamed = within(group('Notes')).getByRole('textbox', {
+      name: en['settings.categoryName']
+    }) as HTMLInputElement
+    fireEvent.change(renamed, { target: { value: '   ' } })
+    fireEvent.keyDown(renamed, { key: 'Enter' })
+    expect(overrides().custom.map((c) => c.name)).toEqual(['Notes'])
+    expect(renamed.value).toBe('Notes')
+
+    // 삭제는 확인 후.
+    fireEvent.click(
+      within(group('Notes')).getByRole('button', { name: en['settings.categoryDelete'] })
+    )
+    await screen.findByRole('alertdialog')
+    expect(screen.getByText('Delete “Notes”?')).toBeTruthy()
+    fireEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', {
+        name: en['settings.categoryDelete']
+      })
+    )
+    await waitFor(() => expect(overrides().custom).toEqual([]))
+
+    // 기본 카테고리: 삭제 버튼은 없고 숨김 토글이 있다.
+    expect(
+      within(group('Images')).queryByRole('button', { name: en['settings.categoryDelete'] })
+    ).toBeNull()
+    expect(within(group('Images')).queryByText(en['settings.categoryHidden'])).toBeNull()
+    fireEvent.click(
+      within(group('Images')).getByRole('button', { name: en['settings.categoryHide'] })
+    )
+    expect(overrides().defaults.image?.hidden).toBe(true)
+    expect(within(group('Images')).getByText(en['settings.categoryHidden'])).toBeTruthy()
+    fireEvent.click(
+      within(group('Images')).getByRole('button', { name: en['settings.categoryShow'] })
+    )
+    expect(overrides().defaults.image?.hidden).toBe(false)
   })
 })

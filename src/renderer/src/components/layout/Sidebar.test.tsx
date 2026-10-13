@@ -2,7 +2,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { en } from '@renderer/i18n/locales/en'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { emptyDraft } from '@renderer/lib/serverAddress'
@@ -11,10 +10,12 @@ import {
   activeTab,
   flush,
   localLoc,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from '@renderer/components/explorer/explorerTestHarness'
 import type { FtpServer } from '@shared/types/ftp'
+import { act } from '@testing-library/react'
 import { Sidebar } from './Sidebar'
 
 const HOME = 'C:\\Users\\me'
@@ -119,17 +120,40 @@ describe('Sidebar — this PC and recent', () => {
     fireEvent.click(place('r2'))
     expect(activeTab().loc.path).toBe('C:\\work\\r2')
   })
+
+  it('tells same-named recent folders of two users on one host apart by their source line', async () => {
+    // covers: Test-1145
+    const RA = 'ra@127.0.0.1:2121'
+    const RB2 = 'rb2@127.0.0.1:2121'
+    useTabsStore.getState().openTab(localLoc(HOME))
+    useTabsStore.setState({
+      recent: [
+        { side: 'remote', path: '/inbox', server: RA },
+        { side: 'remote', path: '/inbox', server: RB2 },
+        localLoc('C:\\work\\inbox')
+      ]
+    })
+    render(<Sidebar />)
+    await flush()
+
+    const rowA = place(`inbox · ${RA}`)
+    const rowB = place(`inbox · ${RB2}`)
+    const local = place('inbox')
+    expect(rowA.getAttribute('title')).toBe(`${RA} · /inbox`)
+    expect(rowB.getAttribute('title')).toBe(`${RB2} · /inbox`)
+    expect(within(rowA).getByText(RA)).toBeTruthy()
+    expect(within(rowB).getByText(RB2)).toBeTruthy()
+    expect(local.textContent).toBe('inbox')
+
+    fireEvent.click(rowB)
+    expect(activeTab().loc).toEqual({ side: 'remote', path: '/inbox', server: RB2 })
+  })
 })
 
 describe('Sidebar — servers', () => {
   it('shows the connected server with its status and four recent folders', async () => {
     // covers: Test-821
-    useFtpStore.setState({
-      connectionStatus: 'connected',
-      host: OFFICE.host,
-      port: OFFICE.port,
-      username: 'kim'
-    })
+    setConnection('kim@ftp.office.lan:2121', 'connected')
     h.handlers['ftp:getRecentPaths'] = () => ({
       success: true,
       data: ['/a', '/b', '/c', '/d', '/e'].map((path) => ({ path, lastVisited: '' }))
@@ -138,7 +162,7 @@ describe('Sidebar — servers', () => {
     render(<Sidebar />)
     await flush()
 
-    expect(invokeCalls(h.invoke, 'ftp:getRecentPaths')).toEqual([[OFFICE.host, OFFICE.port]])
+    expect(invokeCalls(h.invoke, 'ftp:getRecentPaths')).toEqual([['kim@ftp.office.lan:2121']])
     const office = place(/^Office/)
     expect(office.querySelector('[data-status="connected"]')).toBeTruthy()
     expect(place(/^NAS/).querySelector('[data-status="disconnected"]')).toBeTruthy()
@@ -179,5 +203,181 @@ describe('Sidebar — servers', () => {
       port: OFFICE.port,
       user: 'kim'
     })
+  })
+})
+
+describe('Sidebar — several connections', () => {
+  const ARCHIVE: FtpServer = {
+    id: 4,
+    name: 'Archive',
+    host: 'archive.lan',
+    port: 21,
+    username: 'arc',
+    hasPassword: false,
+    secure: false
+  }
+  const OFFICE_KEY = 'kim@ftp.office.lan:2121'
+  const NAS_KEY = 'me@nas.local:21'
+  /** 서버 절의 행 이름(위에서부터). 상태 점이 있는 버튼만 */
+  const serverRows = (): string[] =>
+    within(nav())
+      .getAllByRole('button')
+      .filter((b) => b.querySelector('[data-status]'))
+      .map((b) => b.textContent ?? '')
+
+  it('gives every server its own dot, recent folders and disconnect button', async () => {
+    // covers: Test-1020
+    useServerStore.setState({ servers: [OFFICE, NAS, ARCHIVE] })
+    setConnection(OFFICE_KEY, 'connected')
+    setConnection(NAS_KEY, 'connected')
+    setConnection('arc@archive.lan:21', 'error')
+    setConnection('x@x.example:21', 'connected')
+    setConnection('w@w.example:2121', 'connected')
+    const recent: Record<string, string[]> = {
+      [OFFICE_KEY]: ['/o1', '/o2', '/o3', '/o4', '/o5'],
+      [NAS_KEY]: ['/n1', '/n2', '/n3', '/n4', '/n5']
+    }
+    h.handlers['ftp:getRecentPaths'] = (key) => ({
+      success: true,
+      data: (recent[key as string] ?? []).map((path) => ({ path, lastVisited: '' }))
+    })
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
+
+    expect(place(/^Office/).querySelector('[data-status="connected"]')).toBeTruthy()
+    expect(place(/^NAS/).querySelector('[data-status="connected"]')).toBeTruthy()
+    // 끊긴(error) C는 연결 안 됨이 아니라 끊김 표시와 다시 연결 안내
+    expect(place(/^Archive/).querySelector('[data-status="error"]')).toBeTruthy()
+    expect(place(/^Archive/).textContent).toContain(en['sidebar.serverLost'])
+    expect(invokeCalls(h.invoke, 'ftp:getRecentPaths')).toEqual(
+      expect.arrayContaining([[OFFICE_KEY], [NAS_KEY]])
+    )
+    for (const name of ['o1', 'o2', 'o3', 'o4', 'n1', 'n2', 'n3', 'n4'])
+      expect(place(name)).toBeTruthy()
+    for (const name of ['o5', 'n5'])
+      expect(within(nav()).queryByRole('button', { name })).toBeNull()
+    fireEvent.click(place('n2'))
+    expect(activeTab().loc).toEqual({ side: 'remote', path: '/n2', server: NAS_KEY })
+
+    // 저장 안 된 두 연결이 맨 위에 둘 다
+    const rows = serverRows()
+    expect(rows[0]).toMatch(/^x@x\.example/)
+    expect(rows[1]).toMatch(/^w@w\.example/)
+    expect(rows[2]).toMatch(/^Office/)
+
+    // A 행의 해제 버튼은 A만 끊는다
+    expect(
+      within(nav()).queryByRole('button', { name: 'Disconnect arc@archive.lan:21' })
+    ).toBeNull()
+    fireEvent.click(
+      within(nav()).getByRole('button', { name: 'Disconnect kim@ftp.office.lan:2121' })
+    )
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:disconnect')).toEqual([[OFFICE_KEY]])
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toEqual([])
+  })
+
+  it('lists unsaved connections that are live or broken, not ones that ended', async () => {
+    // covers: Test-1034
+    setConnection('x@x.example:21', 'connected')
+    setConnection('y@y.example:21', 'error')
+    setConnection('z@z.example:21', 'disconnected')
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
+    const rows = serverRows()
+    expect(rows[0]).toMatch(/^x@x\.example/)
+    expect(rows[1]).toMatch(/^y@y\.example/)
+    expect(rows[2]).toMatch(/^Office/)
+    expect(serverRows().some((r) => r.startsWith('z@z.example'))).toBe(false)
+
+    act(() => setConnection('z@z.example:21', 'connecting'))
+    expect(serverRows().some((r) => r.startsWith('z@z.example'))).toBe(true)
+  })
+
+  it('names a saved and an unsaved user on one host apart in the row, its title and its disconnect button', async () => {
+    // covers: Test-1144
+    const RA = 'ra@127.0.0.1:2121'
+    const RB2 = 'rb2@127.0.0.1:2121'
+    const LAB: FtpServer = {
+      id: 7,
+      name: '',
+      host: '127.0.0.1',
+      port: 2121,
+      username: 'ra',
+      hasPassword: true,
+      secure: false
+    }
+    useServerStore.setState({ servers: [LAB] })
+    setConnection(RA, 'connected')
+    setConnection(RB2, 'connected')
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
+
+    /** 상태 점이 있는 행 버튼마다 [이름, 둘째 줄, title] */
+    const rows = (): string[][] =>
+      within(nav())
+        .getAllByRole('button')
+        .filter((b) => b.querySelector('[data-status]'))
+        .map((b) => [
+          ...Array.from(b.querySelectorAll('.block')).map((el) => el.textContent ?? ''),
+          b.getAttribute('title') ?? ''
+        ])
+    expect(rows()).toEqual([
+      ['rb2@127.0.0.1', RB2, RB2],
+      ['127.0.0.1', RA, RA]
+    ])
+
+    expect(within(nav()).getByRole('button', { name: `Disconnect ${RA}` })).toBeTruthy()
+    fireEvent.click(within(nav()).getByRole('button', { name: `Disconnect ${RB2}` }))
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:disconnect')).toEqual([[RB2]])
+
+    act(() => setConnection('anonymous@h.lan:21', 'connected'))
+    expect(rows()[0][0]).toBe('h.lan')
+  })
+
+  it("lists under each server row only that account's recent folders", async () => {
+    // covers: Test-1151
+    const RA = 'ra@127.0.0.1:2121'
+    const RB2 = 'rb2@127.0.0.1:2121'
+    const LAB: FtpServer = {
+      id: 7,
+      name: '',
+      host: '127.0.0.1',
+      port: 2121,
+      username: 'ra',
+      hasPassword: true,
+      secure: false
+    }
+    useServerStore.setState({ servers: [LAB] })
+    setConnection(RA, 'connected')
+    setConnection(RB2, 'connected')
+    const recent: Record<string, string[]> = { [RA]: ['/photos'], [RB2]: ['/inbox'] }
+    h.handlers['ftp:getRecentPaths'] = (key) => ({
+      success: true,
+      data: (recent[key as string] ?? []).map((path) => ({ path, lastVisited: '' }))
+    })
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
+
+    expect(invokeCalls(h.invoke, 'ftp:getRecentPaths')).toEqual(
+      expect.arrayContaining([[RA], [RB2]])
+    )
+    expect(invokeCalls(h.invoke, 'ftp:getRecentPaths')).toHaveLength(2)
+    // 서버 행과 그 아래 들여쓴 최근 폴더의 순서: 저장 안 된 RB2 행이 위
+    const order = within(nav())
+      .getAllByRole('button')
+      .map((b) =>
+        b.querySelector('[data-status]') ? `row ${b.getAttribute('title')}` : (b.textContent ?? '')
+      )
+      .filter((name) => name.startsWith('row ') || name === 'photos' || name === 'inbox')
+    expect(order).toEqual([`row ${RB2}`, 'inbox', `row ${RA}`, 'photos'])
+
+    fireEvent.click(place('inbox'))
+    expect(activeTab().loc).toEqual({ side: 'remote', path: '/inbox', server: RB2 })
   })
 })

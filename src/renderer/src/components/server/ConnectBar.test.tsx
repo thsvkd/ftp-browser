@@ -69,12 +69,7 @@ beforeEach(() => {
     connecting: false,
     error: ''
   })
-  useFtpStore.setState({
-    connectionStatus: 'disconnected',
-    host: '',
-    port: 21,
-    error: null
-  })
+  useFtpStore.setState({ connections: {} })
   useTabsStore.setState({ tabs: [], activeId: '', recent: [] })
 })
 
@@ -100,13 +95,15 @@ describe('ConnectBar — connecting', () => {
     await user.click(screen.getByRole('button', { name: 'Connect' }))
     await user.click(await screen.findByRole('button', { name: 'Cancel' }))
 
-    expect(invokeCalls(mockInvoke, 'ftp:disconnect')).toHaveLength(1)
+    // 연결 중인 시도의 키를 끊는다
+    expect(invokeCalls(mockInvoke, 'ftp:disconnect')).toEqual([['anonymous@ftp.example.com:21']])
     expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
 
     resolveConnect!({ success: true, data: undefined })
     await waitFor(() => {
-      expect(useFtpStore.getState().host).toBe('')
-      expect(useFtpStore.getState().connectionStatus).toBe('disconnected')
+      expect(useFtpStore.getState().connections['anonymous@ftp.example.com:21'].status).toBe(
+        'disconnected'
+      )
     })
     expect(invokeCalls(mockInvoke, 'ftp:list')).toHaveLength(0)
   })
@@ -282,11 +279,22 @@ const connectPayload = (): unknown => invokeCalls(mockInvoke, 'ftp:connect')[0]?
 const savedButton = (): Promise<HTMLElement> =>
   screen.findByRole('button', { name: /Home NAS/, expanded: false })
 
+/**
+ * 연결하면 그 서버의 원격 탭이 활성이 되어 툴바가 연결됨으로 바뀐다(MC16). 다시 폼을 쓰려면 로컬
+ * 탭으로 간다.
+ */
+function backToForm(): void {
+  act(() => {
+    useTabsStore.getState().openTab({ side: 'local', path: 'C:\\' })
+  })
+}
+
 /** Replaces the address, presses Enter and waits for the connect call. */
 async function connectWith(
   user: ReturnType<typeof userEvent.setup>,
   address: string
 ): Promise<void> {
+  if (!screen.queryByRole('textbox', { name: 'Server address' })) backToForm()
   await user.clear(addressInput())
   await user.type(addressInput(), `${address}{Enter}`)
   await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
@@ -400,6 +408,7 @@ describe('saved password — toolbar', () => {
     await waitFor(() => expect(useServerStore.getState().connecting).toBe(false))
 
     mockInvoke.mockClear()
+    backToForm()
     await user.type(passwordField(), 'typed')
     await user.click(screen.getByRole('button', { name: 'Connect' }))
     await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
@@ -530,7 +539,22 @@ describe('regressions — switching and connecting', () => {
     const user = userEvent.setup()
     renderToolbar()
     await savedButton()
-    useFtpStore.setState({ connectionStatus: 'connected', host: 'nas.local' })
+    act(() => {
+      useFtpStore.setState({
+        connections: {
+          'anonymous@nas.local:21': {
+            status: 'connected',
+            host: 'nas.local',
+            port: 21,
+            user: 'anonymous',
+            error: null
+          }
+        }
+      })
+      useTabsStore
+        .getState()
+        .openTab({ side: 'remote', path: '/', server: 'anonymous@nas.local:21' })
+    })
 
     await user.click(await screen.findByTitle('Switch server'))
     await user.click(within(screen.getByRole('listbox')).getByText('Home NAS'))
@@ -647,7 +671,7 @@ describe('reconnecting — start folder', () => {
         data: paths.map((path) => ({ path, lastVisited: '2026-09-29 10:00:00.000' }))
       })
   }
-  const listedPaths = (): unknown[] => invokeCalls(mockInvoke, 'ftp:list').map((c) => c[0])
+  const listedPaths = (): unknown[] => invokeCalls(mockInvoke, 'ftp:list').map((c) => c[1])
   /** 활성 원격 탭이 보는 경로 */
   const activeRemotePath = (): string | undefined => {
     const { tabs, activeId } = useTabsStore.getState()
@@ -664,7 +688,7 @@ describe('reconnecting — start folder', () => {
 
     await waitFor(() => expect(activeRemotePath()).toBe('/photos/2026'))
     expect(listedPaths()[0]).toBe('/photos/2026')
-    expect(invokeCalls(mockInvoke, 'ftp:getRecentPaths')[0]).toEqual(['nas.local', 21])
+    expect(invokeCalls(mockInvoke, 'ftp:getRecentPaths')[0]).toEqual(['anonymous@nas.local:21'])
   })
 
   it('starts at the root when the server has no recent folder', async () => {
@@ -680,7 +704,7 @@ describe('reconnecting — start folder', () => {
   it('falls back to the root when the last folder is gone', async () => {
     mockIpc([NAS], {
       'ftp:getRecentPaths': recent('/gone'),
-      'ftp:list': (path) =>
+      'ftp:list': (_conn, path) =>
         Promise.resolve(
           path === '/gone'
             ? { success: false, error: 'No such directory' }
@@ -692,7 +716,9 @@ describe('reconnecting — start folder', () => {
 
     await user.dblClick(await screen.findByTitle(/Double-click to connect/))
 
-    await waitFor(() => expect(useFtpStore.getState().connectionStatus).not.toBe('error'))
+    await waitFor(() =>
+      expect(useFtpStore.getState().connections['anonymous@nas.local:21']?.status).not.toBe('error')
+    )
     await waitFor(() => expect(listedPaths()).toEqual(['/gone', '/']))
     expect(activeRemotePath()).toBe('/')
   })
@@ -717,6 +743,7 @@ describe('reconnecting — start folder', () => {
     await connectWith(user, 'nas.local/music')
     await waitFor(() => expect(useServerStore.getState().connecting).toBe(false))
     mockInvoke.mockClear()
+    backToForm()
 
     await user.click(screen.getByRole('button', { name: 'Connect' }))
 

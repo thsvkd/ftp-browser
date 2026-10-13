@@ -1,6 +1,9 @@
 import { ipcMain, BrowserWindow } from 'electron'
-import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
-import { FtpFileOperations } from '../ftp/FtpFileOperations'
+import {
+  sessionIpcError,
+  type ConnectionRegistry,
+  type FtpSession
+} from '../ftp/ConnectionRegistry'
 import { OperationManager } from '../operation/OperationManager'
 import { getDatabase } from '../db/database'
 import {
@@ -12,16 +15,18 @@ import {
   KEEP_PASSWORD,
   listServers,
   recordConnection,
+  recordRecentPath,
   saveServer,
   ServerSaveError
 } from '../db/servers'
 import { SavedPasswordUnreadableError, type PasswordVault } from '../db/passwordVault'
 import { ipcError } from '../utils/errorClassifier'
+import { parseConnKey } from '@shared/connKey'
 import type {
   FtpConnectPayload,
   FtpConnectionState,
   FtpListResult,
-  FtpMutationEvent,
+  RemoteChangedEvent,
   FtpServer,
   FtpServerInput,
   PasswordProtection,
@@ -36,25 +41,22 @@ function remoteBasename(remotePath: string): string {
   return parts.length > 0 ? parts[parts.length - 1] : remotePath
 }
 
-export interface FtpHandlersResult {
-  manager: FtpConnectionManager
-  fileOps: FtpFileOperations
-}
-
+/**
+ * 연결·저장 서버·원격 파일 채널. 원격 채널은 첫 인자가 연결 키(`conn`)이고 그 세션에서만 돈다(MC3).
+ * 그 키가 연결돼 있지 않으면 FTP_NOT_CONNECTED, 키 형식이 틀리면 'Invalid connection key.'를 값으로 돌려준다.
+ */
 export function registerFtpHandlers(
   win: BrowserWindow,
   operationManager: OperationManager,
-  passwords: PasswordVault
-): FtpHandlersResult {
-  const manager = new FtpConnectionManager()
-  const fileOps = new FtpFileOperations(manager)
-
-  manager.on('connectionStatus', (state: FtpConnectionState) => {
+  passwords: PasswordVault,
+  registry: ConnectionRegistry
+): void {
+  registry.on('connectionStatus', (state: FtpConnectionState) => {
     if (!win.isDestroyed()) win.webContents.send('ftp:connectionStatus', state)
   })
   // GUI가 시작한 것도 포함해 원격 변경을 알린다. 에이전트가 바꾼 폴더를 GUI가 새로 고친다(K5).
-  manager.on('mutation', (event: FtpMutationEvent) => {
-    if (!win.isDestroyed()) win.webContents.send('ftp:remoteChanged', event)
+  registry.on('mutation', (changed: RemoteChangedEvent) => {
+    if (!win.isDestroyed()) win.webContents.send('ftp:remoteChanged', changed)
   })
 
   ipcMain.handle(
@@ -80,13 +82,19 @@ export function registerFtpHandlers(
         const usesSaved = login.password === undefined && savedPasswordOf !== undefined
         const password = usesSaved ? await passwords.reveal(savedPasswordOf) : login.password
         const config: FtpConnectPayload = { ...login, password: password || 'anonymous@' }
-        const result = await manager.connect(config)
+        const result = await registry.connect(config)
         if (result.cancelled) {
           return { success: false, error: 'Connection cancelled' }
         }
         if (result.success) {
           // UPSERT server info (keyed on host+port)
           try {
+            // 이미 있던 연결을 다시 썼으면 이 페이로드로 로그인하지 않았다(MC5). 확인되지 않은
+            // 비밀번호·보안 설정은 저장하지 않고 그 주소의 연결 시각만 찍는다.
+            if (result.reused) {
+              recordConnection(getDatabase(), { ...config, id: undefined }, KEEP_PASSWORD)
+              return { success: true, data: undefined }
+            }
             // 갱신하는 서버의 저장된 비밀번호로 연결했으면 그대로 두고, 아니면 로그인한 비밀번호를
             // 암호화해 저장한다(E8). 암호화도 저장의 일부라 실패해도 연결은 성공이다.
             const write =
@@ -184,21 +192,25 @@ export function registerFtpHandlers(
     }
   })
 
-  ipcMain.handle(
-    'ftp:getRecentPaths',
-    (_event, host: string, port: number): IpcResult<RecentPath[]> => {
-      try {
-        return { success: true, data: getRecentPaths(getDatabase(), host, port) }
-      } catch (err) {
-        console.warn('[ftpHandlers] Failed to load recent paths:', err)
-        return { success: true, data: [] }
-      }
+  // 연결 여부와 무관하게 그 연결 키의 기록만 읽는다(same-host-accounts SH10)
+  ipcMain.handle('ftp:getRecentPaths', (_event, conn: unknown): IpcResult<RecentPath[]> => {
+    if (typeof conn !== 'string' || parseConnKey(conn) === null) {
+      return { success: false, error: 'Invalid connection key.' }
     }
-  )
-
-  ipcMain.handle('ftp:disconnect', async (): Promise<IpcResult<void>> => {
     try {
-      await manager.disconnect()
+      return { success: true, data: getRecentPaths(getDatabase(), conn) }
+    } catch (err) {
+      console.warn('[ftpHandlers] Failed to load recent paths:', err)
+      return { success: true, data: [] }
+    }
+  })
+
+  ipcMain.handle('ftp:disconnect', async (_event, conn: unknown): Promise<IpcResult<void>> => {
+    try {
+      if (typeof conn !== 'string' || parseConnKey(conn) === null) {
+        return { success: false, error: 'Invalid connection key.' }
+      }
+      await registry.disconnect(conn)
       return { success: true, data: undefined }
     } catch (err) {
       return ipcError(err)
@@ -207,35 +219,15 @@ export function registerFtpHandlers(
 
   ipcMain.handle(
     'ftp:list',
-    async (_event, remotePath: string): Promise<IpcResult<FtpListResult>> => {
+    async (_event, conn: unknown, remotePath: string): Promise<IpcResult<FtpListResult>> => {
       try {
-        const result = await manager.list(remotePath)
+        const session = registry.require(conn)
+        const result = await session.manager.list(remotePath)
 
-        // Save recent path for current server
-        if (manager.isConnected()) {
+        // 그 연결(사용자까지)의 최근 경로로 남긴다
+        if (session.manager.isConnected()) {
           try {
-            const db = getDatabase()
-            const host = manager.getHost()
-            const port = manager.getPort()
-            // 밀리초까지 찍는다. 다시 연결할 때 가장 최근 경로에서 여는데, 1초 안에
-            // 폴더를 여러 번 옮기면 초 단위로는 어느 것이 마지막인지 가릴 수 없다.
-            db.prepare(
-              `INSERT INTO server_recent_paths (server_host, server_port, path, last_visited)
-               VALUES (?, ?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now'))
-               ON CONFLICT(server_host, server_port, path)
-               DO UPDATE SET last_visited = excluded.last_visited`
-            ).run(host, port, remotePath)
-
-            // Keep only last 20 paths per server
-            db.prepare(
-              `DELETE FROM server_recent_paths
-               WHERE server_host = ? AND server_port = ?
-               AND id NOT IN (
-                 SELECT id FROM server_recent_paths
-                 WHERE server_host = ? AND server_port = ?
-                 ORDER BY last_visited DESC LIMIT 20
-               )`
-            ).run(host, port, host, port)
+            recordRecentPath(getDatabase(), session.key, remotePath)
           } catch (dbErr) {
             // Non-critical: listing still succeeds even if recent-path save fails
             console.warn('[ftpHandlers] Failed to save recent path:', dbErr)
@@ -244,27 +236,30 @@ export function registerFtpHandlers(
 
         return { success: true, data: result }
       } catch (err) {
-        return ipcError(err)
+        return sessionIpcError(err)
       }
     }
   )
 
-  ipcMain.handle('ftp:getStatus', (): IpcResult<FtpConnectionState> => {
-    return {
-      success: true,
-      data: {
-        status: manager.isConnected() ? 'connected' : 'disconnected',
-        host: manager.getHost()
-      }
-    }
+  // 알려진 모든 연결(끊긴 것 포함)
+  ipcMain.handle('ftp:getStatus', (): IpcResult<FtpConnectionState[]> => {
+    return { success: true, data: registry.states() }
   })
 
   ipcMain.handle(
     'ftp:deleteBatch',
-    async (_event, targets: DeleteTarget[]): Promise<IpcResult<void>> => {
+    async (_event, conn: unknown, targets: DeleteTarget[]): Promise<IpcResult<void>> => {
+      let session: FtpSession
+      try {
+        session = registry.require(conn)
+      } catch (err) {
+        return sessionIpcError(err)
+      }
+      const { fileOps } = session
       const items = {
         itemCount: targets.length,
-        itemName: targets.length === 1 ? remoteBasename(targets[0].path) : undefined
+        itemName: targets.length === 1 ? remoteBasename(targets[0].path) : undefined,
+        server: session.key
       }
       const job = operationManager.create('delete', items, 'files', targets.length)
 
@@ -304,24 +299,25 @@ export function registerFtpHandlers(
 
   ipcMain.handle(
     'ftp:rename',
-    async (_event, oldPath: string, newPath: string): Promise<IpcResult<void>> => {
+    async (_event, conn: unknown, oldPath: string, newPath: string): Promise<IpcResult<void>> => {
       try {
-        await fileOps.rename(oldPath, newPath)
+        await registry.require(conn).fileOps.rename(oldPath, newPath)
         return { success: true, data: undefined }
       } catch (err) {
-        return ipcError(err)
+        return sessionIpcError(err)
       }
     }
   )
 
-  ipcMain.handle('ftp:mkdir', async (_event, remotePath: string): Promise<IpcResult<void>> => {
-    try {
-      await fileOps.mkdir(remotePath)
-      return { success: true, data: undefined }
-    } catch (err) {
-      return ipcError(err)
+  ipcMain.handle(
+    'ftp:mkdir',
+    async (_event, conn: unknown, remotePath: string): Promise<IpcResult<void>> => {
+      try {
+        await registry.require(conn).fileOps.mkdir(remotePath)
+        return { success: true, data: undefined }
+      } catch (err) {
+        return sessionIpcError(err)
+      }
     }
-  })
-
-  return { manager, fileOps }
+  )
 }

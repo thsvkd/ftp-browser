@@ -1,4 +1,6 @@
-export type TransferDirection = 'upload' | 'download'
+import type { ConnKey } from '../connKey'
+
+export type TransferDirection = 'upload' | 'download' | 'relay'
 export type TransferStatus = 'pending' | 'active' | 'completed' | 'failed' | 'cancelled'
 
 export interface TransferEnqueueItem {
@@ -8,10 +10,25 @@ export interface TransferEnqueueItem {
   totalBytes: number
 }
 
+/** 서버 간 전송 한 파일(보내는 쪽 경로 → 받는 쪽 경로) */
+export interface RelayEnqueueItem {
+  sourcePath: string
+  remotePath: string
+  fileName: string
+  totalBytes: number
+}
+
 export interface TransferJob {
   id: string
   /** Shared by files enqueued as one multi-file/folder transfer. */
   batchId?: string
+  /** 이 작업이 도는 연결(multi-connection MC7). 큐가 만들 때 넣는다. */
+  server: ConnKey
+  /** 서버 간 전송(`relay`)만: 보내는 쪽 연결과 원격 경로(multi-connection MC7). relay는 `localPath`가 '' */
+  sourceServer?: ConnKey
+  sourcePath?: string
+  /** relay만: 최종 실패·취소 뒤 받는 쪽의 잘린 파일을 실제로 지웠다(MC26). 그 밖에는 없다 */
+  partialRemoved?: true
   direction: TransferDirection
   localPath: string
   remotePath: string
@@ -38,9 +55,11 @@ export type ConflictDecision = 'overwrite' | 'skip' | 'rename' | 'newer'
 
 export interface TransferSendRequest {
   direction: TransferDirection
-  /** 다운로드면 원격 경로, 업로드면 로컬 경로. 파일·폴더 섞여도 된다 */
+  /** relay만: 보내는 쪽 연결. 받는 쪽은 `transfer:send`의 conn 인자 */
+  sourceServer?: ConnKey
+  /** 다운로드·relay면 (보내는 쪽) 원격 경로, 업로드면 로컬 경로. 파일·폴더 섞여도 된다 */
   sources: string[]
-  /** 다운로드면 로컬 폴더, 업로드면 원격 폴더 */
+  /** 다운로드면 로컬 폴더, 업로드·relay면 (받는 쪽) 원격 폴더 */
   destDir: string
   /** 대상 경로 → 결정. 충돌마다 하나. 없으면 충돌이 있을 때 아무것도 넣지 않는다 */
   decisions?: Record<string, ConflictDecision>

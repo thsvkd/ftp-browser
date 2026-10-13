@@ -33,6 +33,10 @@ export interface MockFtpServerOptions {
   retrPace?: { bytes: number; ms: number }
   /** STOR 데이터를 ms마다 bytes씩만 읽는다(느린 업링크). 클라이언트 쪽 소켓 버퍼에 데이터가 쌓인다. */
   storPace?: { bytes: number; ms: number }
+  /** 처음 N번의 PASV에 425로 답한다(EPSV는 500). 연결 수 한도에 걸린 서버를 흉내 낸다. */
+  rejectPasv?: number
+  /** 처음 N번의 RETR에서 150과 첫 조각만 보낸 뒤 226 없이 제어 연결을 end()한다(FIN). 서버는 계속 듣는다. */
+  finDuringRetr?: number
 }
 
 export interface MockFtpServer {
@@ -73,6 +77,8 @@ export function startMockFtpServer(options: MockFtpServerOptions): Promise<MockF
   const pasvHost = options.pasvHost ?? '127,0,0,1'
   const sockets = new Set<net.Socket>()
   const dataServers = new Set<net.Server>()
+  let pasvRejectsLeft = options.rejectPasv ?? 0
+  let finsLeft = options.finDuringRetr ?? 0
 
   const track = (socket: net.Socket): void => {
     sockets.add(socket)
@@ -144,6 +150,16 @@ export function startMockFtpServer(options: MockFtpServerOptions): Promise<MockF
         dataServers.delete(current.server)
       }
       send('150 Opening data connection')
+
+      if (finsLeft > 0) {
+        // 첫 조각만 보내고 226 없이 제어 연결을 닫는다(FIN). 데이터 연결은 그 뒤에 닫는다.
+        finsLeft--
+        data.write(file.subarray(offset, Math.min(offset + CHUNK, file.length)))
+        io.end()
+        data.end()
+        closeData()
+        return
+      }
 
       // 클라이언트가 중간에 데이터 연결을 끊으면(분할 구간의 의도적 종료) 426으로 답한다.
       let pos = offset
@@ -277,6 +293,10 @@ export function startMockFtpServer(options: MockFtpServerOptions): Promise<MockF
         case 'EPSV':
           return send('500 EPSV not supported')
         case 'PASV':
+          if (pasvRejectsLeft > 0) {
+            pasvRejectsLeft--
+            return send("425 Too many connections. Can't open data channel.")
+          }
           return openPassive()
         case 'RETR':
           void retr()

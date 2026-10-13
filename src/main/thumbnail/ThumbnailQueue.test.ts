@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import type { Writable } from 'stream'
+import { FTPError } from 'basic-ftp'
 import { ThumbnailQueue, type ThumbnailRequest } from './ThumbnailQueue'
 import { generateCacheKey } from '../utils/cacheKey'
+import { MAIN_VIEWER } from '@shared/connKey'
 import type { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import type { ThumbnailGenerator } from './ThumbnailGenerator'
 import type { CacheManager } from './CacheManager'
 
 const HOST = 'example.org'
 const PORT = 21
+const CONN = `me@${HOST}:${PORT}`
 const MODIFIED_AT = '2024-05-01T10:20:30.000Z'
 
 function remotePath(i: number): string {
@@ -25,7 +28,7 @@ function req(i: number, priority = 0): ThumbnailRequest {
 }
 
 function keyOf(i: number): string {
-  return generateCacheKey(HOST, PORT, remotePath(i), 1000, MODIFIED_AT)
+  return generateCacheKey(CONN, remotePath(i), 1000, MODIFIED_AT)
 }
 
 function range(from: number, to: number): number[] {
@@ -51,19 +54,24 @@ interface Harness {
   /** 다운로드가 시작된 원격 경로(시작 순서) */
   started: string[]
   counts: { created: number; closed: number }
+  runOnMainClient: ReturnType<typeof vi.fn>
   onReady: ReturnType<typeof vi.fn>
   onError: ReturnType<typeof vi.fn>
   drain: () => Promise<void>
   finish: (path: string) => Promise<void>
-  fail: (path: string) => Promise<void>
+  fail: (path: string, err?: Error) => Promise<void>
   releaseConnect: () => void
 }
 
-function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
+function createHarness(
+  options: { holdFirstConnect?: boolean; connectError?: Error } = {}
+): Harness {
   const started: string[] = []
   const downloads = new Map<string, Download>()
   const counts = { created: 0, closed: 0 }
   let releaseConnect: (() => void) | null = null
+  /** 메인 클라이언트 작업은 실제처럼 하나씩 직렬로 돈다 */
+  let mainChain: Promise<unknown> = Promise.resolve()
 
   function makeClient(): { downloadTo: unknown; close: () => void } {
     const pending = new Set<(err: Error) => void>()
@@ -97,8 +105,10 @@ function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
   const ftp = {
     getHost: () => HOST,
     getPort: () => PORT,
+    getConnKey: () => CONN,
     createSecondaryClient: vi.fn(async () => {
       counts.created++
+      if (options.connectError) throw options.connectError
       if (options.holdFirstConnect && counts.created === 1) {
         await new Promise<void>((resolve) => {
           releaseConnect = resolve
@@ -106,7 +116,11 @@ function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
       }
       return makeClient()
     }),
-    runOnMainClient: vi.fn()
+    runOnMainClient: vi.fn((task: (client: unknown) => Promise<unknown>) => {
+      const run = mainChain.then(() => task(makeClient()))
+      mainChain = run.catch(() => undefined)
+      return run
+    })
   }
   const generator = {
     getFormat: vi.fn(async () => 'jpeg'),
@@ -143,8 +157,11 @@ function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
     await flush()
   }
 
-  async function fail(path: string): Promise<void> {
-    downloads.get(path)?.fail(new Error('550 Permission denied'))
+  async function fail(
+    path: string,
+    err: Error = new Error('550 Permission denied')
+  ): Promise<void> {
+    downloads.get(path)?.fail(err)
     await flush()
   }
 
@@ -152,6 +169,7 @@ function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
     queue,
     started,
     counts,
+    runOnMainClient: ftp.runOnMainClient,
     onReady,
     onError,
     drain,
@@ -163,7 +181,7 @@ function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
 
 let current: Harness | null = null
 
-function harness(options?: { holdFirstConnect?: boolean }): Harness {
+function harness(options?: { holdFirstConnect?: boolean; connectError?: Error }): Harness {
   current = createHarness(options)
   return current
 }
@@ -178,11 +196,17 @@ describe('ThumbnailQueue.requestBatch — viewport batch replaces the previous o
   it('serves the new viewport next and never starts the old viewport’s waiting items', async () => {
     // covers: Test-262
     const h = harness()
-    h.queue.requestBatch(range(0, 50).map((i) => req(i)))
+    h.queue.requestBatch(
+      MAIN_VIEWER,
+      range(0, 50).map((i) => req(i))
+    )
     await flush()
     expect(h.started).toEqual([0, 1, 2].map(remotePath))
 
-    h.queue.requestBatch(range(500, 530).map((i) => req(i)))
+    h.queue.requestBatch(
+      MAIN_VIEWER,
+      range(500, 530).map((i) => req(i))
+    )
     await h.drain()
 
     expect(h.started.slice(3)).toEqual(range(500, 530).map(remotePath))
@@ -192,10 +216,16 @@ describe('ThumbnailQueue.requestBatch — viewport batch replaces the previous o
   it('lets in-flight downloads of the old viewport finish and reuses their connections', async () => {
     // covers: Test-263
     const h = harness()
-    h.queue.requestBatch(range(0, 50).map((i) => req(i)))
+    h.queue.requestBatch(
+      MAIN_VIEWER,
+      range(0, 50).map((i) => req(i))
+    )
     await flush()
 
-    h.queue.requestBatch(range(500, 530).map((i) => req(i)))
+    h.queue.requestBatch(
+      MAIN_VIEWER,
+      range(500, 530).map((i) => req(i))
+    )
     for (const i of [0, 1, 2]) await h.finish(remotePath(i))
 
     const readyKeys = h.onReady.mock.calls.map((call) => call[0].cacheKey)
@@ -209,7 +239,7 @@ describe('ThumbnailQueue.requestBatch — viewport batch replaces the previous o
   it('starts the lowest priority first whatever order the batch arrives in', async () => {
     // covers: Test-264
     const h = harness()
-    h.queue.requestBatch([req(10, 2), req(11, 1), req(12, 0), req(13, 0), req(14, 1)])
+    h.queue.requestBatch(MAIN_VIEWER, [req(10, 2), req(11, 1), req(12, 0), req(13, 0), req(14, 1)])
     await h.drain()
 
     expect(h.started).toEqual([12, 13, 11, 14, 10].map(remotePath))
@@ -218,11 +248,11 @@ describe('ThumbnailQueue.requestBatch — viewport batch replaces the previous o
   it('re-sorts an item still waiting from the previous batch by its new priority', async () => {
     // covers: Test-265
     const h = harness()
-    h.queue.requestBatch([req(0), req(1), req(2), req(3, 1), req(4, 3)])
+    h.queue.requestBatch(MAIN_VIEWER, [req(0), req(1), req(2), req(3, 1), req(4, 3)])
     await flush()
 
     // 3은 이번 창에 없어 버려지고, 4는 priority 3 → 0으로 당겨져 새 항목 5(priority 1)보다 먼저 시작한다.
-    h.queue.requestBatch([req(0), req(1), req(2), req(5, 1), req(4, 0)])
+    h.queue.requestBatch(MAIN_VIEWER, [req(0), req(1), req(2), req(5, 1), req(4, 0)])
     await h.drain()
 
     expect(h.started).toEqual([0, 1, 2, 4, 5].map(remotePath))
@@ -231,11 +261,11 @@ describe('ThumbnailQueue.requestBatch — viewport batch replaces the previous o
   it('keeps single request() items that the batch does not contain', async () => {
     // covers: Test-266
     const h = harness()
-    h.queue.requestBatch([req(0), req(1), req(2)])
+    h.queue.requestBatch(MAIN_VIEWER, [req(0), req(1), req(2)])
     await flush()
     h.queue.request(req(900, 1))
 
-    h.queue.requestBatch([req(10), req(11)])
+    h.queue.requestBatch(MAIN_VIEWER, [req(10), req(11)])
     await h.drain()
 
     expect(h.started).toEqual([0, 1, 2, 10, 11, 900].map(remotePath))
@@ -244,11 +274,14 @@ describe('ThumbnailQueue.requestBatch — viewport batch replaces the previous o
   it('downloads an item again when a later batch brings it back', async () => {
     // covers: Test-267
     const h = harness()
-    h.queue.requestBatch(range(0, 6).map((i) => req(i)))
+    h.queue.requestBatch(
+      MAIN_VIEWER,
+      range(0, 6).map((i) => req(i))
+    )
     await flush()
 
-    h.queue.requestBatch([req(10)])
-    h.queue.requestBatch([req(10), req(3)])
+    h.queue.requestBatch(MAIN_VIEWER, [req(10)])
+    h.queue.requestBatch(MAIN_VIEWER, [req(10), req(3)])
     await h.drain()
 
     expect(h.started).toEqual([0, 1, 2, 10, 3].map(remotePath))
@@ -257,10 +290,13 @@ describe('ThumbnailQueue.requestBatch — viewport batch replaces the previous o
   it('drops every waiting item of the previous batch on an empty batch', async () => {
     // covers: Test-268
     const h = harness()
-    h.queue.requestBatch(range(0, 6).map((i) => req(i)))
+    h.queue.requestBatch(
+      MAIN_VIEWER,
+      range(0, 6).map((i) => req(i))
+    )
     await flush()
 
-    h.queue.requestBatch([])
+    h.queue.requestBatch(MAIN_VIEWER, [])
     await h.drain()
 
     expect(h.started).toEqual([0, 1, 2].map(remotePath))
@@ -274,7 +310,7 @@ describe('ThumbnailQueue.cancelAll — cancelled work leaves nothing behind', ()
     h.queue.request(req(0))
     await flush()
 
-    h.queue.cancelAll()
+    h.queue.cancelAll(MAIN_VIEWER)
     h.releaseConnect()
     await flush()
 
@@ -296,7 +332,7 @@ describe('ThumbnailQueue.cancelAll — cancelled work leaves nothing behind', ()
     expect(h.started).toEqual([remotePath(0)])
 
     // 디렉터리 이동: 취소 직후 새 폴더의 요청이 들어온다(예전에는 이 요청이 전역 aborted를 되돌렸다).
-    h.queue.cancelAll()
+    h.queue.cancelAll(MAIN_VIEWER)
     h.queue.request(req(1))
     await flush()
 
@@ -314,12 +350,136 @@ describe('ThumbnailQueue.cancelAll — cancelled work leaves nothing behind', ()
     h.queue.request(req(0))
     await flush()
 
-    h.queue.cancelAll()
+    h.queue.cancelAll(MAIN_VIEWER)
     h.queue.request(req(0))
     h.releaseConnect()
     await h.drain()
 
     expect(h.started).toEqual([remotePath(0)])
     expect(h.onReady.mock.calls.map((call) => call[0].cacheKey)).toEqual([keyOf(0)])
+  })
+})
+
+describe('ThumbnailQueue — batches are scoped per viewer', () => {
+  it('replaces only the same viewer’s previous batch and starts shared items at the smallest priority', async () => {
+    // covers: Test-995
+    const h = harness()
+    // 동시 3개 슬롯을 진행 중 항목으로 채워 이후 항목이 모두 대기하게 한다.
+    h.queue.requestBatch('left', [req(100), req(101), req(102)])
+    await flush()
+    expect(h.started).toEqual([100, 101, 102].map(remotePath))
+
+    h.queue.requestBatch('left', [req(0, 0), req(1, 1)])
+    // right의 첫 배치는 left의 대기 항목 0·1을 버리지 않는다. 1은 두 뷰어가 원해 priority 0으로 당겨진다.
+    h.queue.requestBatch('right', [req(2, 3), req(1, 0)])
+    // left의 두 번째 배치는 0만 버린다(1은 right도 원한다). 1의 priority는 min(5, 0)이다.
+    h.queue.requestBatch('left', [req(1, 5), req(3, 1)])
+    await h.drain()
+
+    expect(h.started.slice(3)).toEqual([1, 3, 2].map(remotePath))
+    expect(h.started).not.toContain(remotePath(0))
+  })
+
+  it('does not drop what another viewer’s earlier batch still wants when a viewer sends its first batch', async () => {
+    // covers: Test-995
+    const h = harness()
+    h.queue.requestBatch('left', [req(100), req(101), req(102)])
+    await flush()
+
+    h.queue.requestBatch('left', [req(0), req(1)])
+    h.queue.requestBatch('right', [req(2)])
+    await h.drain()
+
+    expect(h.started.slice(3)).toEqual([0, 1, 2].map(remotePath))
+  })
+
+  it('cancels only what the cancelling viewer alone wanted and leaves the others’ work and connections', async () => {
+    // covers: Test-996
+    const h = harness()
+    h.queue.requestBatch('right', [req(10), req(11), req(12), req(13)])
+    await flush()
+    h.queue.requestBatch('left', [req(0), req(1), req(11, 0)])
+
+    h.queue.cancelAll('left')
+    expect(h.counts.closed).toBe(0)
+
+    // right의 진행 중 다운로드는 onReady로 끝나고, 대기 중이던 13이 이어서 시작한다. left만 원하던 0·1은 없다.
+    await h.finish(remotePath(10))
+    expect(h.onReady.mock.calls.map((call) => call[0].cacheKey)).toEqual([keyOf(10)])
+    await h.drain()
+    expect(h.started).toEqual([10, 11, 12, 13].map(remotePath))
+    expect(h.counts.closed).toBe(0)
+  })
+
+  it('cancels everything, single requests and connections included, when no other viewer’s batch remains', async () => {
+    // covers: Test-996
+    const h = harness()
+    h.queue.requestBatch('right', [req(10), req(11), req(12), req(13)])
+    await flush()
+    h.queue.request(req(900))
+    expect(h.started).toEqual([10, 11, 12].map(remotePath))
+
+    h.queue.cancelAll('right')
+    expect(h.counts.closed).toBe(3)
+    await h.drain()
+
+    expect(h.started).toEqual([10, 11, 12].map(remotePath))
+    expect(h.onError).not.toHaveBeenCalled()
+  })
+})
+
+describe('ThumbnailQueue — transient FTP errors are not retried automatically', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('reports a 425 once and downloads the file again only when it is requested again', async () => {
+    // covers: Test-1138
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const h = harness()
+    h.queue.request(req(0))
+    await flush()
+    await h.fail(
+      remotePath(0),
+      new FTPError({ code: 425, message: "425 Too many connections. Can't open data channel." })
+    )
+
+    expect(h.onError).toHaveBeenCalledTimes(1)
+    expect(h.onError.mock.calls[0][0]).toBe(keyOf(0))
+    await vi.advanceTimersByTimeAsync(10_000)
+    await flush()
+    expect(h.started.filter((path) => path === remotePath(0))).toHaveLength(1)
+
+    // 사용자의 재시도 아이콘: 같은 요청을 다시 넣으면 다시 내려받는다
+    h.queue.request(req(0))
+    await flush()
+    expect(h.started.filter((path) => path === remotePath(0))).toHaveLength(2)
+  })
+
+  it('caps refused secondary logins at the queue concurrency and serves every thumbnail through the main client after a 421', async () => {
+    // covers: Test-1139
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const h = harness({
+      connectError: new FTPError({
+        code: 421,
+        message: '421 Too many connections. Service temporarily unavailable.'
+      })
+    })
+    // 한꺼번에 들어온 항목은 첫 거절을 알기 전에 각자 로그인하므로(동시 수까지) 상한은 동시 수다.
+    // 큐가 보조 연결을 포기한 뒤에는 시간이 지나도 다시 로그인하지 않는다.
+    h.queue.requestBatch(
+      MAIN_VIEWER,
+      range(0, 5).map((i) => req(i))
+    )
+    await flush()
+    const afterGivingUp = h.counts.created
+    await vi.advanceTimersByTimeAsync(10_000)
+    await h.drain()
+
+    expect(afterGivingUp).toBeLessThanOrEqual(3)
+    expect(h.counts.created).toBe(afterGivingUp)
+    expect(h.runOnMainClient).toHaveBeenCalledTimes(5)
+    expect(h.onReady).toHaveBeenCalledTimes(5)
+    expect(h.onError).not.toHaveBeenCalled()
   })
 })

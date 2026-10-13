@@ -5,7 +5,7 @@
 /*
  * Shelf 토큰(랩 V2). 컴포넌트는 `bg-[var(--sf)]`처럼 쓴다. 테마는 OS를 따른다(H3).
  * --bg 창 바탕 · --sf 면 · --sb 사이드바 · --bd/--bd2 테두리 · --tx 글자 · --mu 흐린 글자 · --hv 올림
- * --selin 포커스 없는 선택 · --sh/--shw/--shx/--shink 선반 · --dg/--dgw 위험 · --ok 성공
+ * --sh/--shw/--shx/--shink 선반 · --dg/--dgw 위험 · --ok 성공
  * --sk/--sk2 스켈레톤 · --tile 타일 바탕 · --local 내 PC 배지 · --ac/--acw/--acx 강조
  */
 :root {
@@ -17,7 +17,6 @@
   --tx: #13201e;
   --mu: #5e6b69;
   --hv: rgba(19, 32, 30, 0.05);
-  --selin: #e2e7e5;
   --sh: #e9a23b;
   --shw: #fdf1dc;
   --shx: #7a4a00;
@@ -34,6 +33,16 @@
   --acw: #ddf2f1;
   --acx: #ffffff;
   --spring: 600ms;
+  --sidebar-left-min: 180px;
+  --sidebar-left-default: 220px;
+  --sidebar-left-max: 360px;
+  --sidebar-right-min: 240px;
+  --sidebar-right-default: 288px;
+  --sidebar-right-max: 480px;
+  --handle-hit: 6px;
+  --handle-line: 2px;
+  --handle-hover-delay: 300ms;
+  --pane-anim: 200ms;
   color-scheme: light dark;
 }
 
@@ -47,7 +56,6 @@
     --tx: #e4ecea;
     --mu: #8fa19e;
     --hv: rgba(228, 236, 234, 0.05);
-    --selin: #232c2b;
     --sh: #f2b95a;
     --shw: #33270f;
     --shx: #f2b95a;
@@ -119,11 +127,6 @@
 }
 .tnum {
   font-variant-numeric: tabular-nums;
-}
-.ring-focus {
-  box-shadow:
-    0 0 0 2px var(--sf),
-    0 0 0 4px var(--ac);
 }
 .scroll {
   scrollbar-width: thin;
@@ -230,7 +233,150 @@
   transform: scale(1.025);
 }
 
+/* 접이식 사이드바(docs/handoff/collapsible-sidebars.md). 폭 전환은 접힘이 바뀔 때만(data-animate). */
+.side-pane {
+  overflow: hidden;
+}
+.side-pane[data-side='left'] {
+  max-width: var(--sidebar-left-max);
+}
+.side-pane[data-side='right'] {
+  max-width: var(--sidebar-right-max);
+}
+.side-pane[data-animate='true'] {
+  transition: width var(--pane-anim) ease-out;
+}
+.pane-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 20;
+  width: var(--handle-hit);
+  cursor: col-resize;
+  touch-action: none;
+}
+.pane-handle[data-side='left'] {
+  right: calc(var(--handle-hit) / -2);
+}
+.pane-handle[data-side='right'] {
+  left: calc(var(--handle-hit) / -2);
+}
+.pane-handle[data-side='left'][data-collapsed='true'] {
+  right: auto;
+  left: 0;
+}
+.pane-handle[data-side='right'][data-collapsed='true'] {
+  left: auto;
+  right: 0;
+}
+/* 접힌 오른쪽 끌기 영역(창 가장자리 6px)이 본문 스크롤바를 가리지 않게 본문 오른쪽에 여백을 둔다(D17). */
+main[data-region='content']:has(+ div > #rail-pane[data-collapsed='true']) {
+  padding-right: var(--handle-hit);
+}
+.pane-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc((var(--handle-hit) - var(--handle-line)) / 2);
+  width: var(--handle-line);
+  background: var(--ac);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.pane-handle:hover::after {
+  opacity: 1;
+  transition-delay: var(--handle-hover-delay);
+}
+.pane-handle:focus-visible::after,
+.pane-handle[data-dragging='true']::after {
+  opacity: 1;
+  transition-delay: 0s;
+}
+.pane-handle:focus-visible {
+  outline: none;
+}
+
+/* 분할 보기(split-view P8·F13): 1px 구분선 + 히트 영역, 사이드 패널 핸들과 같은 토큰. */
+.split-divider {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 1px;
+  width: 1px;
+  background: var(--bd);
+  cursor: col-resize;
+  touch-action: none;
+}
+.split-divider::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc((1px - var(--handle-hit)) / 2);
+  width: var(--handle-hit);
+}
+.split-divider::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc((1px - var(--handle-line)) / 2);
+  width: var(--handle-line);
+  background: var(--ac);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.split-divider:hover::after {
+  opacity: 1;
+  transition-delay: var(--handle-hover-delay);
+}
+.split-divider[data-dragging='true']::after {
+  opacity: 1;
+  transition-delay: 0s;
+}
+/* 비활성 패널의 경로 막대 글자는 흐리게 */
+.path-bar[data-dim='true'] * {
+  color: var(--mu);
+}
+/* 새 분할: 원래 패널은 100%에서, 새 패널은 0에서 비율로 자리 잡는다 */
+[data-split-root] > section[data-entering='grow'] {
+  animation: pane-enter-grow var(--pane-anim) ease-out;
+}
+[data-split-root] > section[data-entering='in'] {
+  animation: pane-enter-in var(--pane-anim) ease-out;
+}
+@keyframes pane-enter-grow {
+  from {
+    flex-basis: 100%;
+  }
+}
+@keyframes pane-enter-in {
+  from {
+    flex-basis: 0%;
+  }
+}
+/* 탭 드래그 분할 오버레이(split-view F6·F7): 놓일 곳을 칠한다. 나타남·좌우 전환 시간은 인라인 스타일 */
+.split-overlay-wash {
+  background: color-mix(in srgb, var(--ac) 14%, transparent);
+  box-shadow: inset 0 0 0 2px var(--ac);
+}
+@keyframes split-overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .side-pane[data-animate='true'] {
+    transition: none;
+  }
+  [data-split-root] > section[data-entering] {
+    animation: none;
+  }
+  .split-overlay-zone {
+    animation: none !important;
+    transition: none !important;
+  }
   *,
   *::before,
   *::after {
@@ -256,7 +402,10 @@
     outline: 2px solid Highlight;
     outline-offset: -2px;
   }
-  .ring-focus {
-    outline: 2px solid CanvasText;
+  .pane-handle::after {
+    background: Highlight;
+  }
+  .pane-handle:focus-visible::after {
+    background: CanvasText;
   }
 }

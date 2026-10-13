@@ -16,14 +16,14 @@ interface Loaded {
 
 /** 큰 미리 보기: 원격은 `ftp:downloadPreview`, 로컬은 `local:preview`(CSP 때문에 data URL, D22). */
 function usePreview(entry: ExplorerEntry): Loaded | null {
-  const key = `${entry.side}|${entry.path}|${entry.size}|${entry.modifiedAt}`
+  const key = `${entry.side}|${entry.server ?? ''}|${entry.path}|${entry.size}|${entry.modifiedAt}`
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   useEffect(() => {
     if (!entry.isImage) return
     let live = true
     const request =
       entry.side === 'remote'
-        ? window.api.invoke<IpcResult<string>>('ftp:downloadPreview', {
+        ? window.api.invoke<IpcResult<string>>('ftp:downloadPreview', entry.server, {
             remotePath: entry.path,
             fileSize: entry.size,
             modifiedAt: entry.modifiedAt
@@ -45,7 +45,7 @@ function usePreview(entry: ExplorerEntry): Loaded | null {
     return () => {
       live = false
     }
-  }, [key, entry.isImage, entry.side, entry.path, entry.size, entry.modifiedAt])
+  }, [key, entry.isImage, entry.side, entry.server, entry.path, entry.size, entry.modifiedAt])
   return loaded?.key === key ? loaded : null
 }
 

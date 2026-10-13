@@ -107,7 +107,7 @@ export function EntryThumb({
 }: EntryThumbProps): React.JSX.Element {
   if (entry.type === 'directory' && folderPreview)
     return entry.side === 'remote' ? (
-      <RemoteFolderThumbnail folderPath={entry.path} size={size} />
+      <RemoteFolderThumbnail server={entry.server ?? ''} folderPath={entry.path} size={size} />
     ) : (
       <LocalFolderThumbnail folderPath={entry.path} size={size} />
     )

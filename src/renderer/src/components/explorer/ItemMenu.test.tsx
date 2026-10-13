@@ -1,5 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushSync } from 'react-dom'
+import { createRoot, type Root } from 'react-dom/client'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { en } from '@renderer/i18n/locales/en'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
@@ -14,6 +16,7 @@ import {
   remoteLoc,
   renderExplorer,
   server,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from './explorerTestHarness'
@@ -145,12 +148,49 @@ describe('ItemMenu — contents', () => {
     expect(labels.length).toBeLessThanOrEqual(9)
     const other = within(sub).getByRole('menuitem', { name: /other:21 › x/ })
     expect(other).toHaveProperty('disabled', true)
-    expect(other.getAttribute('title')).toBe(en['send.invalidOtherServer'])
+    expect(other.getAttribute('title')).toBe(en['send.invalidNotConnected'])
 
     fireEvent.click(within(sub).getByRole('menuitem', { name: /Downloads/ }))
     await act(async () => undefined)
     expect(invokeCalls(h.invoke, 'transfer:send')).toEqual([
-      [{ direction: 'download', sources: [`${DIR}/a.jpg`], destDir: 'C:\\Users\\me\\Downloads' }]
+      [
+        server(),
+        { direction: 'download', sources: [`${DIR}/a.jpg`], destDir: 'C:\\Users\\me\\Downloads' }
+      ]
+    ])
+  })
+
+  it("offers another connected server's tab as a copy target and a disconnected server's tab disabled", async () => {
+    // covers: Test-1026
+    const B = 'you@b.example:2121'
+    const C = 'kim@c.example:21'
+    await photos()
+    act(() => {
+      setConnection(B, 'connected')
+      setConnection(C, 'disconnected')
+      const tabs = useTabsStore.getState()
+      tabs.openTab({ side: 'remote', path: '/in', server: B }, false)
+      tabs.openTab({ side: 'remote', path: '/out', server: C }, false)
+    })
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['1'], skipped: [], conflicts: [], totalBytes: 1024 }
+    })
+    fireEvent.contextMenu(option('a.jpg'))
+    fireEvent.click(item(en['menu.sendTo']))
+    const sub = menus()[1]
+
+    const offline = within(sub).getByRole('menuitem', { name: /c\.example:21 › out/ })
+    expect(offline).toHaveProperty('disabled', true)
+    expect(offline.getAttribute('title')).toBe(en['send.invalidNotConnected'])
+    const other = within(sub).getByRole('menuitem', { name: /b\.example:2121 › in/ })
+    expect(other).toHaveProperty('disabled', false)
+
+    // 고르면 받는 쪽 연결로 서버 간 복사를 보낸다
+    fireEvent.click(other)
+    await act(async () => undefined)
+    expect(invokeCalls(h.invoke, 'transfer:send')).toEqual([
+      [B, { direction: 'relay', sourceServer: server(), sources: [`${DIR}/a.jpg`], destDir: '/in' }]
     ])
   })
 
@@ -282,5 +322,76 @@ describe('ItemMenu — dismiss triggers (migrated)', () => {
     } finally {
       box.remove()
     }
+  })
+})
+
+// ---------- 메뉴를 연 click이 그 메뉴를 닫지 않는다(explorer-menu-and-focus M1) ----------
+
+describe('ItemMenu — the opening click', () => {
+  // act 밖의 네이티브 이벤트: 메뉴가 이벤트 전파 도중에 마운트되는 실제 순서를 만든다(§8 함정 1).
+  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  let saved: boolean | undefined
+  let opened: { root: Root; hosts: HTMLElement[] } | null = null
+  const closeAll = (): void => {
+    opened?.root.unmount()
+    opened?.hosts.forEach((el) => el.remove())
+    opened = null
+  }
+  beforeEach(() => {
+    h = setupExplorer()
+    saved = env.IS_REACT_ACT_ENVIRONMENT
+    env.IS_REACT_ACT_ENVIRONMENT = false
+  })
+  afterEach(() => {
+    closeAll()
+    env.IS_REACT_ACT_ENVIRONMENT = saved
+  })
+
+  const nativeClick = (el: Element, type = 'click'): void => {
+    el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }))
+  }
+  /** 버튼의 네이티브 click 리스너가 그 click 안에서 메뉴를 다른 루트에 동기로 그린다. */
+  function openByClick(onClose: () => void): void {
+    const host = document.createElement('div')
+    const button = document.createElement('button')
+    host.appendChild(button)
+    const menuHost = document.createElement('div')
+    document.body.append(host, menuHost)
+    const root = createRoot(menuHost)
+    opened = { root, hosts: [host, menuHost] }
+    host.addEventListener('click', () =>
+      flushSync(() =>
+        root.render(<ItemMenu x={10} y={10} label="menu" items={ITEM_MENU} onClose={onClose} />)
+      )
+    )
+    nativeClick(button)
+  }
+
+  it('does not close on the very click that opened it', () => {
+    // covers: Test-846
+    const onClose = vi.fn<() => void>()
+    openByClick(onClose)
+    expect(screen.getByRole('menu')).toBeTruthy()
+    expect(onClose).toHaveBeenCalledTimes(0)
+  })
+
+  it('still closes on later outside clicks and right clicks, not on inside ones', () => {
+    // covers: Test-847
+    const onClose = vi.fn<() => void>()
+    openByClick(onClose)
+    expect(onClose).toHaveBeenCalledTimes(0)
+    nativeClick(screen.getByRole('menu'))
+    expect(onClose).toHaveBeenCalledTimes(0)
+    nativeClick(document.body)
+    expect(onClose).toHaveBeenCalledTimes(1)
+
+    closeAll()
+    const again = vi.fn<() => void>()
+    openByClick(again)
+    expect(again).toHaveBeenCalledTimes(0)
+    nativeClick(screen.getByRole('menu'), 'contextmenu')
+    expect(again).toHaveBeenCalledTimes(0)
+    nativeClick(document.body, 'contextmenu')
+    expect(again).toHaveBeenCalledTimes(1)
   })
 })

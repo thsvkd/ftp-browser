@@ -33,6 +33,37 @@ export class LocalFileSystem {
     return { path: dirPath, entries }
   }
 
+  /**
+   * 경로들의 파일 정보. 절대 경로만 받고(`path.resolve`로 정규화), 입력 순서를 지키며, 읽을 수 없는
+   * 것(없음·권한·상대 경로·문자열 아님)은 던지지 않고 뺀다. 심볼릭 링크는 가리키는 대상 기준이다.
+   */
+  async statEntries(paths: unknown[]): Promise<LocalFileEntry[]> {
+    // 병렬로 stat하되 Promise.all이 입력 순서를 지킨다
+    const results = await Promise.all(
+      paths.map(async (input): Promise<LocalFileEntry | null> => {
+        if (typeof input !== 'string' || !path.isAbsolute(input)) return null
+        try {
+          const fullPath = path.resolve(input)
+          const stat = await fs.stat(fullPath)
+          const isDirectory = stat.isDirectory()
+          const name = path.basename(fullPath) || fullPath
+          return {
+            name,
+            path: fullPath,
+            type: isDirectory ? 'directory' : 'file',
+            size: stat.size,
+            modifiedAt: stat.mtime.toISOString(),
+            isImage: !isDirectory && isImageFile(name)
+          }
+        } catch {
+          // 읽을 수 없는 경로는 조용히 뺀다(호출자가 결과 길이로 빠진 수를 안다)
+          return null
+        }
+      })
+    )
+    return results.filter((entry): entry is LocalFileEntry => entry !== null)
+  }
+
   getHomePath(): string {
     return app.getPath('home')
   }

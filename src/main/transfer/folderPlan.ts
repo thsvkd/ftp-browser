@@ -191,6 +191,15 @@ export async function planDownload(
   return plan
 }
 
+/** 원격 폴더에 놓을 파일 하나. `localPath`는 출처(업로드면 로컬 경로, 서버 간 전송이면 보내는 쪽 원격 경로)다. */
+interface IncomingFile {
+  localPath: string
+  /** 대상 폴더 아래 상대 경로('/' 구분) */
+  rel: string
+  size: number
+  modifiedAt: string
+}
+
 /**
  * 로컬 파일·폴더(재귀)를 원격 폴더에 올릴 계획. drag-and-drop 업로드처럼 펼치고, 사이 폴더(dirs)는 큐가 만든다.
  * 원격에 있는 파일은 충돌이다. 빈 로컬 폴더는 올리지 않는다(D31).
@@ -200,7 +209,7 @@ export async function planUpload(
   localPaths: string[],
   remoteDir: string
 ): Promise<FolderPlan> {
-  const files: Array<{ localPath: string; rel: string; size: number; modifiedAt: string }> = []
+  const files: IncomingFile[] = []
   for (const p of outermost(localPaths, path.sep)) {
     const st = await stat(p).catch((err: NodeJS.ErrnoException) => {
       throw err.code === 'ENOENT' ? new AgentError('NOT_FOUND', `Not found: ${p}`) : err
@@ -214,7 +223,50 @@ export async function planUpload(
       files.push({ localPath: f.abs, rel, size: f.size, modifiedAt: f.modifiedAt })
     }
   }
+  return planIntoRemote(deps, files, remoteDir)
+}
 
+/**
+ * 보내는 쪽 원격 파일·폴더(재귀)를 받는 쪽 원격 폴더에 놓을 계획(서버 간 전송, MC23). 보내는 쪽은 `src.list`로만
+ * 펼치고(심볼릭 링크는 건너뛴다, 빈 폴더는 만들지 않는다), 받는 쪽 확인은 업로드와 같다(`planIntoRemote`).
+ * 항목의 `localPath` 자리에 보내는 쪽 경로가 든다.
+ */
+export async function planRelay(
+  src: Pick<PlanDeps, 'list'>,
+  dst: Pick<PlanDeps, 'list'>,
+  remotePaths: string[],
+  remoteDir: string
+): Promise<FolderPlan> {
+  const plan = newPlan('relay')
+  const files: IncomingFile[] = []
+  const collect = async (items: RemoteItem[], prefix: string): Promise<void> => {
+    for (const { remotePath, entry } of items) {
+      const rel = prefix + entry.name
+      if (entry.type === 'symbolic-link') {
+        plan.skipped.push({ path: remotePath, reason: 'symbolic link' })
+      } else if (entry.type === 'directory') {
+        await collect(await children(src, remotePath), `${rel}/`)
+      } else {
+        files.push({ localPath: remotePath, rel, size: entry.size, modifiedAt: entry.modifiedAt })
+      }
+    }
+  }
+  // 루트에는 이름이 없다: 그 내용을 remoteDir에 바로 놓는다(planDownload와 같다)
+  const sources = outermost(remotePaths)
+  await collect(sources[0] === '/' ? await children(src, '/') : await findRemote(src, sources), '')
+  return planIntoRemote(dst, files, remoteDir, plan)
+}
+
+/**
+ * 파일들을 원격 폴더 `remoteDir` 아래 `rel` 자리에 놓을 계획(업로드·서버 간 전송이 함께 쓴다). 원격에 있는 파일은
+ * 충돌이고, 같은 이름 폴더·폴더 자리의 파일·같은 대상 경로 중복은 건너뛴다. `plan`이 있으면 거기에 이어 쓴다.
+ */
+async function planIntoRemote(
+  deps: Pick<PlanDeps, 'list'>,
+  files: IncomingFile[],
+  remoteDir: string,
+  plan: FolderPlan = newPlan('upload')
+): Promise<FolderPlan> {
   // 원격 폴더의 내용(이름 → 항목). 없는 폴더는 비어 있고, 파일 등이 그 자리에 있으면 null이다.
   // 있는 폴더만 읽는다: 읽지 못하면 덮어쓸지 알 수 없으므로 그 오류로 멈춘다.
   const folders = new Map<string, Promise<Map<string, FtpFileEntry> | null>>()
@@ -233,7 +285,6 @@ export async function planUpload(
     return folders.get(dir)!
   }
 
-  const plan = newPlan('upload')
   const seen = new Set<string>()
   for (const { localPath, rel, size, modifiedAt } of files) {
     const remotePath = posix.join(remoteDir, rel)

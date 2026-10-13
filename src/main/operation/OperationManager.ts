@@ -25,7 +25,7 @@ export class OperationManager extends EventEmitter {
 
   create(
     kind: OperationKind,
-    items: Pick<OperationJob, 'itemCount' | 'itemName'>,
+    items: Pick<OperationJob, 'itemCount' | 'itemName' | 'server'>,
     unit: OperationUnit,
     total: number
   ): OperationJob {

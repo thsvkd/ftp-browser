@@ -27,6 +27,9 @@ function conflict(name: string, overrides: Partial<TransferConflict> = {}): Tran
   }
 }
 
+/** 원격 쪽 연결 */
+const K = 'me@nas.local:21'
+
 const REQUEST: TransferSendRequest = {
   direction: 'download',
   sources: ['/photos'],
@@ -58,7 +61,7 @@ function answerConflicts(conflicts: TransferConflict[]): void {
 async function startSend(): Promise<{ pending: Promise<TransferSendResult | null> }> {
   let pending!: Promise<TransferSendResult | null>
   act(() => {
-    pending = useTransferStore.getState().send(REQUEST, {
+    pending = useTransferStore.getState().send(K, REQUEST, {
       label: 'photos',
       to: { side: 'local', path: 'C:\\dl' }
     })
@@ -70,7 +73,8 @@ async function startSend(): Promise<{ pending: Promise<TransferSendResult | null
 function secondDecisions(): Record<string, string> | undefined {
   const sends = invokeCalls(mockInvoke, 'transfer:send')
   expect(sends).toHaveLength(2)
-  return (sends[1][0] as TransferSendRequest).decisions
+  expect(sends.map(([conn]) => conn)).toEqual([K, K])
+  return (sends[1][1] as TransferSendRequest).decisions
 }
 
 beforeEach(() => {
@@ -194,15 +198,21 @@ describe('ConflictSheet', () => {
     const moved = { target: '/dst/a.jpg', source: '/src/a.jpg', folder: false }
     let answer!: Promise<Record<string, string> | null>
     act(() => {
-      answer = useTransferStore.getState().askConflicts('move', [conflict('a.jpg', moved)])
+      answer = useTransferStore
+        .getState()
+        .askConflicts('move', [conflict('a.jpg', moved)], { server: K })
     })
     await screen.findByRole('alertdialog')
-    // 원격 이동: 있던 것도 보내는 것도 원격 파일이다(원격 썸네일 요청 두 건).
+    // 원격 이동: 있던 것도 보내는 것도 그 연결의 원격 파일이다(원격 썸네일 요청 두 건).
     expect(
-      invokeCalls(mockInvoke, 'thumbnail:request').map(
-        ([r]) => (r as { remotePath: string }).remotePath
-      )
-    ).toEqual(['/dst/a.jpg', '/src/a.jpg'])
+      invokeCalls(mockInvoke, 'thumbnail:request').map(([conn, r]) => [
+        conn,
+        (r as { remotePath: string }).remotePath
+      ])
+    ).toEqual([
+      [K, '/dst/a.jpg'],
+      [K, '/src/a.jpg']
+    ])
     await userEvent.setup().click(screen.getByRole('button', { name: 'Overwrite' }))
     await expect(answer).resolves.toEqual({ '/dst/a.jpg': 'overwrite' })
 
@@ -221,5 +231,70 @@ describe('ConflictSheet', () => {
     ).toEqual(['Cancel', 'Keep both (rename)', 'Skip'])
     await userEvent.setup().click(within(sheet).getByRole('button', { name: 'Skip' }))
     await expect(answer).resolves.toEqual({ 'C:\\dst\\sub': 'skip' })
+  })
+
+  it('shows a relay conflict as two remote cards on their own servers and resends with the decisions', async () => {
+    // covers: Test-1037
+    const A = 'me@a.example:21'
+    const B = 'you@b.example:2121'
+    render(<ConflictSheet />)
+    const thumbs = (): unknown[][] =>
+      invokeCalls(mockInvoke, 'thumbnail:request').map(([conn, r]) => [
+        conn,
+        (r as { remotePath: string }).remotePath
+      ])
+    // 시트가 뜰 때까지 기다린다. 결정 전에는 끝나지 않는 보내기를 감싸서 돌려준다
+    const ask = async (
+      conn: string,
+      request: TransferSendRequest,
+      c: TransferConflict
+    ): Promise<{ pending: Promise<TransferSendResult | null> }> => {
+      answerConflicts([c])
+      let pending!: Promise<TransferSendResult | null>
+      act(() => {
+        pending = useTransferStore.getState().send(conn, request, {
+          label: 'a.jpg',
+          to: { side: 'remote', path: '/photos', server: B }
+        })
+      })
+      await screen.findByRole('alertdialog')
+      return { pending }
+    }
+
+    const relay: TransferSendRequest = {
+      direction: 'relay',
+      sourceServer: A,
+      sources: ['/photos'],
+      destDir: '/photos'
+    }
+    const same = conflict('a.jpg', { target: '/photos/a.jpg', source: '/photos/a.jpg' })
+    const { pending } = await ask(B, relay, same)
+    // 있던 것은 받는 쪽(B), 보내는 것은 보내는 쪽(A)의 원격 파일이다. 로컬로 뒤집히지 않는다
+    expect(thumbs()).toEqual([
+      [B, '/photos/a.jpg'],
+      [A, '/photos/a.jpg']
+    ])
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Overwrite' }))
+    await expect(pending).resolves.toEqual(QUEUED)
+    expect(invokeCalls(mockInvoke, 'transfer:send')).toEqual([
+      [B, relay],
+      [B, { ...relay, decisions: { '/photos/a.jpg': 'overwrite' } }]
+    ])
+
+    // 다운로드의 보내는 것과 업로드의 있던 것은 그 연결의 원격 파일이다
+    mockInvoke.mockClear()
+    await ask(A, REQUEST, conflict('a.jpg'))
+    expect(thumbs()).toEqual([[A, '/photos/a.jpg']])
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Skip' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+
+    mockInvoke.mockClear()
+    const upload: TransferSendRequest = {
+      direction: 'upload',
+      sources: ['C:\\pics\\a.jpg'],
+      destDir: '/up'
+    }
+    await ask(B, upload, conflict('a.jpg', { target: '/up/a.jpg', source: 'C:\\pics\\a.jpg' }))
+    expect(thumbs()).toEqual([[B, '/up/a.jpg']])
   })
 })

@@ -1,9 +1,7 @@
 import { ipcMain, nativeImage, app } from 'electron'
 import { dirname, join, resolve } from 'path'
 import { mkdirSync, existsSync, rmSync } from 'fs'
-import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
-import { ipcError } from '../utils/errorClassifier'
-import { ErrorCode } from '@shared/types/ipc'
+import { sessionIpcError, type ConnectionRegistry } from '../ftp/ConnectionRegistry'
 import { toLocalFileName, uniqueLocalNames } from '@shared/entryName'
 import type { IpcResult } from '@shared/types/ipc'
 
@@ -21,7 +19,7 @@ function cannotSave(file: DragFile): IpcResult<void> {
   return { success: false, error: `Cannot save "${file.fileName}" as a local file.` }
 }
 
-export function registerDragHandlers(manager: FtpConnectionManager): void {
+export function registerDragHandlers(registry: ConnectionRegistry): void {
   const tempDir = join(app.getPath('temp'), 'ftp-browser-drag')
 
   // 이전 임시 파일 정리
@@ -34,15 +32,9 @@ export function registerDragHandlers(manager: FtpConnectionManager): void {
 
   ipcMain.handle(
     'drag:start',
-    async (event, payload: DragStartPayload): Promise<IpcResult<void>> => {
+    async (event, conn: unknown, payload: DragStartPayload): Promise<IpcResult<void>> => {
       try {
-        if (!manager.isConnected()) {
-          return {
-            success: false,
-            error: 'Not connected to FTP server.',
-            code: ErrorCode.FTP_NOT_CONNECTED
-          }
-        }
+        const { manager } = registry.require(conn)
 
         // 원격 이름은 서버가 정한다. 로컬에서 쓸 수 있는 이름으로 고치고, 고친 결과가 임시 폴더
         // 바로 아래가 아니면 하나라도 받기 전에 거부한다 — 일부만 받은 채 끌기를 시작하지 않는다.
@@ -90,7 +82,7 @@ export function registerDragHandlers(manager: FtpConnectionManager): void {
 
         return { success: true, data: undefined }
       } catch (err) {
-        return ipcError(err)
+        return sessionIpcError(err)
       }
     }
   )

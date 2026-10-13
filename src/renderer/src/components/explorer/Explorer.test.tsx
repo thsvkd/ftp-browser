@@ -6,22 +6,29 @@ import {
   createEvent,
   fireEvent,
   render,
+  renderHook,
   screen,
   within
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
-import { optId } from '@renderer/lib/explorerLayout'
+import { ROW, optId } from '@renderer/lib/explorerLayout'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
+import { EMPTY_FILTER } from '@renderer/lib/fileCategories'
 import { gridLayout } from '@renderer/lib/gridGeometry'
+import { useTabEntries } from '@renderer/hooks/useTabEntries'
 import { useConfirmStore } from '@renderer/stores/useConfirmStore'
+import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { useGalleryStore } from '@renderer/stores/useGalleryStore'
+import { useListingStore } from '@renderer/stores/useListingStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
-import { useTabsStore } from '@renderer/stores/useTabsStore'
+import { useActiveTab, useTabsStore } from '@renderer/stores/useTabsStore'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
+import { connKey, MAIN_VIEWER } from '@shared/connKey'
 import type { FtpServer } from '@shared/types/ftp'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
 import { useDnd } from './dnd'
@@ -37,9 +44,11 @@ import {
   renderExplorer,
   selectedNames,
   server,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from './explorerTestHarness'
+import { Explorer } from './Explorer'
 
 vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() })
@@ -73,7 +82,7 @@ async function remoteFiles(names: string[], patch = {}): Promise<void> {
 }
 
 describe('Explorer — keyboard selection', () => {
-  it('moves the focus cursor with arrows, extends with Shift, moves focus only with Ctrl, Ctrl+A, Esc', async () => {
+  it('moves the selection with arrows, extends with Shift, Ctrl+A, Esc', async () => {
     // covers: Test-791
     const names = Array.from({ length: 14 }, (_, i) => `f${String(i).padStart(2, '0')}.txt`)
     await remoteFiles(names)
@@ -85,10 +94,6 @@ describe('Explorer — keyboard selection', () => {
     expect(selectedNames()).toEqual([names[cols]])
     key('ArrowLeft', { shiftKey: true })
     expect(selectedNames()).toEqual([names[cols - 1], names[cols]])
-    key('ArrowLeft', { ctrlKey: true })
-    // Ctrl은 포커스만 옮긴다: 선택은 그대로, 활성 항목은 옮겨 간다.
-    expect(selectedNames()).toEqual([names[cols - 1], names[cols]])
-    expect(listbox().getAttribute('aria-activedescendant')).toBe(optId(`${DIR}/${names[cols - 2]}`))
 
     key('a', { ctrlKey: true })
     expect(selectedNames()).toEqual(names)
@@ -128,7 +133,7 @@ describe('Explorer — keyboard selection', () => {
     act(() => useTabsStore.getState().goBack())
     await flush()
 
-    const lists = (): number => invokeCalls(h.invoke, 'ftp:list').filter((c) => c[0] === DIR).length
+    const lists = (): number => invokeCalls(h.invoke, 'ftp:list').filter((c) => c[1] === DIR).length
     const before = lists()
     key('F5')
     key('r', { ctrlKey: true })
@@ -145,7 +150,7 @@ describe('Explorer — keyboard selection', () => {
     act(() => useTabsStore.getState().navigate(remoteLoc('/other')))
     await act(async () => request?.resolve(true))
     expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toEqual([
-      [[{ path: `${DIR}/a.jpg`, isDirectory: false }]]
+      [server(), [{ path: `${DIR}/a.jpg`, isDirectory: false }]]
     ])
   })
 
@@ -188,10 +193,13 @@ describe('Explorer — lightbox', () => {
       key(' ')
       await flush()
       const dialog = screen.getByRole('dialog', { name: 'Preview: a.jpg' })
-      expect(invokeCalls(h.invoke, channel)[0][0]).toEqual(
+      expect(invokeCalls(h.invoke, channel)[0]).toEqual(
         side === 'remote'
-          ? { remotePath: `${DIR}/a.jpg`, fileSize: 1024, modifiedAt: expect.any(String) }
-          : `${LDIR}\\a.jpg`
+          ? [
+              server(),
+              { remotePath: `${DIR}/a.jpg`, fileSize: 1024, modifiedAt: expect.any(String) }
+            ]
+          : [`${LDIR}\\a.jpg`]
       )
 
       fireEvent.keyDown(dialog, { key: 'ArrowRight' })
@@ -207,7 +215,7 @@ describe('Explorer — lightbox', () => {
 })
 
 describe('Explorer — shelf and type-ahead', () => {
-  it('puts the selection (or the focused item) on the shelf with Shift+S, and plain s types ahead', async () => {
+  it('puts the selection on the shelf with Shift+S (nothing without one), and plain s types ahead', async () => {
     // covers: Test-794
     await remoteFiles(['apple.jpg', 'tree.jpg', '나무.jpg'])
     const shelf = (): string[] =>
@@ -220,12 +228,11 @@ describe('Explorer — shelf and type-ahead', () => {
     key('S', { shiftKey: true })
     expect(shelf()).toEqual(['apple.jpg', 'tree.jpg'])
 
-    // 선택이 없으면 포커스 항목을 담는다.
+    // 선택이 없으면 아무것도 담지 않는다(선택 = 포커스).
     key('Escape')
     expect(selectedNames()).toEqual([])
-    act(() => useTabsStore.getState().patchTab(activeTab().id, { focus: pathOf('나무.jpg') }))
     key('S', { shiftKey: true })
-    expect(shelf()).toEqual(['apple.jpg', 'tree.jpg', '나무.jpg'])
+    expect(shelf()).toEqual(['apple.jpg', 'tree.jpg'])
 
     act(() => useShelfStore.getState().clear())
     key('Home')
@@ -269,7 +276,7 @@ describe('Explorer — loading, errors and empty states', () => {
   it('classifies a permission error with retry and up, and keeps the last listing when the connection drops', async () => {
     // covers: Test-797
     h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
-    h.handlers['ftp:list'] = (path) =>
+    h.handlers['ftp:list'] = (_conn, path) =>
       path === `${DIR}/locked`
         ? { success: false, error: '550 Permission denied', code: 'FTP_PERMISSION_DENIED' }
         : { success: true, data: { path, entries: [ftp('a.jpg')] } }
@@ -285,7 +292,7 @@ describe('Explorer — loading, errors and empty states', () => {
     expect(activeTab().loc.path).toBe(DIR)
     expect(option('a.jpg')).toBeTruthy()
 
-    act(() => useFtpStore.setState({ connectionStatus: 'error' }))
+    act(() => setConnection(server(), 'error'))
     expect(option('a.jpg').closest('.grayscale-\\[\\.4\\]')).not.toBeNull()
     expect(screen.getByText(en['explorer.staleBanner'])).toBeTruthy()
     expect(screen.getByRole('button', { name: en['explorer.reconnect'] })).toBeTruthy()
@@ -310,11 +317,86 @@ describe('Explorer — loading, errors and empty states', () => {
 
     act(() => useTabsStore.getState().navigate(remoteLoc('/docs')))
     await flush()
-    act(() => useTabsStore.getState().patchTab(activeTab().id, { photosOnly: true }))
-    expect(screen.getByText('1 other file hidden by the photo filter')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: en['explorer.showAll'] }))
-    expect(activeTab().photosOnly).toBe(false)
+    act(() =>
+      useTabsStore
+        .getState()
+        .patchTab(activeTab().id, { filter: { ...EMPTY_FILTER, categories: ['image'] } })
+    )
+    expect(screen.getByText('No “Images” files in this folder.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: en['filter.clearType'] }))
+    expect(activeTab().filter).toEqual(EMPTY_FILTER)
     expect(option('b.txt')).toBeTruthy()
+  })
+
+  it('names the cause in the empty panel: the type filter first, then find, then an empty folder', async () => {
+    // covers: Test-946
+    h = setupExplorer({
+      remote: {
+        '/empty': [],
+        '/docs': [ftp('b.txt')],
+        '/mixed': [ftp('b.txt'), ftp('c.txt')],
+        '/withdir': [ftp('b.txt'), ftp('sub', { dir: true })]
+      }
+    })
+    const setFilter = (categories: string[]): void =>
+      act(() =>
+        useTabsStore
+          .getState()
+          .patchTab(activeTab().id, { filter: { ...EMPTY_FILTER, categories } })
+      )
+    const go = async (path: string): Promise<void> => {
+      act(() => useTabsStore.getState().navigate(remoteLoc(path)))
+      await flush()
+    }
+    await renderExplorer(remoteLoc('/empty'))
+    // (1) 정말 빈 폴더
+    expect(screen.getByText(en['explorer.empty'])).toBeTruthy()
+
+    // (2) 찾기만 걸려 일치 없음: 찾기 분기의 버튼은 `Clear filter`다(막대의 X와 패널, 둘 다 찾기를 지운다).
+    await go('/mixed')
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'zzz' }))
+    expect(screen.getByText('No items match "zzz"')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: en['filter.clear'] })).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: en['filter.clearType'] })).toBeNull()
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: '' }))
+
+    // (3) 필터로 파일이 모두 가려졌다: 필터 문구와 전용 버튼, 두 카테고리면 라벨이 둘.
+    await go('/docs')
+    setFilter(['image'])
+    expect(screen.getByText('No “Images” files in this folder.')).toBeTruthy()
+    setFilter(['image', 'video'])
+    expect(screen.getByText('No “Images, Videos” files in this folder.')).toBeTruthy()
+    setFilter(['image'])
+    fireEvent.click(screen.getByRole('button', { name: en['filter.clearType'] }))
+    expect(activeTab().filter).toEqual(EMPTY_FILTER)
+    expect(option('b.txt')).toBeTruthy()
+
+    // (4) 찾기 `b`는 일치하는데 필터가 막았다: 필터 문구가 먼저다. 두 버튼은 이름이 다르다.
+    await go('/mixed')
+    act(() =>
+      useTabsStore.getState().patchTab(activeTab().id, {
+        query: 'b',
+        filter: { ...EMPTY_FILTER, categories: ['image'] }
+      })
+    )
+    expect(screen.getByText('No “Images” files in this folder.')).toBeTruthy()
+    expect(screen.queryByText(/No items match/)).toBeNull()
+    expect(screen.getAllByRole('button', { name: en['filter.clear'] })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: en['filter.clearType'] })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: en['filter.clear'] }))
+    expect(activeTab().query).toBe('')
+    expect(activeTab().filter.categories).toEqual(['image'])
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'b' }))
+    fireEvent.click(screen.getByRole('button', { name: en['filter.clearType'] }))
+    expect(activeTab().query).toBe('b')
+    expect(activeTab().filter).toEqual(EMPTY_FILTER)
+
+    // (5) 하위 폴더가 있으면 파일이 모두 가려져도 패널 없이 폴더만 보인다.
+    await go('/withdir')
+    setFilter(['image'])
+    expect(option('sub')).toBeTruthy()
+    expect(screen.queryByText(/files in this folder/)).toBeNull()
+    expect(screen.queryByText(en['explorer.empty'])).toBeNull()
   })
 })
 
@@ -331,7 +413,9 @@ describe('Explorer — inline rename and new folder', () => {
       fireEvent.keyDown(input, { key: 'Enter' })
       await flush()
       expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
-      expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([[`${DIR}/a.txt`, `${DIR}/c.txt`]])
+      expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([
+        [server(), `${DIR}/a.txt`, `${DIR}/c.txt`]
+      ])
       expect(document.activeElement).toBe(listbox())
     }
   )
@@ -361,7 +445,9 @@ describe('Explorer — inline rename and new folder', () => {
       key('N', { ctrlKey: true, shiftKey: true })
       await flush()
       await flush()
-      expect(invokeCalls(h.invoke, channel)).toEqual([[made]])
+      expect(invokeCalls(h.invoke, channel)).toEqual([
+        side === 'remote' ? [server(), made] : [made]
+      ])
       expect(within(option('New folder (1)')).getByRole('textbox')).toBeTruthy()
     }
   )
@@ -396,8 +482,8 @@ describe('Explorer — drag and drop', () => {
     fireEvent.drop(option('sub'), { dataTransfer: dt() })
     await flush()
     expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([
-      [`${DIR}/a.jpg`, `${DIR}/sub/a.jpg`],
-      [`${DIR}/b.jpg`, `${DIR}/sub/b.jpg`]
+      [server(), `${DIR}/a.jpg`, `${DIR}/sub/a.jpg`],
+      [server(), `${DIR}/b.jpg`, `${DIR}/sub/b.jpg`]
     ])
 
     // 빈 곳에 놓으면 현재 폴더로 보낸다(다른 곳에서 끌어 온 항목).
@@ -412,7 +498,11 @@ describe('Explorer — drag and drop', () => {
     expect(screen.getByText('Move 1 to photos')).toBeTruthy()
     fireEvent.drop(listbox(), { dataTransfer: dt() })
     await flush()
-    expect(invokeCalls(h.invoke, 'ftp:rename').at(-1)).toEqual(['/elsewhere/x.jpg', `${DIR}/x.jpg`])
+    expect(invokeCalls(h.invoke, 'ftp:rename').at(-1)).toEqual([
+      server(),
+      '/elsewhere/x.jpg',
+      `${DIR}/x.jpg`
+    ])
 
     // 폴더를 자기 위에 놓을 수는 없다. 고스트는 "+ folder contents"를 붙인다.
     fireEvent.dragStart(option('sub'), { dataTransfer: dt() })
@@ -446,7 +536,7 @@ describe('Explorer — drag and drop', () => {
     await flush()
     expect(invokeCalls(h.invoke, channel)[0]).toEqual(
       side === 'remote'
-        ? [{ direction: 'upload', sources: ['C:\\in\\x.jpg'], destDir: DIR }]
+        ? [server(), { direction: 'upload', sources: ['C:\\in\\x.jpg'], destDir: DIR }]
         : [['C:\\in\\x.jpg'], LDIR, ['x.jpg']]
     )
   })
@@ -478,32 +568,208 @@ describe('Explorer — drag and drop', () => {
 })
 
 describe('Explorer — remote tabs and the connection', () => {
-  it('shows a connect panel for another server without listing, and the not-connected pane when offline', async () => {
-    // covers: Test-823
+  it("lists each connected server's tab and gives an unconnected server its own panel", async () => {
+    // covers: Test-1018
+    const B = 'bob@b.lan:2121'
+    const C = 'carol@c.lan:21'
     h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
-    await renderExplorer({ side: 'remote', path: DIR, server: 'kim@nas:2121' })
-    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([])
-    expect(screen.getByText('This tab is a location on kim@nas:2121')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Connect to kim@nas:2121' }))
-    expect(useServerStore.getState().address).toBe('kim@nas:2121')
+    setConnection(B, 'connected')
+    h.handlers['ftp:list'] = (conn, path) =>
+      conn === B
+        ? { success: true, data: { path, entries: [ftp('b.jpg')] } }
+        : { success: false, error: 'wrong server', code: 'FTP_NOT_CONNECTED' }
+    await renderExplorer({ side: 'remote', path: DIR, server: B })
+    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([[B, DIR]])
+    expect(option('b.jpg')).toBeTruthy()
 
-    cleanup()
-    h.restore()
-    h = setupExplorer({ connected: false })
+    // 연결 안 된 C: 그 서버 전용 패널과 연결 버튼(누르면 C 연결 흐름)
+    act(() => useTabsStore.getState().navigate({ side: 'remote', path: DIR, server: C }))
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([[B, DIR]])
+    expect(screen.getByText(`Not connected to ${C}`)).toBeTruthy()
+    const connect = screen.getByRole('button', { name: `Connect to ${C}` }) as HTMLButtonElement
+    expect(connect.disabled).toBe(false)
+    fireEvent.click(connect)
+    expect(useServerStore.getState().address).toBe(C)
+
+    // C가 연결 중: 버튼 비활성 + 회전 표시
+    act(() => setConnection(C, 'connecting'))
+    const busy = screen.getByRole('button', { name: `Connect to ${C}` }) as HTMLButtonElement
+    expect(busy.disabled).toBe(true)
+    expect(busy.querySelector('.spin')).toBeTruthy()
+
+    // C가 끊김: 지난 목록이 있으면 흐리게 + 배너, 없으면 끊김 패널
+    act(() => {
+      useListingStore
+        .getState()
+        .put({ side: 'remote', path: DIR, server: C }, [fromFtpEntry(ftp('c.jpg'), DIR, C)])
+      setConnection(C, 'error')
+    })
+    expect(option('c.jpg').closest('.grayscale-\\[\\.4\\]')).not.toBeNull()
+    expect(screen.getByText(en['explorer.staleBanner'])).toBeTruthy()
+    act(() => useTabsStore.getState().navigate({ side: 'remote', path: '/never', server: C }))
+    expect(screen.getByText(en['listError.lost'])).toBeTruthy()
+    expect(screen.queryByText(/This tab is a location on/)).toBeNull()
+  })
+
+  it('auto-connects a saved server with a saved password once each time its tab is shown', async () => {
+    // covers: Test-1019
+    const C = 'carol@c.lan:21'
     const saved: FtpServer = {
-      id: 1,
+      id: 7,
       name: 'Studio',
-      host: 'nas',
+      host: 'c.lan',
       port: 21,
-      username: '',
+      username: 'carol',
       secure: false,
-      hasPassword: false
+      hasPassword: true
     }
-    useServerStore.setState({ servers: [saved], connecting: false })
-    await renderExplorer({ side: 'remote', path: DIR, server: 'kim@nas:2121' })
-    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([])
-    expect(screen.getByText(en['explorer.notConnected'])).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Studio/ })).toBeTruthy()
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    const draft = { ...useServerStore.getState().draft, host: 'toolbar.lan' }
+    useServerStore.setState({ servers: [saved], draft, connecting: false })
+    const connects = (): unknown[][] => invokeCalls(h.invoke, 'ftp:connect')
+    const home = useTabsStore.getState().openTab(localLoc(LDIR))
+    h.local[LDIR] = []
+    render(<Explorer />)
+    await flush()
+    const show = async (id: string): Promise<void> => {
+      act(() => useTabsStore.getState().activate(id))
+      await flush()
+    }
+
+    const tabC = useTabsStore.getState().openTab({ side: 'remote', path: DIR, server: C }, false)
+    await show(tabC)
+    expect(connects()).toHaveLength(1)
+    expect(connects()[0][0]).toMatchObject({
+      id: 7,
+      host: 'c.lan',
+      port: 21,
+      user: 'carol',
+      savedPasswordOf: 7
+    })
+    expect(useServerStore.getState().draft).toBe(draft)
+    expect(useServerStore.getState().connecting).toBe(false)
+    expect(useFtpStore.getState().connections[C].status).toBe('connected')
+
+    // 보는 중에 C를 끊으면 다시 잇지 않는다. 다른 탭에 갔다 돌아오면 한 번 더
+    await act(() => useFtpStore.getState().disconnect(C))
+    await flush()
+    expect(connects()).toHaveLength(1)
+    await show(home)
+    await show(tabC)
+    expect(connects()).toHaveLength(2)
+
+    // 실패한 뒤 같은 탭에 머무는 동안은 다시 부르지 않는다
+    h.handlers['ftp:connect'] = () => ({ success: false, error: '530 Login incorrect' })
+    await act(() => useFtpStore.getState().disconnect(C))
+    await show(home)
+    await show(tabC)
+    expect(connects()).toHaveLength(3)
+    act(() => setConnection(C, 'disconnected'))
+    await flush()
+    expect(connects()).toHaveLength(3)
+
+    // 끊김(error)으로는 부르지 않는다
+    act(() => setConnection(C, 'error'))
+    await show(home)
+    await show(tabC)
+    expect(connects()).toHaveLength(3)
+
+    // 저장 비밀번호가 없으면 0회
+    useServerStore.setState({ servers: [{ ...saved, hasPassword: false }] })
+    act(() => setConnection(C, 'disconnected'))
+    await show(home)
+    await show(tabC)
+    expect(connects()).toHaveLength(3)
+  })
+
+  it('does not auto-connect a server that is already connecting', async () => {
+    // covers: Test-1034
+    const C = 'carol@c.lan:21'
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    useServerStore.setState({
+      servers: [
+        {
+          id: 7,
+          name: 'Studio',
+          host: 'c.lan',
+          port: 21,
+          username: 'carol',
+          secure: false,
+          hasPassword: true
+        }
+      ],
+      connecting: false
+    })
+    setConnection(C, 'connecting')
+    await renderExplorer({ side: 'remote', path: DIR, server: C })
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toEqual([])
+    act(() => setConnection(C, 'connected'))
+    await flush()
+    act(() => setConnection(C, 'disconnected'))
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toEqual([])
+  })
+
+  it("runs every remote action of a tab on that tab's connection", async () => {
+    // covers: Test-1028
+    const B = 'bob@b.lan:2121'
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg'), ftp('b.jpg')] } })
+    setConnection(B, 'connected')
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: true,
+      data: 'data:image/png;base64,AA=='
+    })
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['1'], skipped: [], conflicts: [], totalBytes: 1 }
+    })
+    await renderExplorer({ side: 'remote', path: DIR, server: B })
+    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([[B, DIR]])
+
+    // 라이트박스
+    listbox().focus()
+    key('Home')
+    key(' ')
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:downloadPreview')[0][0]).toBe(B)
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    await flush()
+
+    // 이름 바꾸기
+    key('Home')
+    key('F2')
+    const input = within(option('a.jpg')).getByRole('textbox', { name: en['menu.newName'] })
+    fireEvent.change(input, { target: { value: 'c.jpg' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([[B, `${DIR}/a.jpg`, `${DIR}/c.jpg`]])
+
+    // 삭제
+    fireEvent.click(option('b.jpg'))
+    key('Delete')
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toEqual([
+      [B, [{ path: `${DIR}/b.jpg`, isDirectory: false }]]
+    ])
+
+    // OS 파일 드롭은 그 서버로 업로드
+    h.api.getPathForFile.mockReturnValue('C:\\in\\x.jpg')
+    const file = new File(['x'], 'x.jpg')
+    const drop = { types: ['Files'], files: [file], dropEffect: '' }
+    fireEvent.drop(listbox(), { dataTransfer: drop })
+    await flush()
+    expect(invokeCalls(h.invoke, 'transfer:send')).toEqual([
+      [B, { direction: 'upload', sources: ['C:\\in\\x.jpg'], destDir: DIR }]
+    ])
+
+    // 새 폴더
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:mkdir')).toEqual([[B, `${DIR}/New folder`]])
+    expect(
+      [...h.invoke.mock.calls].filter((c) => String(c[0]).startsWith('ftp:') && c[1] === server())
+    ).toEqual([])
   })
 
   it('restores the scroll position of a tab after switching away and back', async () => {
@@ -704,7 +970,9 @@ describe('Explorer — remote rename (migrated)', () => {
   it('renames through ftp:rename with the old and the new path', async () => {
     // covers: Test-89
     await renameTo('b.txt')
-    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([[`${DIR}/a.txt`, `${DIR}/b.txt`]])
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([
+      [server(), `${DIR}/a.txt`, `${DIR}/b.txt`]
+    ])
   })
 
   it('rejects a name with a path separator before IPC', async () => {
@@ -863,5 +1131,532 @@ describe('Explorer — local rename and delete (migrated)', () => {
     expect(toastError).toHaveBeenCalledWith('Failed to delete', {
       description: 'channel not allowed'
     })
+  })
+})
+
+// ---------- 선택 = 포커스(explorer-menu-and-focus F1~F10) ----------
+
+const activeId = (): string | null => listbox().getAttribute('aria-activedescendant')
+const selectionOf = (): { sel: string[]; anchor: string | null; focus: string | null } => {
+  const { sel, anchor, focus } = activeTab()
+  return { sel, anchor, focus }
+}
+const CLEARED = { sel: [], anchor: null, focus: null }
+const noneSelected = (): boolean =>
+  screen.getAllByRole('option').every((o) => o.getAttribute('aria-selected') === 'false')
+/** 항목 밖(안쪽 컨테이너)의 왼쪽 mousedown. 마퀴의 window 리스너도 mouseup으로 걷는다. */
+const pressEmpty = (init: MouseEventInit = {}): void => {
+  fireEvent.mouseDown(option('a.txt').parentElement as HTMLElement, init)
+  fireEvent.mouseUp(window)
+}
+const FIVE = ['a.txt', 'b.txt', 'c.txt', 'd.txt', 'e.txt']
+const p = (name: string): string => `${DIR}/${name}`
+
+describe('Explorer — selection is the focus', () => {
+  it('releases the focus with the selection even when the delete fails', async () => {
+    // covers: Test-856
+    h = setupExplorer({
+      local: { [LDIR]: [local(LDIR, 'a.txt'), local(LDIR, 'd', { dir: true })] }
+    })
+    await renderExplorer(localLoc(LDIR))
+    const failThenCheck = async (): Promise<void> => {
+      fireEvent.click(option('d'))
+      expect(activeId()).toBe(optId(pathOf('d')))
+      key('Delete')
+      await flush()
+      expect(toastError).toHaveBeenCalledWith('Failed to delete', expect.anything())
+      expect(selectionOf()).toEqual(CLEARED)
+      expect(option('d')).toBeTruthy()
+      expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+      expect(noneSelected()).toBe(true)
+      key('Enter')
+      await flush()
+      expect(activeTab().loc.path).toBe(LDIR)
+      key(' ')
+      expect(screen.queryByRole('dialog')).toBeNull()
+      key('F2')
+      expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    }
+    h.handlers['local:deleteBatch'] = () => ({ success: false, error: 'permission denied' })
+    await failThenCheck()
+    toastError.mockClear()
+    h.handlers['local:deleteBatch'] = () => Promise.reject(new Error('channel not allowed'))
+    await failThenCheck()
+  })
+
+  it.each(['grid', 'list'] as const)(
+    'clears the selection, focus and anchor on a plain click on empty space (%s)',
+    async (view) => {
+      // covers: Test-857
+      await remoteFiles(FIVE, {
+        view,
+        sel: [p('b.txt'), p('c.txt')],
+        anchor: p('b.txt'),
+        focus: p('c.txt')
+      })
+      expect(activeId()).toBe(optId(p('c.txt')))
+      fireEvent.mouseDown(option('e.txt').parentElement as HTMLElement)
+      fireEvent.mouseUp(window)
+      expect(selectionOf()).toEqual(CLEARED)
+      expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+      expect(noneSelected()).toBe(true)
+    }
+  )
+
+  it('focuses the last marquee item, keeps the selection on modified empty presses and clears on a plain one', async () => {
+    // covers: Test-858
+    await remoteFiles(FIVE, { view: 'list' })
+    const box = option('a.txt').parentElement as HTMLElement
+    fireEvent.mouseDown(box, { clientX: 40, clientY: FIVE.length * ROW + 10 })
+    fireEvent.mouseMove(window, { clientX: 60, clientY: ROW + 10 })
+    expect(selectedNames()).toEqual(['b.txt', 'c.txt', 'd.txt', 'e.txt'])
+    expect(activeTab().focus).toBe(p('e.txt'))
+    expect(activeId()).toBe(optId(p('e.txt')))
+    fireEvent.mouseUp(window)
+
+    const before = selectionOf()
+    for (const mod of [{ ctrlKey: true }, { shiftKey: true }]) {
+      pressEmpty(mod)
+      expect(selectionOf()).toEqual(before)
+    }
+    pressEmpty()
+    expect(selectionOf()).toEqual(CLEARED)
+  })
+
+  it('moves the selection with Ctrl or Cmd plus an arrow and adds a range with Ctrl+Shift', async () => {
+    // covers: Test-859
+    const names = Array.from({ length: 14 }, (_, i) => `f${String(i).padStart(2, '0')}.txt`)
+    await remoteFiles(names)
+    key('ArrowRight')
+    expect(selectedNames()).toEqual(['f00.txt'])
+    key('ArrowRight', { ctrlKey: true })
+    expect(selectedNames()).toEqual(['f01.txt'])
+    expect(activeId()).toBe(optId(p('f01.txt')))
+    key('ArrowLeft', { metaKey: true })
+    expect(selectedNames()).toEqual(['f00.txt'])
+    expect(activeId()).toBe(optId(p('f00.txt')))
+    key('ArrowRight', { metaKey: true })
+    expect(selectedNames()).toEqual(['f01.txt'])
+    key('ArrowRight', { ctrlKey: true, shiftKey: true })
+    expect(selectedNames()).toEqual(['f01.txt', 'f02.txt'])
+  })
+
+  it('clears selection, focus and anchor on Esc before it clears the find query', async () => {
+    // covers: Test-860
+    await remoteFiles(['f0.txt', 'f1.txt', 'f2.txt'])
+    fireEvent.click(option('f0.txt'))
+    fireEvent.click(option('f1.txt'), { ctrlKey: true })
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'f' }))
+    key('Escape')
+    expect(selectionOf()).toEqual(CLEARED)
+    expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+    expect(activeTab().query).toBe('f')
+    key('Escape')
+    expect(activeTab().query).toBe('')
+    expect(fireEvent.keyDown(listbox(), { key: 'Escape' })).toBe(true)
+  })
+
+  it('does not fall back to the first item when nothing is selected', async () => {
+    // covers: Test-861
+    h = setupExplorer({
+      remote: { [DIR]: [ftp('sub', { dir: true }), ftp('a.jpg')], [`${DIR}/sub`]: [] }
+    })
+    await renderExplorer(remoteLoc(DIR))
+    useSettingsStore.setState({ confirmBeforeDelete: true })
+    listbox().focus()
+    expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+    for (const o of screen.getAllByRole('option')) {
+      expect(o.getAttribute('aria-selected')).toBe('false')
+      for (const el of [o, ...o.querySelectorAll('*')])
+        expect(el.getAttribute('class') ?? '').not.toMatch(
+          /(^|\s)(ring-|outline|bg-\[var\(--acw\)\])/
+        )
+    }
+    key('Enter')
+    await flush()
+    expect(activeTab().loc.path).toBe(DIR)
+    key(' ')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    key('F2')
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    key('Delete')
+    await flush()
+    expect(useConfirmStore.getState().request).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toHaveLength(0)
+    key('S', { shiftKey: true })
+    expect(useShelfStore.getState().items).toEqual([])
+    key('ContextMenu')
+    expect(menu()).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: en['menu.open'] })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: en['menu.rename'] })).toBeNull()
+    expect(
+      screen.getByRole('menuitem', { name: new RegExp(en['explorer.newFolder']) })
+    ).toBeTruthy()
+  })
+
+  it('points aria-activedescendant at the selected item that keys act on', async () => {
+    // covers: Test-862
+    await remoteFiles(FIVE, { view: 'list' })
+    // ① 클릭
+    fireEvent.click(option('b.txt'))
+    expect(activeId()).toBe(optId(p('b.txt')))
+    expect(document.getElementById(activeId() as string)?.getAttribute('aria-selected')).toBe(
+      'true'
+    )
+    // ② Shift 범위의 끝 항목(focus)
+    key('ArrowDown', { shiftKey: true })
+    expect(activeId()).toBe(optId(p('c.txt')))
+    // ③ Ctrl+A는 focus를 그대로 둔다. focus가 없었다면 속성이 없다.
+    key('a', { ctrlKey: true })
+    expect(activeId()).toBe(optId(p('c.txt')))
+    key('Escape')
+    key('a', { ctrlKey: true })
+    expect(selectedNames()).toEqual(FIVE)
+    expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+    // ④ 찾기로 숨으면 속성이 없다(items[0]로 대체하지 않는다).
+    fireEvent.click(option('b.txt'))
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'a' }))
+    expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+
+    // ⑥ 숨은 focus + 모두 선택(Ctrl+A, 빈 곳 메뉴의 "모두 선택")
+    const hiddenThenSelectAll = async (selectAll: () => void): Promise<void> => {
+      act(() => useTabsStore.getState().patchTab(activeTab().id, { query: '' }))
+      fireEvent.click(option('b.txt'))
+      expect(activeTab().focus).toBe(p('b.txt'))
+      act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'p' }))
+      selectAll()
+      const visible = screen.getAllByRole('option')
+      expect(activeTab().sel).toEqual(visible.map((o) => o.getAttribute('data-path')))
+      expect(activeTab().focus).toBeNull()
+      expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+      expect(visible.every((o) => o.getAttribute('aria-selected') === 'true')).toBe(true)
+      key('Enter')
+      await flush()
+      expect(screen.queryByRole('dialog')).toBeNull()
+    }
+    cleanup()
+    h.restore()
+    await remoteFiles(['pa.jpg', 'b.txt', 'pc.jpg'], { view: 'list' })
+    await hiddenThenSelectAll(() => key('a', { ctrlKey: true }))
+    await hiddenThenSelectAll(() => {
+      key('ContextMenu')
+      fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(en['menu.selectAll']) }))
+    })
+
+    // ⑤ 라이트박스에서 넘긴 항목(Test-793 흐름)
+    cleanup()
+    h.restore()
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg'), ftp('b.jpg')] } })
+    await renderExplorer(remoteLoc(DIR))
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: true,
+      data: 'data:image/png;base64,AA=='
+    })
+    key('Home')
+    key(' ')
+    await flush()
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'ArrowRight' })
+    await flush()
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    expect(activeId()).toBe(optId(p('b.jpg')))
+    expect(document.getElementById(activeId() as string)?.getAttribute('aria-selected')).toBe(
+      'true'
+    )
+  })
+
+  it.each(['grid', 'list'] as const)(
+    'draws only idle, hover and focus item states (%s)',
+    async (view) => {
+      // covers: Test-863
+      const four = ['a.txt', 'b.txt', 'c.txt', 'd.txt']
+      await remoteFiles(four, {
+        view,
+        sel: [p('b.txt'), p('c.txt')],
+        anchor: p('b.txt'),
+        focus: p('c.txt')
+      })
+      listbox().focus()
+      const cls = (n: string): string => option(n).className
+      for (const n of ['a.txt', 'd.txt']) {
+        expect(cls(n)).not.toContain('bg-[var(--acw)]')
+        expect(cls(n)).toContain('hover:bg-[var(--hv)]')
+      }
+      for (const n of ['b.txt', 'c.txt']) {
+        expect(cls(n)).toContain('bg-[var(--acw)]')
+        expect(cls(n)).not.toContain('hover:bg-')
+      }
+      expect(cls('b.txt')).toBe(cls('c.txt'))
+      const before = four.map(cls)
+      key('l', { ctrlKey: true })
+      fireEvent.blur(listbox())
+      screen.getByRole('textbox', { name: en['path.edit'] }).focus()
+      expect(four.map(cls)).toEqual(before)
+      for (const o of screen.getAllByRole('option')) {
+        expect(o.outerHTML).not.toContain('--selin')
+        expect(o.outerHTML).not.toContain('ring-focus')
+        expect(o.className).not.toMatch(/(^|\s)-?outline-/)
+      }
+      if (view === 'grid')
+        for (const n of ['b.txt', 'c.txt']) {
+          const box = option(n).firstElementChild as HTMLElement
+          expect(box.classList.contains('ring-2')).toBe(true)
+          expect(box.classList.contains('ring-[var(--ac)]')).toBe(true)
+        }
+    }
+  )
+
+  it('toggles the focused item with Ctrl+Space and moves the focus to what remains', async () => {
+    // covers: Test-865
+    await remoteFiles(['a.txt', 'b.txt', 'c.txt', 'd.txt'])
+    fireEvent.click(option('b.txt'))
+    key(' ', { ctrlKey: true })
+    expect(activeTab().sel).toEqual([])
+    expect(activeTab().focus).toBeNull()
+    fireEvent.click(option('b.txt'))
+    fireEvent.click(option('c.txt'), { ctrlKey: true })
+    expect(activeTab().focus).toBe(p('c.txt'))
+    key(' ', { ctrlKey: true })
+    expect(selectedNames()).toEqual(['b.txt'])
+    expect(activeTab().focus).toBe(p('b.txt'))
+    expect(activeId()).toBe(optId(p('b.txt')))
+    key('Escape')
+    key(' ', { ctrlKey: true })
+    expect(selectionOf()).toEqual(CLEARED)
+  })
+
+  it('applies the same rule to the tile check circle', async () => {
+    // covers: Test-866
+    await remoteFiles(['a.txt', 'b.txt', 'c.txt'])
+    fireEvent.click(option('a.txt'))
+    const check = option('b.txt').querySelector('button') as HTMLElement
+    fireEvent.click(check)
+    expect(selectedNames()).toEqual(['a.txt', 'b.txt'])
+    expect(activeTab().focus).toBe(p('b.txt'))
+    fireEvent.click(check)
+    expect(selectedNames()).toEqual(['a.txt'])
+    expect(activeTab().focus).toBe(p('a.txt'))
+  })
+
+  it('starts keyboard moves afresh after the selection is cleared', async () => {
+    // covers: Test-867
+    await remoteFiles(FIVE)
+    const twoThenClear = (): void => {
+      fireEvent.click(option('c.txt'))
+      fireEvent.click(option('d.txt'), { ctrlKey: true })
+      pressEmpty()
+      expect(selectionOf()).toEqual(CLEARED)
+    }
+    twoThenClear()
+    key('ArrowDown')
+    expect(selectedNames()).toEqual(['a.txt'])
+    twoThenClear()
+    key('End')
+    expect(selectedNames()).toEqual(['e.txt'])
+    twoThenClear()
+    key('ArrowDown', { shiftKey: true })
+    expect(selectedNames()).toEqual(['a.txt'])
+    twoThenClear()
+    fireEvent.click(option('d.txt'), { shiftKey: true })
+    expect(selectedNames()).toEqual(['d.txt'])
+  })
+})
+
+describe('Explorer — file type filter', () => {
+  const FDIR = '/c'
+  const shown = (): string[] =>
+    screen
+      .getAllByRole('option')
+      .map((o) => (o.getAttribute('data-path') ?? '').split('/').pop() ?? '')
+  const filterButton = (): HTMLElement => screen.getByRole('button', { name: en['filter.button'] })
+  const openMenu = (): HTMLElement => {
+    fireEvent.click(filterButton())
+    return screen.getByRole('dialog')
+  }
+  const pick = (name: string | RegExp): void => {
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('checkbox', { name }))
+  }
+  const closeMenu = (): void => {
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+  }
+  const setup = async (patch = {}): Promise<void> => {
+    h = setupExplorer({
+      remote: {
+        [FDIR]: [
+          ftp('a.jpg'),
+          ftp('a.PNG'),
+          ftp('b.cr3'),
+          ftp('c.mp4'),
+          ftp('d.txt'),
+          ftp('README'),
+          ftp('.hidden.jpg'),
+          ftp('sub', { dir: true })
+        ],
+        '/d': [ftp('x.png'), ftp('y.txt')]
+      }
+    })
+    await renderExplorer(remoteLoc(FDIR), patch)
+  }
+
+  it('filters by categories and extensions (OR), ANDs with find, and survives navigation per tab', async () => {
+    // covers: Test-945
+    await setup()
+    expect(shown()).toEqual(['sub', 'a.jpg', 'a.PNG', 'b.cr3', 'c.mp4', 'd.txt', 'README'])
+
+    openMenu()
+    pick(/Images/)
+    expect(shown()).toEqual(['sub', 'a.jpg', 'a.PNG'])
+    pick(/RAW/)
+    pick(/Videos/)
+    // 이미지+RAW+비디오는 옛 "사진만"과 같은 항목이다.
+    expect(shown()).toEqual(['sub', 'a.jpg', 'a.PNG', 'b.cr3', 'c.mp4'])
+    pick(/RAW/)
+    pick(/Videos/)
+
+    // 카테고리(이미지) + 확장자(.txt)는 합집합이다.
+    fireEvent.click(screen.getByRole('button', { name: /Advanced/ }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('checkbox', { name: '.txt (1)' }))
+    expect(shown()).toEqual(['sub', 'a.jpg', 'a.PNG', 'd.txt'])
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('checkbox', { name: '.txt (1)' }))
+
+    // 찾기는 AND이고, 드롭다운의 개수는 찾기를 반영하지 않는다(E19).
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'a' }))
+    expect(shown()).toEqual(['a.jpg', 'a.PNG'])
+    expect(
+      within(screen.getByRole('dialog'))
+        .getByRole('checkbox', { name: /Images/ })
+        .closest('label')?.textContent
+    ).toBe('Images (2)')
+    // 찾기가 이미지를 모두 떨궈도 개수는 폴더 전체 기준이다(find로 좁힌 목록이 넘어가면 0이 된다).
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'b' }))
+    expect(shown()).toEqual(['sub'])
+    expect(
+      within(screen.getByRole('dialog'))
+        .getByRole('checkbox', { name: /Images/ })
+        .closest('label')?.textContent
+    ).toBe('Images (2)')
+    closeMenu()
+
+    // 폴더를 옮기면 찾기는 지워지고 필터는 남는다. 다른 탭은 영향이 없다.
+    const second = useTabsStore.getState().openTab(remoteLoc('/d'), false)
+    act(() => useTabsStore.getState().navigate(remoteLoc('/d')))
+    await flush()
+    expect(activeTab().query).toBe('')
+    expect(activeTab().filter.categories).toEqual(['image'])
+    expect(shown()).toEqual(['x.png'])
+    expect(useTabsStore.getState().tabs.find((t) => t.id === second)!.filter).toEqual(EMPTY_FILTER)
+
+    // 선택은 보이는 항목만 센다.
+    act(() => useTabsStore.getState().navigate(remoteLoc(FDIR)))
+    await flush()
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: '' }))
+    key('a', { ctrlKey: true })
+    expect(selectedNames()).toEqual(['a.PNG', 'a.jpg', 'sub'])
+  })
+
+  it('applies edits made in settings straight away', async () => {
+    // covers: Test-951
+    await setup()
+    const store = useFileCategoryStore.getState()
+    store.removeExtension('image', 'png')
+    const id = store.addCustom('Docs')!
+    store.addExtension(id, 'txt')
+
+    const dialog = openMenu()
+    expect(
+      within(dialog)
+        .getByRole('checkbox', { name: /Images/ })
+        .closest('label')?.textContent
+    ).toBe('Images (1)')
+    expect(
+      within(dialog).getByRole('checkbox', { name: /Docs/ }).closest('label')?.textContent
+    ).toBe('Docs (1)')
+    pick(/Images/)
+    expect(shown()).toEqual(['sub', 'a.jpg'])
+    pick(/Docs/)
+    expect(shown()).toEqual(['sub', 'a.jpg', 'd.txt'])
+    closeMenu()
+
+    // 이미지 카테고리를 숨기면 드롭다운에서 사라지고 걸려 있던 이미지 체크는 무시된다(E15).
+    act(() => useFileCategoryStore.getState().setHidden('image', true))
+    expect(shown()).toEqual(['sub', 'd.txt'])
+    openMenu()
+    expect(screen.queryByRole('checkbox', { name: /Images/ })).toBeNull()
+    expect(activeTab().filter.categories).toEqual(['image', id])
+    closeMenu()
+    act(() => useFileCategoryStore.getState().setHidden('image', false))
+    expect(shown()).toEqual(['sub', 'a.jpg', 'd.txt'])
+  })
+
+  it('does not act on a selected item the filter hides', async () => {
+    // covers: Test-954
+    h = setupExplorer({ remote: { [FDIR]: [ftp('a.jpg'), ftp('b.txt')] } })
+    await renderExplorer(remoteLoc(FDIR))
+    const bPath = `${FDIR}/b.txt`
+    const deletes = (): unknown[][] => invokeCalls(h.invoke, 'ftp:deleteBatch')
+    const hook = renderHook(() => useTabEntries(useActiveTab()))
+
+    // (1) 양성 대조: 필터가 없으면 b.txt가 삭제 대상에 든다.
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { sel: [bPath] }))
+    key('Delete')
+    await flush()
+    expect(JSON.stringify(deletes())).toContain(bPath)
+    const callsBefore = deletes().length
+
+    // (2) 이미지 필터가 b.txt를 가리면 삭제 대상이 아니다.
+    act(() =>
+      useTabsStore.getState().patchTab(activeTab().id, {
+        sel: [bPath],
+        filter: { ...EMPTY_FILTER, categories: ['image'] }
+      })
+    )
+    expect(hook.result.current.selected).toEqual([])
+    key('Delete')
+    await flush()
+    expect(deletes()).toHaveLength(callsBefore)
+
+    // (3) 확인창을 켜도 숨은 선택 때문에 뜨지 않는다.
+    useSettingsStore.setState({ confirmBeforeDelete: true })
+    key('Delete')
+    await flush()
+    expect(useConfirmStore.getState().request).toBeNull()
+
+    // (4) 필터를 풀면 선택이 되살아난다.
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { filter: EMPTY_FILTER }))
+    expect(hook.result.current.selected.map((e) => e.name)).toEqual(['b.txt'])
+  })
+})
+
+describe('Explorer — remote location change cancels this panel’s pending work', () => {
+  it('cancels thumbnails and folder previews before the new batch and clears only that server’s previews', async () => {
+    // covers: Test-1024
+    h = setupExplorer({
+      remote: { '/': [ftp('dir', { dir: true })], '/sub': [ftp('new.jpg', { size: 1000 })] }
+    })
+    await renderExplorer(remoteLoc('/'))
+    const other = connKey('other.example', 21, 'kim')
+    const resolved = { status: 'resolved', preview: null } as const
+    useGalleryStore.setState({
+      remoteFolderPreviews: {
+        [`${server()}|/photos`]: resolved,
+        [`${other}|/photos`]: resolved
+      }
+    })
+    h.invoke.mockClear()
+
+    act(() => useTabsStore.getState().navigate(remoteLoc('/sub')))
+    await flush()
+
+    const calls = h.invoke.mock.calls
+    const cancelThumbs = calls.findIndex((c) => c[0] === 'thumbnail:cancelAll')
+    const cancelGallery = calls.findIndex((c) => c[0] === 'gallery:cancelAll')
+    const firstBatch = calls.findIndex((c) => c[0] === 'thumbnail:requestBatch')
+    expect(cancelThumbs).toBeGreaterThanOrEqual(0)
+    expect(cancelGallery).toBeGreaterThanOrEqual(0)
+    expect(firstBatch).toBeGreaterThan(Math.max(cancelThumbs, cancelGallery))
+    expect(calls[cancelThumbs]).toEqual(['thumbnail:cancelAll', null, MAIN_VIEWER])
+    expect(calls[cancelGallery]).toEqual(['gallery:cancelAll', null, MAIN_VIEWER])
+    expect(Object.keys(useGalleryStore.getState().remoteFolderPreviews)).toEqual([
+      `${other}|/photos`
+    ])
   })
 })

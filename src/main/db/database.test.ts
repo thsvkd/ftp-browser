@@ -253,6 +253,278 @@ describe('initDatabase cache.db', () => {
     error.mockRestore()
   })
 
+  it('should add remote_folder_previews keyed by user to new and old cache.db, keeping folder_previews', async () => {
+    // covers: Test-1001
+    /** 열·제약을 비교할 수 있는 테이블 모양 */
+    const shape = (db: Database.Database): unknown => ({
+      columns: db.prepare('PRAGMA table_info(remote_folder_previews)').all(),
+      unique: (
+        db.prepare('PRAGMA index_list(remote_folder_previews)').all() as {
+          name: string
+          unique: number
+        }[]
+      )
+        .filter((i) => i.unique)
+        .map((i) =>
+          (db.prepare(`PRAGMA index_info(${i.name})`).all() as { name: string }[]).map(
+            (c) => c.name
+          )
+        )
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const reopen = async (): Promise<Database.Database> => {
+      opened?.close()
+      vi.resetModules()
+      opened = (await loadInitDatabase())()
+      return opened
+    }
+    try {
+      // 새 cache.db
+      const fresh = shape(await reopen())
+      expect(fresh).toMatchObject({ unique: [['host', 'port', 'username', 'folder_path']] })
+      const insert = (db: Database.Database, user: string): void => {
+        db.prepare(
+          `INSERT INTO remote_folder_previews (host, port, username, folder_path)
+           VALUES ('h', 21, ?, '/p')`
+        ).run(user)
+      }
+      insert(opened!, 'u1')
+      insert(opened!, 'u2')
+      expect(() => insert(opened!, 'u1')).toThrow(/UNIQUE/)
+      // 두 번 열어도 경고·오류 없이 행이 남는다
+      expect(shape(await reopen())).toEqual(fresh)
+      expect(opened!.prepare('SELECT COUNT(*) AS n FROM remote_folder_previews').get()).toEqual({
+        n: 2
+      })
+
+      // 옛 folder_previews(행 있음)만 있는 cache.db: 옛 테이블과 행은 그대로다
+      opened!.close()
+      opened = undefined
+      for (const file of fs.readdirSync(userData)) fs.rmSync(path.join(userData, file))
+      const cachePath = path.join(userData, 'cache.db')
+      const seed = new Database(cachePath)
+      seed.exec(`CREATE TABLE folder_previews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host TEXT NOT NULL,
+        port INTEGER NOT NULL,
+        folder_path TEXT NOT NULL,
+        first_image_name TEXT,
+        first_image_size INTEGER,
+        first_image_modified_at TEXT,
+        item_count INTEGER,
+        cached_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(host, port, folder_path)
+      )`)
+      seed
+        .prepare(
+          `INSERT INTO folder_previews (host, port, folder_path, first_image_name, item_count)
+           VALUES ('old.example', 21, '/photos', 'a.jpg', 3)`
+        )
+        .run()
+      seed.close()
+      expect(shape(await reopen())).toEqual(fresh)
+      expect(fs.existsSync(cachePath)).toBe(true)
+      expect(
+        opened!.prepare('SELECT host, folder_path, first_image_name FROM folder_previews').all()
+      ).toEqual([{ host: 'old.example', folder_path: '/photos', first_image_name: 'a.jpg' }])
+      expect(shape(await reopen())).toEqual(fresh)
+
+      // 004 파일을 읽을 수 없으면(빌드된 앱) 인라인 SQL로 같은 테이블이 생긴다
+      opened!.close()
+      opened = undefined
+      for (const file of fs.readdirSync(userData)) fs.rmSync(path.join(userData, file))
+      const readFileSync = fs.readFileSync
+      const read = vi.spyOn(fs, 'readFileSync').mockImplementation(((
+        file: fs.PathOrFileDescriptor,
+        ...rest
+      ) => {
+        if (String(file).endsWith('004_remote_folder_previews.sql')) throw new Error('ENOENT')
+        return readFileSync(file, ...(rest as []))
+      }) as typeof fs.readFileSync)
+      try {
+        expect(shape(await reopen())).toEqual(fresh)
+        expect(
+          read.mock.calls.some(([f]) => String(f).endsWith('004_remote_folder_previews.sql'))
+        ).toBe(true)
+        expect(shape(await reopen())).toEqual(fresh)
+      } finally {
+        read.mockRestore()
+      }
+      expect(warn).not.toHaveBeenCalled()
+      expect(error).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+      error.mockRestore()
+    }
+  })
+
+  it('should add remote_recent_paths keyed by user to cache.db, also from the inline SQL', async () => {
+    // covers: Test-1146
+    /** 열·유일 제약·색인을 비교할 수 있는 테이블 모양 */
+    const shape = (db: Database.Database): unknown => {
+      const indexes = db.prepare('PRAGMA index_list(remote_recent_paths)').all() as {
+        name: string
+        unique: number
+      }[]
+      const columnsOf = (name: string): string[] =>
+        (db.prepare(`PRAGMA index_info(${name})`).all() as { name: string }[]).map((c) => c.name)
+      return {
+        columns: db.prepare('PRAGMA table_info(remote_recent_paths)').all(),
+        unique: indexes.filter((i) => i.unique).map((i) => columnsOf(i.name)),
+        conn: indexes.some((i) => i.name === 'idx_remote_recent_paths_conn')
+          ? columnsOf('idx_remote_recent_paths_conn')
+          : null
+      }
+    }
+    const hasOldTable = (db: Database.Database): boolean =>
+      !!db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'server_recent_paths'"
+        )
+        .get()
+    const insert = (db: Database.Database, user: string): void => {
+      db.prepare(
+        `INSERT INTO remote_recent_paths (host, port, username, path) VALUES ('h', 21, ?, '/p')`
+      ).run(user)
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const reopen = async (): Promise<Database.Database> => {
+      opened?.close()
+      vi.resetModules()
+      opened = (await loadInitDatabase())()
+      return opened
+    }
+    try {
+      const fresh = shape(await reopen())
+      expect(fresh).toMatchObject({
+        unique: [['host', 'port', 'username', 'path']],
+        conn: ['host', 'port', 'username']
+      })
+      insert(opened!, 'u1')
+      insert(opened!, 'u2')
+      expect(() => insert(opened!, 'u1')).toThrow(/UNIQUE/)
+
+      // 다시 열어도 경고·오류 없이 행이 남고 옛 테이블도 있다
+      expect(shape(await reopen())).toEqual(fresh)
+      expect(opened!.prepare('SELECT COUNT(*) AS n FROM remote_recent_paths').get()).toEqual({
+        n: 2
+      })
+      expect(hasOldTable(opened!)).toBe(true)
+
+      // 005 파일을 읽을 수 없으면(빌드된 앱) 인라인 SQL로 같은 모양이 생긴다
+      opened!.close()
+      opened = undefined
+      for (const file of fs.readdirSync(userData)) fs.rmSync(path.join(userData, file))
+      const readFileSync = fs.readFileSync
+      const read = vi.spyOn(fs, 'readFileSync').mockImplementation(((
+        file: fs.PathOrFileDescriptor,
+        ...rest
+      ) => {
+        if (String(file).endsWith('005_remote_recent_paths.sql')) throw new Error('ENOENT')
+        return readFileSync(file, ...(rest as []))
+      }) as typeof fs.readFileSync)
+      try {
+        expect(shape(await reopen())).toEqual(fresh)
+        expect(
+          read.mock.calls.some(([f]) => String(f).endsWith('005_remote_recent_paths.sql'))
+        ).toBe(true)
+        expect(hasOldTable(opened!)).toBe(true)
+        expect(shape(await reopen())).toEqual(fresh)
+      } finally {
+        read.mockRestore()
+      }
+      expect(warn).not.toHaveBeenCalled()
+      expect(error).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+      error.mockRestore()
+    }
+  })
+
+  it("should copy old recent paths to the saved server's user once, when remote_recent_paths is created", async () => {
+    // covers: Test-1147
+    const seed = new Database(path.join(userData, 'cache.db'))
+    seed.exec(`
+      CREATE TABLE servers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        host TEXT NOT NULL,
+        port INTEGER NOT NULL DEFAULT 21,
+        username TEXT,
+        password_enc TEXT,
+        secure INTEGER NOT NULL DEFAULT 0,
+        last_connected TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE server_recent_paths (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_host TEXT NOT NULL,
+        server_port INTEGER NOT NULL,
+        path TEXT NOT NULL,
+        last_visited TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(server_host, server_port, path)
+      );
+    `)
+    const server = seed.prepare(
+      'INSERT INTO servers (name, host, port, username) VALUES (?, ?, ?, ?)'
+    )
+    server.run('', 'nas.local', 21, 'me')
+    server.run('', 'ftp.x', 21, '')
+    const old = seed.prepare(
+      'INSERT INTO server_recent_paths (server_host, server_port, path, last_visited) VALUES (?, ?, ?, ?)'
+    )
+    old.run('NAS.local', 21, '/photos', '2026-01-02 03:04:05')
+    old.run('ftp.x', 21, '/pub', '2026-01-01 10:00:00.123')
+    old.run('orphan', 21, '/o', '2026-01-01 00:00:00')
+    seed.close()
+
+    const copied = (): unknown =>
+      opened!
+        .prepare(
+          'SELECT host, port, username, path, last_visited FROM remote_recent_paths ORDER BY host'
+        )
+        .all()
+    const oldCount = (): unknown =>
+      opened!.prepare('SELECT COUNT(*) AS n FROM server_recent_paths').get()
+
+    opened = (await loadInitDatabase())()
+    expect(copied()).toEqual([
+      {
+        host: 'NAS.local',
+        port: 21,
+        username: 'me',
+        path: '/photos',
+        last_visited: '2026-01-02 03:04:05'
+      },
+      {
+        host: 'ftp.x',
+        port: 21,
+        username: 'anonymous',
+        path: '/pub',
+        last_visited: '2026-01-01 10:00:00.123'
+      }
+    ])
+    expect(oldCount()).toEqual({ n: 3 })
+
+    // 한 번만 복사한다: 지운 행은 다시 열어도 되살아나지 않는다
+    opened.prepare("DELETE FROM remote_recent_paths WHERE path = '/pub'").run()
+    opened.close()
+    vi.resetModules()
+    opened = (await loadInitDatabase())()
+    expect(copied()).toEqual([
+      {
+        host: 'NAS.local',
+        port: 21,
+        username: 'me',
+        path: '/photos',
+        last_visited: '2026-01-02 03:04:05'
+      }
+    ])
+    expect(oldCount()).toEqual({ n: 3 })
+  })
+
   it('should leave no saved password as plain text in the database files after saving and migrating', async () => {
     // covers: Test-717
     // 여러 행이어야 바뀐 행이 페이지에 남긴 옛 바이트와, 행마다 커밋한 WAL 프레임에 남은 아직 안 옮긴

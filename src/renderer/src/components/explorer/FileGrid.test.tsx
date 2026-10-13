@@ -12,9 +12,7 @@ import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import {
-  HOST,
   MODIFIED_AT,
-  PORT,
   flush,
   ftp,
   listbox,
@@ -25,9 +23,11 @@ import {
   renderExplorer,
   selectedNames,
   server,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from './explorerTestHarness'
+import { connKey, MAIN_VIEWER } from '@shared/connKey'
 import { ZOOM_STEP } from './FileGrid'
 
 let h: ExplorerHarness
@@ -60,11 +60,11 @@ describe('FileGrid — viewport thumbnail batches (migrated)', () => {
   }
   const name = (i: number): string => `img${String(i).padStart(3, '0')}.jpg`
   const key = (i: number): string =>
-    generateCacheKeyRenderer(HOST, PORT, `/${name(i)}`, 1000, MODIFIED_AT)
+    generateCacheKeyRenderer(server(), `/${name(i)}`, 1000, MODIFIED_AT)
   const lastBatch = (): Item[] => {
     const batches = invokeCalls(h.invoke, 'thumbnail:requestBatch')
     if (!batches.length) throw new Error('no thumbnail:requestBatch')
-    return batches[batches.length - 1][0] as Item[]
+    return batches[batches.length - 1][2] as Item[]
   }
   const indexOf = (n: string): number => Number(n.slice(3, 6))
   const scrollTo = async (top: number): Promise<void> => {
@@ -157,6 +157,7 @@ describe('FileGrid — viewport thumbnail batches (migrated)', () => {
     )
     expect(invokeCalls(h.invoke, 'thumbnail:request')).toEqual([
       [
+        server(),
         {
           remotePath: '/img001.jpg',
           fileName: 'img001.jpg',
@@ -188,7 +189,7 @@ describe('FileGrid — viewport thumbnail batches (migrated)', () => {
     expect(lastCancel).toBeGreaterThanOrEqual(0)
     const after = h.invoke.mock.calls.slice(lastCancel + 1)
     const batches = after.filter((call) => call[0] === 'thumbnail:requestBatch')
-    expect(batches.map((call) => (call[1] as Item[]).map((r) => r.remotePath))).toContainEqual([
+    expect(batches.map((call) => (call[3] as Item[]).map((r) => r.remotePath))).toContainEqual([
       '/sub/new000.jpg'
     ])
   })
@@ -254,5 +255,67 @@ describe('FileGrid — zoom modifiers (migrated)', () => {
     await grid('local', [])
     fireEvent.wheel(listbox(), { deltaY: 100, metaKey: true })
     expect(useSettingsStore.getState().tileSize).toBe(160 - ZOOM_STEP)
+  })
+})
+
+describe('FileGrid — selection does not resize a tile', () => {
+  it('keeps the selected thumbnail box the same size and marks it with the ring only', async () => {
+    // covers: Test-851
+    h = setupExplorer({ remote: { '/d': [ftp('a.jpg'), ftp('b.jpg')] } })
+    await renderExplorer(remoteLoc('/d'))
+    fireEvent.click(option('a.jpg'))
+    const box = (name: string): HTMLElement => option(name).firstElementChild as HTMLElement
+    const picked = box('a.jpg')
+    expect(picked.className).not.toMatch(/(^|\s)scale-/)
+    expect(picked.className).not.toContain('transition-transform')
+    expect(picked.style.height).toBe(box('b.jpg').style.height)
+    expect(picked.classList.contains('ring-2')).toBe(true)
+    expect(picked.classList.contains('ring-[var(--ac)]')).toBe(true)
+  })
+})
+
+describe('FileGrid — thumbnails are per connection', () => {
+  it('batches for its own connection and never shows another connection’s thumbnail', async () => {
+    // covers: Test-1023
+    const A = server()
+    const B = connKey('example.org', 21, 'kim')
+    const dataUrl = (id: string): string => `data:image/jpeg;base64,${id}`
+    const keyOf = (conn: string): string =>
+      generateCacheKeyRenderer(conn, '/p.jpg', 1000, MODIFIED_AT)
+    expect(keyOf(A)).not.toBe(keyOf(B))
+    h = setupExplorer({ remote: { '/': [ftp('p.jpg', { size: 1000 })] } })
+    setConnection(B, 'connected')
+    // 같은 경로·크기·시각의 A 썸네일만 있다.
+    useThumbnailStore.setState({
+      thumbnails: { [keyOf(A)]: { dataUrl: dataUrl('QQ=='), width: 1, height: 1 } }
+    })
+
+    await renderExplorer({ side: 'remote', path: '/', server: B })
+
+    const batches = invokeCalls(h.invoke, 'thumbnail:requestBatch')
+    expect(batches[batches.length - 1]).toEqual([
+      B,
+      MAIN_VIEWER,
+      [
+        {
+          remotePath: '/p.jpg',
+          fileName: 'p.jpg',
+          fileSize: 1000,
+          modifiedAt: MODIFIED_AT,
+          priority: 0
+        }
+      ]
+    ])
+    expect(option('p.jpg').querySelector('img')).toBeNull()
+
+    act(() =>
+      useThumbnailStore.setState({
+        thumbnails: {
+          [keyOf(A)]: { dataUrl: dataUrl('QQ=='), width: 1, height: 1 },
+          [keyOf(B)]: { dataUrl: dataUrl('Qg=='), width: 1, height: 1 }
+        }
+      })
+    )
+    expect(option('p.jpg').querySelector('img')?.getAttribute('src')).toBe(dataUrl('Qg=='))
   })
 })

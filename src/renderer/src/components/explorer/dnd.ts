@@ -10,7 +10,8 @@ import { toast } from 'sonner'
 import { t } from '@renderer/i18n'
 import type { ExplorerEntry, Loc } from '@renderer/lib/explorerEntry'
 import { planSend } from '@renderer/lib/sendPlan'
-import { dropOsFiles, planVerb, sendItems, useConnection } from '@renderer/lib/sendItems'
+import { useConnectedKeys } from '@renderer/lib/connections'
+import { dropOsFiles, planVerb, sendItems, shelveOsFiles } from '@renderer/lib/sendItems'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 
 interface DndState {
@@ -31,12 +32,14 @@ export function endDrag(): void {
 }
 
 export function startDrag(e: DragEvent, items: ExplorerEntry[]): void {
+  // 같은 폴더를 연 다른 패널이 아니라 끌기 시작한 패널에서 썸네일을 찾는다(split-view P9).
+  const root =
+    (e.currentTarget instanceof Element && e.currentTarget.closest('[data-tab-pane]')) || document
   const thumbs = items
     .slice(0, 3)
     .map(
       (it) =>
-        document.querySelector(`[data-path="${CSS.escape(it.path)}"] img`)?.getAttribute('src') ??
-        ''
+        root.querySelector(`[data-path="${CSS.escape(it.path)}"] img`)?.getAttribute('src') ?? ''
     )
   // 고스트가 지금 그려져 있어야 setDragImage가 찍을 수 있다.
   flushSync(() => useDnd.setState({ items, over: null, thumbs }))
@@ -83,8 +86,8 @@ export function useDropTarget(
 ): DropState {
   const items = useDnd((s) => s.items)
   const over = useDnd((s) => s.over === key)
-  const conn = useConnection()
-  const plan = items && dest && dest !== 'shelf' ? planSend(items, dest, conn) : null
+  const connected = useConnectedKeys()
+  const plan = items && dest && dest !== 'shelf' ? planSend(items, dest, connected) : null
   const valid = !!dest && (dest === 'shelf' ? !!items : !plan?.invalid)
   const springRef = useRef(opts.spring)
   useEffect(() => {
@@ -113,19 +116,21 @@ export function useDropTarget(
     handlers: {
       onDragOver: (e) => {
         if (!dest) return
-        if (useDnd.getState().items)
-          enter(e, valid ? (plan?.transfer.length || dest === 'shelf' ? 'copy' : 'move') : 'none')
-        else if (dest !== 'shelf' && hasFiles(e)) enter(e, 'copy')
+        // 다른 쪽 전송과 다른 서버로의 복사(relay)는 복사 커서, 같은 쪽 원격은 이동
+        const copies = plan?.transfer.length || plan?.relay.length || dest === 'shelf'
+        if (useDnd.getState().items) enter(e, valid ? (copies ? 'copy' : 'move') : 'none')
+        else if (hasFiles(e)) enter(e, 'copy')
       },
       onDrop: (e) => {
         if (!dest) return
         const dragged = useDnd.getState().items
-        if (!dragged && (dest === 'shelf' || !hasFiles(e))) return
+        if (!dragged && !hasFiles(e)) return
         e.preventDefault()
         e.stopPropagation()
         endDrag()
         if (!dragged) {
-          if (dest !== 'shelf') void dropOsFiles(Array.from(e.dataTransfer.files), dest)
+          const files = Array.from(e.dataTransfer.files)
+          void (dest === 'shelf' ? shelveOsFiles(files) : dropOsFiles(files, dest))
         } else if (dest === 'shelf') {
           if (!useShelfStore.getState().add(dragged)) toast(t('toast.alreadyOnShelf'))
         } else {

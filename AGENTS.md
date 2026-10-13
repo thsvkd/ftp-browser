@@ -2,9 +2,10 @@
 
 ## Overview
 
-Electron desktop FTP/FTPS browser. The main process (`src/main`) owns all I/O as services: the
-basic-ftp connection, a transfer queue over a pool of parallel connections (large WAN downloads
-split into segments), sharp thumbnails in a disk cache indexed in SQLite (better-sqlite3, which
+Electron desktop FTP/FTPS browser. The main process (`src/main`) owns all I/O as services: one
+basic-ftp connection per server (several servers can be connected at once), each with its own
+transfer queue over a pool of parallel connections (large WAN downloads split into segments) and
+server-to-server copies streamed between two of them, sharp thumbnails in a disk cache indexed in SQLite (better-sqlite3, which
 also stores saved servers), local file operations, and auto-update (electron-updater, packaged
 Windows installer only). The renderer (`src/renderer/src`, React 19 + zustand + Tailwind) shows
 one explorer pane whose tabs each hold a local or remote folder (grid/list), a sidebar of places
@@ -15,16 +16,21 @@ through the preload bridge `window.api`.
 ## Source map
 
 - `src/main/index.ts` — bootstrap: creates the window and DB, calls every `register*Handlers`.
-- `src/main/`: `ftp/` connection manager and remote file ops · `transfer/` queue, client pool,
-  segmented download · `thumbnail/` generator + SQLite cache · `local/` local FS and thumbnails ·
+- `src/main/`: `ftp/` connection manager and remote file ops; `ConnectionRegistry.ts` keeps one
+  `FtpSession` (manager, file ops, pool, queue, thumbnail queues) per `ConnKey` `user@host:port`
+  (`src/shared/connKey.ts`) · `transfer/` queue, client pool, segmented download;
+  `TransferHub.ts` merges the sessions' queues into one job list and owns `RelayLane.ts`
+  (server-to-server copies) · `thumbnail/` generator + SQLite cache · `local/` local FS and thumbnails ·
   `db/` `database.ts`, `servers.ts`, `migrations/` · `ipc/` one `<domain>Handlers.ts` per domain ·
   `update/` `UpdateManager` · `operation/` copy/move/delete progress · `debug/` DevTools shortcuts ·
   `menu/`, `preview/`, `utils/` (`errorClassifier.ts`, `remotePath.ts`, `sparseFile.ts`).
 - `src/preload/index.ts` + `index.d.ts` — the only bridge; exposes `window.api`.
 - `src/renderer/src/`: `components/<area>/` (explorer, shelf, activity, layout, server, settings,
   thumbnail, common) · `stores/` one zustand `use*Store.ts` each (`useTabsStore` tabs and their
-  locations, `useListingStore` listing cache, `useShelfStore`; `useFtpStore` only the connection) ·
-  `hooks/` · `lib/` pure helpers · `i18n/` · `test/rendererTestUtils.ts`.
+  locations and their type filter, `useListingStore` listing cache, `useShelfStore`;
+  `useFtpStore` the connections by key; `useFileCategoryStore` user edits of the filter categories) ·
+  `hooks/` · `lib/` pure helpers (`fileCategories` the type-filter matcher and default
+  categories, `fileCategoryEdit` its settings reducers) · `i18n/` · `test/rendererTestUtils.ts`.
 - `src/shared/` — imported by both sides: `types/` (incl. `ipc.ts`), `constants.ts`, `debug.ts`,
   plus repo contract tests. Aliases: `@shared/*` everywhere, `@renderer/*` in renderer and vitest.
 - `script/` — dev helpers and `smoke-packaged.mjs`. `docs/handoff/` — feature specs (see below).
@@ -33,6 +39,9 @@ through the preload bridge `window.api`.
 
 - Channels are `domain:action` (`ftp:list`, `transfer:enqueue`); main→renderer events use the same
   shape (`transfer:updated`) via `win.webContents.send`; `window.api.on` returns an unsubscribe.
+- Remote channels (`ftp:*` on a server, `transfer:send`, `thumbnail:*`…) take the connection's
+  `ConnKey` (`conn`) as their first argument and resolve it with `registry.require(conn)`; events
+  and jobs carry it as `server`.
 - Every `ipcMain.handle` returns `IpcResult<T>` from `src/shared/types/ipc.ts`
   (`{ success: true, data }` | `{ success: false, error, code? }`). Return failures as values:
   `catch (err) { return ipcError(err) }` (`src/main/utils/errorClassifier.ts`).
@@ -147,9 +156,13 @@ before running it; approval is left to the agent tool (Claude Code, Codex…).
 - `mcpTools.ts`: the 12 tools in one `TOOLS` list. `risk` (read · write · upload · delete) builds both
   the `[RISK: …]` first description line and the annotations. Tools call the app services
   (`AgentDeps`) through `agentOps.ts` (connect, rename, delete, download/upload planning);
-  `jobTracker.ts` remembers finished jobs for `wait_for_jobs`; `thumbnailPreviews.ts` is the single
-  preview queue. Errors are `CODE: message next-step` isError results. A new tool goes into `TOOLS`,
-  the §2 table of the spec and Test-450 (`TOOL_COUNT` in `McpService.test.ts`).
+  `jobTracker.ts` remembers finished jobs for `wait_for_jobs`; `thumbnailPreviews.ts` keeps one
+  preview queue per connection. Errors are `CODE: message next-step` isError results. A new tool
+  goes into `TOOLS`, the §2 table of the spec and Test-450 (`TOOL_COUNT` in `McpService.test.ts`).
+- Target connection (`agentTarget.ts`, multi-connection MC18): the remote tools and `disconnect`
+  take an optional `server`; without it they use the connection the agent last connected or named
+  while still connected, else the only one; none is `NOT_CONNECTED`, two or more `AMBIGUOUS`.
+  `connect` adds a connection and never logs in again to one already connected.
 - GUI sync: `ftp:remoteChanged` (every FTP mutation, `ftpHandlers.ts`) and `agent:session`
   (connect/disconnect) feed `useAgentSync`.
 - `ftpb` (`src/main/cli/`): a dependency-free MCP client of the same endpoint (one POST per request
@@ -174,6 +187,7 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
 
 Before implementing:
+
 - State your assumptions explicitly. If uncertain, ask.
 - If multiple interpretations exist, present them - don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.
@@ -196,12 +210,14 @@ Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, sim
 **Touch only what you must. Clean up only your own mess.**
 
 When editing existing code:
+
 - Don't "improve" adjacent code, comments, or formatting.
 - Don't refactor things that aren't broken.
 - Match existing style, even if you'd do it differently.
 - If you notice unrelated dead code, mention it - don't delete it.
 
 When your changes create orphans:
+
 - Remove imports/variables/functions that YOUR changes made unused.
 - Don't remove pre-existing dead code unless asked.
 
@@ -212,11 +228,13 @@ The test: Every changed line should trace directly to the user's request.
 **Define success criteria. Loop until verified.**
 
 Transform tasks into verifiable goals:
+
 - "Add validation" → "Write tests for invalid inputs, then make them pass"
 - "Fix the bug" → "Write a test that reproduces it, then make it pass"
 - "Refactor X" → "Ensure tests pass before and after"
 
 For multi-step tasks, state a brief plan:
+
 ```
 1. [Step] → verify: [check]
 2. [Step] → verify: [check]
@@ -228,4 +246,3 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
-

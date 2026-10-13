@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { ConnKey } from '@shared/connKey'
 import type { RemoteFolderPreview, LocalFolderPreview } from '@shared/types/gallery'
 
 type RemoteState =
@@ -24,7 +25,8 @@ interface GalleryStore {
   setLocalError: (key: string, error: string) => void
 
   clearAll: () => void
-  clearRemote: () => void
+  /** 그 서버의 폴더 미리보기 항목만 지운다(키 `server|folderPath`). 다른 서버의 것은 남는다 */
+  clearRemote: (server: ConnKey) => void
 }
 
 export const useGalleryStore = create<GalleryStore>((set) => ({
@@ -68,5 +70,10 @@ export const useGalleryStore = create<GalleryStore>((set) => ({
     })),
 
   clearAll: () => set({ remoteFolderPreviews: {}, localFolderPreviews: {} }),
-  clearRemote: () => set({ remoteFolderPreviews: {} })
+  clearRemote: (server) =>
+    set((s) => ({
+      remoteFolderPreviews: Object.fromEntries(
+        Object.entries(s.remoteFolderPreviews).filter(([key]) => !key.startsWith(`${server}|`))
+      )
+    }))
 }))

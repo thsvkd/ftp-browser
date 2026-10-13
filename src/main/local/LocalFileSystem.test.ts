@@ -231,4 +231,73 @@ describe('LocalFileSystem', () => {
       expect(await fs.readFile(path.join(dir, 'marker.txt'), 'utf8')).toBe('untouched')
     })
   })
+
+  describe('statEntries', () => {
+    it('stats absolute paths in input order with resolved paths and folder-aware isImage', async () => {
+      // covers: Test-870
+      const file = path.join(tmpDir, 'a.txt')
+      const sub = path.join(tmpDir, 'sub')
+      const imgDir = path.join(tmpDir, 'x.jpg')
+      const photo = path.join(tmpDir, 'p.JPG')
+      await fs.writeFile(file, 'hello')
+      await fs.mkdir(sub)
+      await fs.writeFile(path.join(sub, 'inner.txt'), 'inner')
+      await fs.mkdir(imgDir)
+      await fs.writeFile(photo, 'x')
+
+      const result = await localFs.statEntries([file, sub + path.sep, photo, imgDir])
+
+      expect(result.map((e) => e.path)).toEqual([file, sub, photo, imgDir])
+      expect(result.map((e) => e.name)).toEqual(['a.txt', 'sub', 'p.JPG', 'x.jpg'])
+      expect(result.map((e) => e.type)).toEqual(['file', 'directory', 'file', 'directory'])
+      expect(result[0].size).toBe((await fs.stat(file)).size)
+      expect(result[0].modifiedAt).toBe((await fs.stat(file)).mtime.toISOString())
+      expect(result.map((e) => e.isImage)).toEqual([false, false, true, false])
+      // 폴더의 하위 파일은 열거하지 않는다
+      expect(result.some((e) => e.name === 'inner.txt')).toBe(false)
+
+      const root = path.parse(tmpDir).root
+      const [rootEntry] = await localFs.statEntries([root])
+      expect(rootEntry.name).not.toBe('')
+      expect(rootEntry.name).toBe(root)
+      expect(rootEntry.path).toBe(path.resolve(root))
+    })
+
+    it('drops unreadable inputs silently instead of throwing', async () => {
+      // covers: Test-871
+      const a = path.join(tmpDir, 'a.txt')
+      const b = path.join(tmpDir, 'b.txt')
+      await fs.writeFile(a, 'a')
+      await fs.writeFile(b, 'b')
+
+      const mixed = await localFs.statEntries([
+        a,
+        path.join(tmpDir, 'missing.txt'),
+        'rel/x.txt',
+        '',
+        42,
+        null,
+        b
+      ])
+
+      expect(mixed.map((e) => e.path)).toEqual([a, b])
+      expect(
+        await localFs.statEntries([path.join(tmpDir, 'missing.txt'), 'rel/x.txt', '', 42, null])
+      ).toEqual([])
+      expect(await localFs.statEntries([])).toEqual([])
+    })
+
+    it('judges a symlink by its target, not the link itself', async () => {
+      // covers: Test-882
+      const sub = path.join(tmpDir, 'sub')
+      const link = path.join(tmpDir, 'link')
+      await fs.mkdir(sub)
+      await fs.symlink(sub, link, 'junction')
+
+      const [entry] = await localFs.statEntries([link])
+
+      expect(entry.type).toBe('directory')
+      expect(entry.path).toBe(link)
+    })
+  })
 })

@@ -1,7 +1,8 @@
-/** 탭이 보이는 목록: 정렬(자연 순서, 폴더 먼저)과 걸러내기(숨김·찾기·사진만). */
+/** 탭이 보이는 목록: 정렬(자연 순서, 폴더 먼저)과 걸러내기(숨김·찾기·파일 종류). */
 import { getFileExtension } from './utils'
 import { matchesTypeAhead, normalizeTypedChar } from './typeAhead'
 import type { ExplorerEntry } from './explorerEntry'
+import type { EntryMatcher } from './fileCategories'
 
 export type SortKey = 'name' | 'size' | 'modified' | 'type'
 
@@ -35,7 +36,8 @@ export function sortEntries(entries: readonly ExplorerEntry[], sort: SortSpec): 
 
 export interface FilterOptions {
   query: string
-  photosOnly: boolean
+  /** 파일 종류 필터(`createMatcher`). null이면 거르지 않는다. */
+  matcher: EntryMatcher | null
   showHidden: boolean
 }
 
@@ -45,27 +47,24 @@ export interface FilterResult {
   hiddenCount: number
   /** 찾기 문자열에 맞지 않아 빠진 수 */
   queryCount: number
-  /** 찾기를 통과했지만 사진만 칩으로 빠진 수 */
-  photosCount: number
+  /** 찾기를 통과했지만 파일 종류 필터로 빠진 수 */
+  filterCount: number
 }
 
-const PHOTO_CATEGORIES = new Set(['image', 'raw', 'video'])
-
-/** 숨김 → 찾기 → 사진만 순으로 거르고, 단계마다 빠진 수를 센다. */
+/** 숨김 → 찾기 → 파일 종류 순으로 거르고, 단계마다 빠진 수를 센다. */
 export function filterEntries(
   entries: readonly ExplorerEntry[],
-  { query, photosOnly, showHidden }: FilterOptions
+  { query, matcher, showHidden }: FilterOptions
 ): FilterResult {
   const q = query.trim().toLowerCase()
   // 한글 초성: 입력해서 고르기와 같은 규칙(ㄴ = s)으로 맞춘다.
   const initials = [...q].map(normalizeTypedChar).join('')
-  const result: FilterResult = { visible: [], hiddenCount: 0, queryCount: 0, photosCount: 0 }
+  const result: FilterResult = { visible: [], hiddenCount: 0, queryCount: 0, filterCount: 0 }
   for (const e of entries) {
     if (!showHidden && e.hidden) result.hiddenCount++
     else if (q && !e.name.toLowerCase().includes(q) && !matchesTypeAhead(e.name, initials))
       result.queryCount++
-    else if (photosOnly && e.type !== 'directory' && !PHOTO_CATEGORIES.has(e.category))
-      result.photosCount++
+    else if (matcher && !matcher(e)) result.filterCount++
     else result.visible.push(e)
   }
   return result

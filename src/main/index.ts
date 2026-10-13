@@ -7,7 +7,7 @@ import { registerFtpHandlers } from './ipc/ftpHandlers'
 import { registerLocalFsHandlers } from './ipc/localFsHandlers'
 import { registerOperationHandlers } from './ipc/operationHandlers'
 import { registerTransferHandlers } from './ipc/transferHandlers'
-import { registerThumbnailHandlers } from './ipc/thumbnailHandlers'
+import { registerThumbnailHandlers, thumbnailEvents } from './ipc/thumbnailHandlers'
 import { registerPreviewHandlers } from './ipc/previewHandlers'
 import { registerDragHandlers } from './ipc/dragHandlers'
 import { registerGalleryHandlers } from './ipc/galleryHandlers'
@@ -18,6 +18,11 @@ import { McpService } from './mcp/McpService'
 import { createMcpToolServer, type McpToolDeps } from './mcp/mcpTools'
 import { createJobTracker } from './mcp/jobTracker'
 import { createThumbnailPreviewer } from './mcp/thumbnailPreviews'
+import { ConnectionRegistry, createSession } from './ftp/ConnectionRegistry'
+import { RemoteFolderPreviewCache } from './ftp/RemoteFolderPreviewCache'
+import { TransferHub } from './transfer/TransferHub'
+import { CacheManager } from './thumbnail/CacheManager'
+import { ThumbnailGenerator } from './thumbnail/ThumbnailGenerator'
 import { registerDevtools } from './debug/devtools'
 import { applyApplicationMenu } from './menu/appMenu'
 import { UpdateManager, isAutomaticUpdateSupported } from './update/UpdateManager'
@@ -127,29 +132,39 @@ app.whenReady().then(() => {
     (err) => console.error('[passwords] Saved-password migration failed:', err)
   )
 
+  // 연결마다 세션(매니저·파일 작업·전송 큐·풀·썸네일·폴더 미리보기 큐)이 하나다. 세션 팩토리가 쓰는
+  // 캐시·생성기는 앱에 하나라 레지스트리보다 먼저 만든다(multi-connection §8-4).
+  const cacheManager = new CacheManager(db)
+  const generator = new ThumbnailGenerator()
+  const folderCache = new RemoteFolderPreviewCache(db)
+  const shared = { cacheManager, generator, folderCache, ...thumbnailEvents(win) }
+  const registry = new ConnectionRegistry((key) => createSession(key, shared))
+  const hub = new TransferHub(registry)
+
   // Register IPC handlers
   const operationManager = registerOperationHandlers(win)
-  const { manager, fileOps } = registerFtpHandlers(win, operationManager, passwords)
+  registerFtpHandlers(win, operationManager, passwords, registry)
   const localFs = registerLocalFsHandlers(win, operationManager)
-  const transferQueue = registerTransferHandlers(win, fileOps, manager, localFs)
-  const { cacheManager, generator } = registerThumbnailHandlers(win, db, manager)
-  registerPreviewHandlers(db, manager)
-  registerDragHandlers(manager)
-  registerGalleryHandlers(win, db, manager)
+  registerTransferHandlers(win, registry, hub, localFs)
+  registerThumbnailHandlers(registry, cacheManager)
+  registerPreviewHandlers(db, registry)
+  registerDragHandlers(registry)
+  registerGalleryHandlers(win, registry, folderCache)
   registerAppHandlers()
 
   // 에이전트(내장 MCP 서버, ftpb)는 GUI와 같은 연결·전송 큐·파일 작업·썸네일 캐시를 쓴다(기본 꺼짐).
+  // 도구마다 대상 연결을 고른다(server 인자, 마지막 사용 연결, 유일한 연결 — multi-connection MC18).
   const agentDeps: McpToolDeps = {
     version: app.getVersion(),
     db,
-    ftp: manager,
-    fileOps,
-    queue: transferQueue,
+    connections: registry,
+    transfers: hub,
+    target: {},
     operations: operationManager,
     localFs,
     passwords,
-    previews: createThumbnailPreviewer(manager, generator, cacheManager),
-    jobs: createJobTracker(transferQueue, operationManager),
+    previews: createThumbnailPreviewer(registry, generator, cacheManager),
+    jobs: createJobTracker(hub, operationManager),
     onSession: (event) => {
       if (!win.isDestroyed()) win.webContents.send('agent:session', event)
     }

@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
 import { fallbackBatchMeta, useTransferStore } from './useTransferStore'
 import { useListingStore } from './useListingStore'
 import { useSettingsStore } from './useSettingsStore'
 import type { Loc } from '@renderer/lib/explorerEntry'
 import type { TransferJob } from '@shared/types/transfer'
 
+vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }))
+
 function job(id: string, overrides: Partial<TransferJob> = {}): TransferJob {
   return {
     id,
+    server: 'me@nas.local:21',
     direction: 'upload',
     localPath: `/local/${id}`,
     remotePath: `/remote/${id}`,
@@ -110,13 +114,15 @@ describe('useTransferStore.send', () => {
     })
     const request = { direction: 'download' as const, sources: ['/p/a.jpg'], destDir: 'C:\\dl' }
 
-    const sent = useTransferStore.getState().send(request, { label: 'a.jpg', to })
+    const sent = useTransferStore
+      .getState()
+      .send('me@nas.local:21', request, { label: 'a.jpg', to })
     expect(useTransferStore.getState().pendingSends).toEqual([
       { id: expect.any(String), label: 'a.jpg' }
     ])
     const result = await sent
 
-    expect(invoke).toHaveBeenCalledWith('transfer:send', request)
+    expect(invoke).toHaveBeenCalledWith('transfer:send', 'me@nas.local:21', request)
     expect(result?.batchId).toBe('b1')
     expect(useTransferStore.getState().batchMeta).toEqual({ b1: { label: 'a.jpg', to } })
     expect(useTransferStore.getState().pendingSends).toEqual([])
@@ -140,21 +146,124 @@ describe('useTransferStore.send', () => {
       to: { side: 'local', path: 'C:\\dl\\photos' }
     })
     expect(
-      fallbackBatchMeta([job('4', { remotePath: '/up/x/a.jpg', fileName: 'a.jpg' })], 'me@h:21')
+      fallbackBatchMeta([
+        job('4', { server: 'me@h:21', remotePath: '/up/x/a.jpg', fileName: 'a.jpg' })
+      ])
     ).toEqual({ label: 'a.jpg', to: { side: 'remote', path: '/up/x', server: 'me@h:21' } })
 
-    // The fallback is fixed when the batch is first seen: a later connection does not relabel it.
-    const up = job('5', { batchId: 'b2', remotePath: '/up/y/b.jpg', fileName: 'b.jpg' })
-    useTransferStore.getState().applyUpdate({ upserts: [up], removedIds: [] }, 'me@h:21')
-    useTransferStore
-      .getState()
-      .applyUpdate({ upserts: [{ ...up, status: 'active' }], removedIds: [] }, 'other@h:21')
+    // The fallback is fixed when the batch is first seen: a later update does not relabel it.
+    const up = job('5', {
+      server: 'me@h:21',
+      batchId: 'b2',
+      remotePath: '/up/y/b.jpg',
+      fileName: 'b.jpg'
+    })
+    useTransferStore.getState().applyUpdate({ upserts: [up], removedIds: [] })
+    useTransferStore.getState().applyUpdate({
+      upserts: [{ ...up, status: 'active', remotePath: '/moved/b.jpg' }],
+      removedIds: []
+    })
     expect(useTransferStore.getState().batchMeta.b2).toEqual({
       label: 'b.jpg',
       to: { side: 'remote', path: '/up/y', server: 'me@h:21' }
     })
     // A batch sent from the GUI keeps its own meta.
     expect(useTransferStore.getState().batchMeta.b1).toEqual({ label: 'a.jpg', to })
+  })
+})
+
+describe('useTransferStore batch meta per connection', () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ language: 'en' })
+    useTransferStore.setState({ jobs: [], batchMeta: {} })
+  })
+
+  it("labels a batch without meta by its job's connection, relay batches included", () => {
+    // covers: Test-1015
+    const B = 'bob@b.example.com:2121'
+    // 메타 없는 업로드 배치: 목적지 서버는 그 작업의 server다(지금 연결과 무관)
+    useTransferStore.getState().applyUpdate({
+      upserts: [
+        job('u1', { server: B, batchId: 'up', remotePath: '/in/a.jpg', fileName: 'a.jpg' }),
+        job('u2', { server: B, batchId: 'up', remotePath: '/in/sub/b.jpg', fileName: 'b.jpg' })
+      ],
+      removedIds: []
+    })
+    expect(useTransferStore.getState().batchMeta.up).toEqual({
+      label: 'a.jpg and 1 more',
+      to: { side: 'remote', path: '/in', server: B }
+    })
+
+    // relay 배치: 받는 쪽 원격 폴더가 목적지다
+    const relay = job('r1', {
+      server: B,
+      direction: 'relay',
+      sourceServer: 'me@a.example.com:21',
+      sourcePath: '/photos/x/c.jpg',
+      localPath: '',
+      remotePath: '/photos/x/c.jpg',
+      fileName: 'c.jpg',
+      batchId: 'rl'
+    })
+    expect(fallbackBatchMeta([relay])).toEqual({
+      label: 'c.jpg',
+      to: { side: 'remote', server: B, path: '/photos/x' }
+    })
+    useTransferStore.getState().applyUpdate({ upserts: [relay], removedIds: [] })
+    expect(useTransferStore.getState().batchMeta.rl.to).toEqual({
+      side: 'remote',
+      server: B,
+      path: '/photos/x'
+    })
+  })
+})
+
+describe('useTransferStore relay partial cleanup toast', () => {
+  const B = 'you@b.example:2121'
+  const relay = (id: string, batchId: string, overrides: Partial<TransferJob> = {}): TransferJob =>
+    job(id, {
+      batchId,
+      direction: 'relay',
+      server: B,
+      sourceServer: 'me@a.example:21',
+      sourcePath: `/photos/${id}`,
+      localPath: '',
+      remotePath: `/in/${id}`,
+      fileName: id,
+      ...overrides
+    })
+  const apply = (...upserts: TransferJob[]): void =>
+    useTransferStore.getState().applyUpdate({ upserts, removedIds: [] })
+
+  beforeEach(() => {
+    vi.mocked(toast).mockClear()
+    useSettingsStore.setState({ language: 'en' })
+    useTransferStore.setState({ jobs: [], batchMeta: {} })
+  })
+
+  it('toasts once per batch when main reports a removed partial file, and never on a guess', () => {
+    // covers: Test-1027
+    apply(relay('a.jpg', 'r1', { status: 'active' }), relay('b.jpg', 'r1', { status: 'active' }))
+    apply(relay('a.jpg', 'r1', { status: 'failed', error: 'x' }))
+    expect(toast).not.toHaveBeenCalled()
+    apply(relay('a.jpg', 'r1', { status: 'failed', error: 'x', partialRemoved: true }))
+    apply(relay('a.jpg', 'r1', { status: 'failed', error: 'x', partialRemoved: true }))
+    apply(relay('b.jpg', 'r1', { status: 'cancelled', partialRemoved: true }))
+    expect(vi.mocked(toast).mock.calls).toEqual([
+      ['Removed the incomplete copy of a.jpg on you@b.example:2121']
+    ])
+
+    // 지웠다는 표시가 없는 실패·취소에는 토스트가 없다
+    vi.mocked(toast).mockClear()
+    apply(
+      relay('zero.bin', 'r2', { status: 'failed', error: `${B}: Permission denied` }),
+      relay('single.bin', 'r3', {
+        status: 'failed',
+        error: `${B} allows only one connection, so a server-to-server copy can't run.`
+      }),
+      relay('gone.bin', 'r4', { status: 'cancelled' })
+    )
+    expect(toast).not.toHaveBeenCalled()
   })
 })
 

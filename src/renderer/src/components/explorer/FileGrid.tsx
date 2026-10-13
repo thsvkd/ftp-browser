@@ -7,11 +7,12 @@ import { GAP, LABEL_H, PAD } from '@renderer/lib/explorerLayout'
 import { itemIndicesInRect, type GridLayout } from '@renderer/lib/gridGeometry'
 import { currentPlatform, isZoomModifier } from '@renderer/lib/platform'
 import { viewportThumbnailTargets } from '@renderer/lib/thumbnailViewport'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
+import { usePaneId } from './paneContext'
 import { Tile } from './Tile'
 import type { ItemProps } from './useItem'
+import type { ConnKey } from '@shared/connKey'
 
 /** Ctrl+휠·Ctrl+= / Ctrl+− 한 번에 바뀌는 타일 크기(px) */
 export const ZOOM_STEP = 16
@@ -26,8 +27,9 @@ export interface ViewProps {
 }
 
 /**
- * 가상화 그리드. 원격이면 보이는 행 ± 한 화면의 이미지 썸네일을 가까운 순 배치 하나로 요청한다
- * (thumbnail-viewport-priority). Ctrl·Cmd+휠은 타일 크기를 바꾼다(네이티브 non-passive 리스너).
+ * 가상화 그리드. `server`(그 원격 위치의 연결)가 있으면 보이는 행 ± 한 화면의 이미지 썸네일을 가까운
+ * 순 배치 하나로 그 연결에 요청한다(thumbnail-viewport-priority). Ctrl·Cmd+휠은 타일 크기를 바꾼다
+ * (네이티브 non-passive 리스너).
  */
 export function FileGrid({
   items,
@@ -36,12 +38,12 @@ export function FileGrid({
   setSelection,
   getSelection,
   layout,
-  remote
-}: ViewProps & { layout: GridLayout; remote: boolean }): React.JSX.Element {
+  server
+}: ViewProps & { layout: GridLayout; server: ConnKey | undefined }): React.JSX.Element {
   const { cols, cellWidth, imageHeight, rowHeight } = layout
-  const host = useFtpStore((s) => s.host)
-  const port = useFtpStore((s) => s.port)
   const rowCount = Math.ceil(items.length / cols)
+  // 이 패널의 뷰어(split-view P2). 두 패널이 같은 서버여도 서로의 배치를 교체하지 않는다.
+  const viewerId = usePaneId()
 
   const virtualizer = useVirtualizer({
     count: rowCount,
@@ -60,7 +62,7 @@ export function FileGrid({
 
   // 보이는 행 ± 한 화면 안의 이미지를 배치 하나로 요청한다. main은 직전 배치를 교체한다.
   useEffect(() => {
-    if (!remote || visibleStart === undefined || visibleEnd === undefined) return
+    if (!server || visibleStart === undefined || visibleEnd === undefined) return
     const { thumbnails, errors, clearError } = useThumbnailStore.getState()
     const inWindow = viewportThumbnailTargets(
       items,
@@ -68,7 +70,7 @@ export function FileGrid({
       { startIndex: visibleStart, endIndex: visibleEnd },
       visibleEnd - visibleStart + 1
     ).map(({ entry, priority }) => ({
-      key: generateCacheKeyRenderer(host, port, entry.path, entry.size, entry.modifiedAt),
+      key: generateCacheKeyRenderer(server, entry.path, entry.size, entry.modifiedAt),
       request: {
         remotePath: entry.path,
         fileName: entry.name,
@@ -84,8 +86,8 @@ export function FileGrid({
       .map((x) => x.request)
     // 창을 벗어난 실패 항목은 에러를 지워, 다시 보일 때 재요청되게 한다.
     for (const key of Object.keys(errors)) if (!windowKeys.has(key)) clearError(key)
-    window.api.invoke('thumbnail:requestBatch', requests)
-  }, [remote, visibleStart, visibleEnd, items, cols, host, port])
+    window.api.invoke('thumbnail:requestBatch', server, viewerId, requests)
+  }, [server, viewerId, visibleStart, visibleEnd, items, cols])
 
   useEffect(() => {
     const el = scrollRef.current

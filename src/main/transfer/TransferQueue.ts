@@ -18,6 +18,7 @@ import {
 } from './segmentedDownload'
 import { classifyError, isRetryableError, socketErrorDetail } from '../utils/errorClassifier'
 import { markSparse } from '../utils/sparseFile'
+import type { ConnKey } from '@shared/connKey'
 import type {
   TransferJob,
   TransferDirection,
@@ -25,8 +26,8 @@ import type {
   TransferUpdate
 } from '@shared/types/transfer'
 
-const MAX_RETRIES = 3
-const RETRY_DELAY_MS = 2000
+export const MAX_RETRIES = 3
+export const RETRY_DELAY_MS = 2000
 /**
  * 풀 로그인이 실패한 뒤 새 항목을 시작하지 않고 쉬는 시간. 연달아 실패할 때마다 두 배로 늘린다.
  * 로그인 실패는 작업 탓이 아니므로 작업마다 재시도/실패로 치르지 않는다.
@@ -35,7 +36,7 @@ export const LOGIN_HOLD_MS = 500
 /** 연달아 이만큼 로그인이 실패하면 남은 대기 작업을 그 에러 하나로 한꺼번에 실패시킨다. */
 export const MAX_LOGIN_FAILURES = 4
 /** 변경분을 렌더러로 내보내는 최소 간격(초당 10회). 파일 수천 개여도 IPC 부하가 O(변경된 작업)으로 묶인다. */
-const FLUSH_MS = 100
+export const FLUSH_MS = 100
 /**
  * REST 명령 자체에 대한 거부 응답(RFC 959: 500/501/502, 504는 해당 인자 미구현).
  * 데이터 전에 오는 다른 응답(425, 450, 550 등)은 RETR·PASV의 것이라 REST 문제로 보지 않는다.
@@ -43,7 +44,7 @@ const FLUSH_MS = 100
 const REST_REJECT_CODES = new Set([500, 501, 502, 504])
 
 /** 작업에 보일 에러 메시지. 소켓 연결 에러면 어느 주소로의 연결인지 덧붙여 나중에 진단할 수 있게 한다. */
-function jobError(err: unknown): string {
+export function jobError(err: unknown): string {
   const { message } = classifyError(err)
   const detail = socketErrorDetail(err)
   return detail ? `${message} (${detail})` : message
@@ -91,9 +92,26 @@ interface StreamProbe {
   b0: number
 }
 
+/** 빌린 슬롯. 큐의 `running`에 들어 있고 `done`이 돌려준다(multi-connection MC24, §8-3). */
+export interface BorrowedClient {
+  client: Client
+  /** 끝났다. err가 없으면 release, 있으면 discard. 그 뒤 running을 줄이고 pump한다. 두 번째부터는 무시한다 */
+  done(err?: unknown): void
+}
+
+/** 줄 선 빌림 하나. 받거나 거절되거나 abort되면 settled다. */
+interface BorrowRequest {
+  settled: boolean
+  resolve(lease: BorrowedClient | null): void
+  reject(err: unknown): void
+}
+
 /** 스케줄러가 풀 슬롯 하나에서 실행하는 단위. 보통 작업 하나가 항목 하나이고, 분할 다운로드는 구간마다 하나다. */
 interface WorkItem {
+  /** 빌림 항목이면 목록에 없는 자리표시 작업이다(markDirty가 무시한다) */
   job: TransferJob
+  /** 있으면 작업이 아니라 슬롯 빌림이다. 클라이언트를 받으면 빌린 쪽에 넘긴다 */
+  borrow?: BorrowRequest
   /** 업로드 배치의 원격 디렉터리. 같은 배치의 항목이 하나의 객체를 공유한다. */
   dirs?: BatchDirs
   /**
@@ -106,6 +124,12 @@ interface WorkItem {
 }
 
 type SegmentItem = WorkItem & Required<Pick<WorkItem, 'segment'>>
+
+/** 큐 생성자 옵션 */
+export interface QueueOptions {
+  /** 이 큐의 작업이 도는 연결(`TransferJob.server`). 없으면 `''`(기존 테스트). */
+  server?: ConnKey
+}
 
 /** enqueueBatch 옵션 */
 export interface EnqueueOptions {
@@ -162,7 +186,8 @@ export class TransferQueue extends EventEmitter {
 
   constructor(
     private fileOps: FtpFileOperations,
-    private pool: TransferClientPool
+    private pool: TransferClientPool,
+    private queueOptions: QueueOptions = {}
   ) {
     super()
   }
@@ -187,9 +212,11 @@ export class TransferQueue extends EventEmitter {
     if (items.length === 0) return []
 
     const batchId = items.length > 1 || forceBatch ? randomUUID() : undefined
+    const { server = '' } = this.queueOptions
     const jobs: TransferJob[] = items.map((item) => ({
       id: randomUUID(),
       batchId,
+      server,
       direction,
       ...item,
       transferredBytes: 0,
@@ -300,6 +327,65 @@ export class TransferQueue extends EventEmitter {
     return [...this.queue]
   }
 
+  /**
+   * 이 큐의 슬롯 하나를 빌린다(서버 간 전송, MC24). FIFO에서 일반 항목처럼 기다리고, 받으면 큐의 running에
+   * 들어 풀 한도·LIMIT·로그인 실패 처리를 그대로 탄다. null = 보조 연결 불가(MC28). 큐가 대기를 실패시키면
+   * 그 오류로 reject. signal이 abort되면 줄에서 빠지고(reject), 받는 중이던 클라이언트는 돌려준다.
+   */
+  borrow(signal?: AbortSignal): Promise<BorrowedClient | null> {
+    return new Promise((resolve, reject) => {
+      const request: BorrowRequest = {
+        settled: false,
+        resolve: (lease) => {
+          request.settled = true
+          resolve(lease)
+        },
+        reject: (err) => {
+          request.settled = true
+          reject(err)
+        }
+      }
+      if (signal?.aborted) return request.reject(new Error('Cancelled'))
+      signal?.addEventListener('abort', () => {
+        if (!request.settled) request.reject(new Error('Cancelled'))
+      })
+      const job: TransferJob = {
+        id: `borrow:${randomUUID()}`,
+        server: this.queueOptions.server ?? '',
+        direction: 'relay',
+        localPath: '',
+        remotePath: '',
+        fileName: '',
+        totalBytes: 0,
+        transferredBytes: 0,
+        status: 'pending'
+      }
+      this.work.push({ job, borrow: request })
+      this.pump()
+    })
+  }
+
+  /** 빌림 항목이 받은 클라이언트를 넘긴다. 그사이 abort됐으면 돌려준다. null은 그대로 null이다. */
+  private lend(request: BorrowRequest, client: Client | null): void {
+    if (request.settled || client === null) {
+      if (client) this.pool.release(client)
+      if (!request.settled) request.resolve(null)
+      this.finishRun()
+      return
+    }
+    let returned = false
+    request.resolve({
+      client,
+      done: (err?: unknown) => {
+        if (returned) return
+        returned = true
+        if (err === undefined) this.pool.release(client)
+        else this.pool.discard(client)
+        this.finishRun()
+      }
+    })
+  }
+
   private markDirty(job: TransferJob): void {
     // clearCompleted로 지운 작업에 늦게 온 진행률·상태 변경은 버린다. 다시 보내면 렌더러에 지울 수 없는 행이 생긴다.
     if (!this.byId.has(job.id)) return
@@ -377,8 +463,9 @@ export class TransferQueue extends EventEmitter {
     return undefined
   }
 
-  /** 작업 항목은 대기 중일 때, 구간 항목은 그 분할이 아직 끝나지 않았을 때(작업은 active) 실행한다. */
+  /** 작업 항목은 대기 중일 때, 구간 항목은 그 분할이 아직 끝나지 않았을 때(작업은 active), 빌림은 아직 기다릴 때 실행한다. */
   private isRunnable(item: WorkItem): boolean {
+    if (item.borrow) return !item.borrow.settled
     return item.segment ? !item.segment.state.stopped : item.job.status === 'pending'
   }
 
@@ -419,6 +506,8 @@ export class TransferQueue extends EventEmitter {
       this.loginHold = null
     }
     this.pump()
+
+    if (item.borrow) return this.lend(item.borrow, client)
 
     if (item.segment) {
       await this.runSegment(item as SegmentItem, client)
@@ -910,6 +999,7 @@ export class TransferQueue extends EventEmitter {
   }
 
   private fail(item: WorkItem, err: unknown): void {
+    if (item.borrow) return item.borrow.reject(err)
     const { job } = item
     job.status = 'failed'
     job.error = jobError(err)
