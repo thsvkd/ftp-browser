@@ -111,6 +111,15 @@ export function setupExplorer(
   } = {}
 ): ExplorerHarness {
   const layout = stubGridLayout()
+  // 경로 막대의 도구 측정 줄(`[data-path-measure]`) 안은 40px, 나머지는 스텁 그대로 1200px다. 그러지
+  // 않으면 도구 하나하나가 막대만큼 넓어 모두 ⋯로 접힌다(explorer-ux-polish §4 함정 1). 막대 폭은
+  // 테스트가 `HTMLElement.prototype.clientWidth`로 정한다. `layout.restore()`가 되돌린다.
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get(this: HTMLElement): number {
+      return this.closest('[data-path-measure]') ? 40 : 1200
+    }
+  })
   const h: ExplorerHarness = {
     api: makeApiMock(vi.fn()),
     invoke: vi.fn(),

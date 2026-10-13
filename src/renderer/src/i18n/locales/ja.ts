@@ -291,6 +291,7 @@ export const ja = {
   'path.editHint': '空白をクリックするとパスを入力できます (Ctrl+L)',
   'path.edit': 'パスを入力',
   'path.hidden': '省略されたパス',
+  'path.moreTools': 'その他のツール',
 
   'filter.find': 'このフォルダー内を検索',
   'filter.findTooltip': 'このフォルダー内を検索 (Ctrl+F)',

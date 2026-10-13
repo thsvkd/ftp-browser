@@ -327,6 +327,7 @@ export const ru = {
   'path.editHint': 'Щёлкните пустое место, чтобы ввести путь (Ctrl+L)',
   'path.edit': 'Ввести путь',
   'path.hidden': 'Скрытые части пути',
+  'path.moreTools': 'Другие инструменты',
 
   'filter.find': 'Найти в этой папке',
   'filter.findTooltip': 'Найти в этой папке (Ctrl+F)',

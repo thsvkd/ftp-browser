@@ -6,21 +6,29 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Ellipsis,
   FolderOpen,
   FolderPlus,
   Info,
   LayoutGrid,
   List,
+  ListFilter,
   RefreshCw,
   Search,
   X
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { useT, type MessageKey } from '@renderer/i18n'
+import { useLocale, useT, type MessageKey } from '@renderer/i18n'
 import type { SortKey } from '@renderer/lib/entryList'
 import { locKey, parentPath, type ExplorerEntry, type Loc } from '@renderer/lib/explorerEntry'
 import { fitCrumbs, pathCrumbs, type Crumb } from '@renderer/lib/pathCrumbs'
 import { SPRING_MS } from '@renderer/lib/explorerLayout'
+import {
+  PATH_TOOL_ORDER,
+  fitPathTools,
+  type PathBarFit,
+  type PathToolId
+} from '@renderer/lib/pathBarTools'
 import { sourceLabel } from '@renderer/lib/sendItems'
 import { cn } from '@renderer/lib/utils'
 import { useListingStore } from '@renderer/stores/useListingStore'
@@ -28,7 +36,8 @@ import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
 import { SourceBadge } from '@renderer/components/common/SourceBadge'
 import { useDropTarget } from './dnd'
-import { FileFilterMenu } from './FileFilterMenu'
+import { useFilterSummary } from '@renderer/hooks/useFileFilter'
+import { FileFilterMenu, FilterTriggerPlaceholder } from './FileFilterMenu'
 import { ItemMenu, type MenuItem } from './ItemMenu'
 
 const SORT_LABEL: Record<SortKey, MessageKey> = {
@@ -140,7 +149,8 @@ function Crumbs({
   tabId: string
   loc: Loc
   onEdit: () => void
-  onMenu: (x: number, y: number, hidden: Crumb[]) => void
+  /** `opener`는 "…" 버튼, `keyboard`는 Enter·Space로 눌렀는가(click의 detail 0, X12) */
+  onMenu: (x: number, y: number, hidden: Crumb[], opener: HTMLElement, keyboard: boolean) => void
 }): React.JSX.Element {
   const t = useT()
   const crumbs = pathCrumbs(loc.side, loc.path)
@@ -202,7 +212,7 @@ function Crumbs({
               className="h-7 rounded-md px-1.5 text-[var(--mu)] hover:bg-[var(--hv)]"
               onClick={(e) => {
                 const r = e.currentTarget.getBoundingClientRect()
-                onMenu(r.left, r.bottom + 4, hidden)
+                onMenu(r.left, r.bottom + 4, hidden, e.currentTarget, e.detail === 0)
               }}
             >
               …
@@ -258,6 +268,9 @@ export interface PathBarProps {
   dim?: boolean
   editing: boolean
   onEditingChange: (editing: boolean) => void
+  /** 찾기 칸이 열렸는가(Ctrl+F·돋보기·⋯의 찾기). 열림이 거짓에서 참이 되면 칸에 포커스를 준다(X7) */
+  searchOpen: boolean
+  onSearchOpenChange: (open: boolean) => void
   /** 현재 폴더의 목록(숨김 파일 설정 반영, 찾기·필터 전). 필터 드롭다운의 개수 기준이다. */
   entries: readonly ExplorerEntry[]
   /** 찾기를 통과했지만 파일 종류 필터로 빠진 수 */
@@ -267,12 +280,23 @@ export interface PathBarProps {
   onReload: () => void
 }
 
-/** 경로 막대: ‹ › ↑, 접히는 조각(빈 곳·Ctrl+L로 입력), 찾기, 파일 종류 필터, 정렬, 보기, 새 폴더, 세부 정보. */
+const sortBtn =
+  'flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-semibold text-[var(--mu)] hover:bg-[var(--hv)] hover:text-[var(--tx)]'
+const searchBox = (compact: boolean): string =>
+  cn('relative flex h-9 shrink-0 items-center', compact ? 'w-[150px]' : 'w-[200px]')
+
+/**
+ * 경로 막대: ‹ › ↑, 접히는 조각(빈 곳·Ctrl+L로 입력), 찾기, 파일 종류 필터, 정렬, 보기, 새 폴더, 세부 정보.
+ * 어느 폭에서도 한 줄이다. 들어가지 않는 도구는 오른쪽 끝의 ⋯ 메뉴로 접는다(explorer-ux-polish X1~X9):
+ * 보이지 않는 측정 줄에 지금 모양의 도구를 그려 폭을 재고 `fitPathTools`로 고른다.
+ */
 export function PathBar({
   tab,
   dim = false,
   editing,
   onEditingChange,
+  searchOpen,
+  onSearchOpenChange,
   entries,
   filterHidden,
   canWrite,
@@ -280,33 +304,115 @@ export function PathBar({
   onReload
 }: PathBarProps): React.JSX.Element {
   const t = useT()
+  const locale = useLocale()
   const railTab = useShelfStore((s) => s.railTab)
   const barRef = useRef<HTMLDivElement>(null)
+  const measureRef = useRef<HTMLDivElement>(null)
+  // ⋯ 버튼. 접힌 필터 팝오버의 기준 요소다.
+  const [moreEl, setMoreEl] = useState<HTMLButtonElement | null>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
   const [compact, setCompact] = useState(false)
-  const [searchOpen, setSearchOpen] = useState(false)
+  // `forSearch`: 이 결과를 잰 찾기 모양(열린 칸이면 참). 지금 `showSearch`와 같아야 칸 자리가 확정이다.
+  const [fit, setFit] = useState<(PathBarFit & { forSearch: boolean }) | null>(null)
+  // 접힌 필터의 팝오버(⋯ 아래)
+  const [filterOpen, setFilterOpen] = useState(false)
   const [menu, setMenu] = useState<{
     x: number
     y: number
     items: MenuItem[]
     label: string
+    /** Enter·Space로 연 메뉴: 첫 사용 가능한 항목에 포커스(X12) */
+    focusFirst: boolean
   } | null>(null)
+  // 메뉴를 연 버튼과, 메뉴가 Esc로 닫혔는가. Esc로 닫히면 연 버튼으로 포커스를 돌려준다(X9).
+  const opener = useRef<HTMLElement | null>(null)
+  const escaped = useRef(false)
+  const openMenu = (
+    el: HTMLElement,
+    m: { x: number; y: number; items: MenuItem[]; label: string; focusFirst: boolean }
+  ): void => {
+    opener.current = el
+    escaped.current = false
+    setMenu(m)
+  }
+  const closeMenu = (reason?: 'replaced'): void => {
+    setMenu(null)
+    if (reason !== 'replaced' && escaped.current) opener.current?.focus()
+    escaped.current = false
+  }
   const patch = (p: Partial<Tab>): void => useTabsStore.getState().patchTab(tab.id, p)
   const { loc, sort } = tab
+  const { count: filterCount, title: filterTitle } = useFilterSummary(tab.filter, filterHidden)
+  const showSearch = !compact || searchOpen || !!tab.query
 
+  // 측정 줄의 폭으로 접을 도구를 고른다(X5). 막대 폭이 0이면(레이아웃 없음) 모두 보인다.
+  const remeasure = useRef<() => void>(() => undefined)
+  useLayoutEffect(() => {
+    remeasure.current = () => {
+      const bar = barRef.current
+      const row = measureRef.current
+      if (!bar || !row) return
+      const width = (id: string): number =>
+        row.querySelector<HTMLElement>(`[data-measure="${id}"]`)?.offsetWidth ?? 0
+      setFit({
+        ...fitPathTools(
+          {
+            bar: bar.clientWidth,
+            back: width('back'),
+            up: width('up'),
+            more: width('more'),
+            tools: Object.fromEntries(PATH_TOOL_ORDER.map((id) => [id, width(id)])) as Record<
+              PathToolId,
+              number
+            >
+          },
+          showSearch
+        ),
+        forSearch: showSearch
+      })
+    }
+  })
   useLayoutEffect(() => {
     const bar = barRef.current
     if (!bar) return
     const update = (): void => {
       setCompact(bar.clientWidth > 0 && bar.clientWidth < 900)
-      // 좁은 패널에서는 줄을 바꿔 높이가 늘어난다. 패널(부모)에 알려 바쁨 막대·놓기 테두리가 막대
-      // 아래에 붙게 한다(Explorer의 `--path-bar-h`).
+      // 막대는 늘 한 줄이지만 바쁨 막대·놓기 테두리가 이 값을 따른다(Explorer의 `--path-bar-h`).
       bar.parentElement?.style.setProperty('--path-bar-h', `${bar.offsetHeight || 52}px`)
+      remeasure.current()
     }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(bar)
     return () => observer.disconnect()
   }, [])
+  // 도구 모양이 바뀌면 다시 잰다(좁음 여부, 필터 개수, 찾기 열림, 정렬 키·방향, 로캘).
+  useLayoutEffect(() => {
+    remeasure.current()
+  }, [compact, filterCount, showSearch, sort.key, sort.dir, locale])
+
+  // 찾기가 열리면 칸에 포커스를 준다. 칸은 다시 잰 뒤에야 그려질 수 있어 그려질 때까지 기다린다(X7).
+  // 열린 칸으로 다시 재기 전의 칸은 다음 그리기에서 조각 자리로 옮겨 가며 새로 그려질 수 있으므로(X6),
+  // 지금 모양으로 잰 결과가 나온 뒤에만 포커스한다.
+  const focusSearch = useRef(false)
+  useLayoutEffect(() => {
+    focusSearch.current = searchOpen
+  }, [searchOpen])
+  useLayoutEffect(() => {
+    if (focusSearch.current && searchRef.current && fit?.forSearch === showSearch) {
+      focusSearch.current = false
+      searchRef.current.focus()
+    }
+  })
+
+  const shownSet = new Set<PathToolId>(fit?.shown ?? PATH_TOOL_ORDER)
+  const shown = (id: PathToolId): boolean => shownSet.has(id)
+  const overflow = fit?.overflow ?? []
+  const searchInSlot = !!fit?.searchInSlot && showSearch
+  const filterFolded = !shown('filter')
+  // 접힌 필터의 열림은 접혀 있는 동안만 뜻이 있다. 펴지면 잊어야 다시 접힐 때 저절로 열리지 않는다.
+  if (!filterFolded && filterOpen) setFilterOpen(false)
+  const moreOpen = menu?.label === t('path.moreTools')
 
   const sortItems: MenuItem[] = [
     ...(['name', 'modified', 'size', 'type'] as const).map((key) => ({
@@ -330,13 +436,128 @@ export function PathBar({
     key: t(SORT_LABEL[sort.key]),
     direction: t(sort.dir === 'asc' ? 'sort.ascending' : 'sort.descending')
   })
-  const showSearch = !compact || searchOpen || !!tab.query
+  const toggleInfo = (): void =>
+    useShelfStore.getState().setRailTab(railTab === 'info' ? 'shelf' : 'info')
+
+  // ⋯ 메뉴: 접힌 도구만, 막대에 놓이는 순서로(X8)
+  const moreItems = (): MenuItem[] =>
+    overflow.flatMap((id): MenuItem[] => {
+      switch (id) {
+        case 'forward':
+          return [
+            {
+              label: t('explorer.forward'),
+              icon: ChevronRight,
+              shortcut: 'Alt+→',
+              disabled: !tab.fwd.length,
+              onSelect: () => useTabsStore.getState().goForward(tab.id)
+            }
+          ]
+        case 'reload':
+          return [
+            { label: t('toolbar.refresh'), icon: RefreshCw, shortcut: 'F5', onSelect: onReload }
+          ]
+        case 'search':
+          return [
+            {
+              label: t('filter.find'),
+              icon: Search,
+              shortcut: 'Ctrl+F',
+              onSelect: () => onSearchOpenChange(true)
+            }
+          ]
+        case 'filter':
+          return [
+            {
+              label: t('filter.button'),
+              icon: ListFilter,
+              hint: filterCount > 0 ? filterTitle : undefined,
+              onSelect: () => setFilterOpen(true)
+            }
+          ]
+        case 'sort':
+          return [{ label: t('sort.label'), icon: ArrowUpDown, submenu: sortItems }]
+        case 'view':
+          return (['grid', 'list'] as const).map((view) => ({
+            label: t(view === 'grid' ? 'view.grid' : 'view.list'),
+            icon: tab.view === view ? Check : undefined,
+            onSelect: () => patch({ view })
+          }))
+        case 'newFolder':
+          return [
+            {
+              label: t('explorer.newFolder'),
+              icon: FolderPlus,
+              shortcut: 'Ctrl+Shift+N',
+              disabled: !canWrite,
+              onSelect: onNewFolder
+            }
+          ]
+        case 'info':
+          return [
+            {
+              label: t('explorer.details'),
+              icon: railTab === 'info' ? Check : undefined,
+              shortcut: 'Alt+Shift+P',
+              onSelect: toggleInfo
+            }
+          ]
+      }
+    })
+
+  const searchField = (inSlot: boolean): React.JSX.Element => (
+    <label
+      className={inSlot ? 'relative flex h-7 min-w-0 flex-1 items-center' : searchBox(compact)}
+    >
+      <Search
+        className="pointer-events-none absolute left-2.5 h-4 w-4 text-[var(--mu)]"
+        aria-hidden
+      />
+      <input
+        ref={searchRef}
+        id={`explorer-filter-${tab.id}`}
+        onBlur={() => onSearchOpenChange(false)}
+        value={tab.query}
+        onChange={(e) => patch({ query: e.target.value })}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.stopPropagation()
+            patch({ query: '' })
+            document.getElementById(`explorer-list-${tab.id}`)?.focus()
+          } else if (e.key === 'ArrowDown' || e.key === 'Enter') {
+            e.preventDefault()
+            document.getElementById(`explorer-list-${tab.id}`)?.focus()
+          }
+        }}
+        placeholder={t('filter.find')}
+        aria-label={t('filter.find')}
+        title={t('filter.findTooltip')}
+        className={cn(
+          'h-full w-full border border-[var(--bd)] bg-[var(--bg)] pl-8 pr-7 text-[13px] text-[var(--tx)] outline-none placeholder:text-[var(--mu)] focus:border-[var(--ac)] focus:bg-[var(--sf)]',
+          inSlot ? 'rounded-md' : 'rounded-[10px]'
+        )}
+      />
+      {tab.query && (
+        <button
+          onClick={() => patch({ query: '' })}
+          className="absolute right-1.5 flex h-6 w-6 items-center justify-center rounded-md text-[var(--mu)] hover:bg-[var(--hv)]"
+          aria-label={t('filter.clear')}
+        >
+          <X className="h-3.5 w-3.5" aria-hidden />
+        </button>
+      )}
+    </label>
+  )
 
   return (
     <div
       ref={barRef}
       data-dim={dim ? 'true' : undefined}
-      className="path-bar relative flex min-h-[52px] shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--bd)] px-3 py-2"
+      className="path-bar relative flex min-h-[52px] shrink-0 items-center gap-1.5 border-b border-[var(--bd)] px-3 py-2"
+      // 메뉴는 이 막대 안에 그려지므로 그 Esc를 메뉴보다 먼저 본다(X9).
+      onKeyDownCapture={(e) => {
+        if (menu && e.key === 'Escape') escaped.current = true
+      }}
     >
       <button
         className={iconBtn}
@@ -347,15 +568,17 @@ export function PathBar({
       >
         <ChevronLeft className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
       </button>
-      <button
-        className={iconBtn}
-        disabled={!tab.fwd.length}
-        onClick={() => useTabsStore.getState().goForward(tab.id)}
-        title={t('path.forwardTooltip')}
-        aria-label={t('explorer.forward')}
-      >
-        <ChevronRight className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
-      </button>
+      {shown('forward') && (
+        <button
+          className={iconBtn}
+          disabled={!tab.fwd.length}
+          onClick={() => useTabsStore.getState().goForward(tab.id)}
+          title={t('path.forwardTooltip')}
+          aria-label={t('explorer.forward')}
+        >
+          <ChevronRight className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+        </button>
+      )}
       <button
         className={iconBtn}
         disabled={parentPath(loc.side, loc.path) === null}
@@ -366,23 +589,22 @@ export function PathBar({
         <ArrowUp className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
       </button>
 
-      <div
-        className={cn(
-          'relative ml-1 flex h-9 flex-1 items-center overflow-hidden rounded-[10px] border border-[var(--bd)] bg-[var(--bg)] pl-1.5 pr-1',
-          compact ? 'min-w-[110px]' : 'min-w-[200px]'
-        )}
-      >
+      <div className="relative ml-1 flex h-9 min-w-0 flex-1 items-center overflow-hidden rounded-[10px] border border-[var(--bd)] bg-[var(--bg)] pl-1.5 pr-1">
         {editing ? (
           <PathInput tab={tab} onDone={() => onEditingChange(false)} />
+        ) : searchInSlot ? (
+          // 들어가지 않는 열린 찾기 칸은 조각 자리를 대신한다(X6). 경로 입력이 먼저다.
+          searchField(true)
         ) : (
           <Crumbs
             tabId={tab.id}
             loc={loc}
             onEdit={() => onEditingChange(true)}
-            onMenu={(x, y, hidden) =>
-              setMenu({
+            onMenu={(x, y, hidden, el, keyboard) =>
+              openMenu(el, {
                 x,
                 y,
+                focusFirst: keyboard,
                 label: t('path.hidden'),
                 items: hidden.map((c) => ({
                   label: c.name,
@@ -394,139 +616,185 @@ export function PathBar({
             }
           />
         )}
-        <button
-          className={cn(iconBtn, 'h-7 w-7')}
-          onClick={onReload}
-          title={t('toolbar.refreshTooltip')}
-          aria-label={t('toolbar.refresh')}
-        >
-          <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-        </button>
+        {shown('reload') && (
+          <button
+            className={cn(iconBtn, 'h-7 w-7')}
+            onClick={onReload}
+            title={t('toolbar.refreshTooltip')}
+            aria-label={t('toolbar.refresh')}
+          >
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        )}
       </div>
 
-      {/* 찾기·필터·정렬·보기·새 폴더·정보. 좁은 패널(분할 보기, 최소 280px)에서는 한 덩어리로
-          다음 줄에 내려가고, 그래도 좁으면 그 안에서 줄을 바꾼다(F13: 패널마다 이 도구가 보여야 한다). */}
-      <div data-path-tools className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
-        {showSearch ? (
-          <label
-            className={cn(
-              'relative ml-1 flex h-9 shrink-0 items-center',
-              compact ? 'w-[150px]' : 'w-[200px]'
-            )}
-          >
-            <Search
-              className="pointer-events-none absolute left-2.5 h-4 w-4 text-[var(--mu)]"
-              aria-hidden
-            />
-            <input
-              // 목록의 Ctrl+F가 이 id로 칸을 찾는다(좁을 때는 돋보기 버튼이 같은 id다).
+      {/* 찾기·필터·정렬·보기·새 폴더·정보와 ⋯. 들어가지 않는 도구는 ⋯로 접힌다(X1). */}
+      <div data-path-tools className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
+        {shown('search') &&
+          !searchInSlot &&
+          (showSearch ? (
+            searchField(false)
+          ) : (
+            <button
               id={`explorer-filter-${tab.id}`}
-              autoFocus={compact && searchOpen}
-              onBlur={() => setSearchOpen(false)}
-              value={tab.query}
-              onChange={(e) => patch({ query: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  e.stopPropagation()
-                  patch({ query: '' })
-                  document.getElementById(`explorer-list-${tab.id}`)?.focus()
-                } else if (e.key === 'ArrowDown' || e.key === 'Enter') {
-                  e.preventDefault()
-                  document.getElementById(`explorer-list-${tab.id}`)?.focus()
-                }
-              }}
-              placeholder={t('filter.find')}
-              aria-label={t('filter.find')}
+              className={cn(iconBtn, 'h-9 w-9')}
+              onClick={() => onSearchOpenChange(true)}
               title={t('filter.findTooltip')}
-              className="h-full w-full rounded-[10px] border border-[var(--bd)] bg-[var(--bg)] pl-8 pr-7 text-[13px] text-[var(--tx)] outline-none placeholder:text-[var(--mu)] focus:border-[var(--ac)] focus:bg-[var(--sf)]"
-            />
-            {tab.query && (
-              <button
-                onClick={() => patch({ query: '' })}
-                className="absolute right-1.5 flex h-6 w-6 items-center justify-center rounded-md text-[var(--mu)] hover:bg-[var(--hv)]"
-                aria-label={t('filter.clear')}
-              >
-                <X className="h-3.5 w-3.5" aria-hidden />
-              </button>
-            )}
-          </label>
-        ) : (
+              aria-label={t('filter.find')}
+            >
+              <Search className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+            </button>
+          ))}
+
+        <FileFilterMenu
+          tab={tab}
+          entries={entries}
+          hiddenCount={filterHidden}
+          compact={compact}
+          folded={
+            filterFolded
+              ? { anchor: moreEl, open: filterOpen, onOpenChange: setFilterOpen }
+              : undefined
+          }
+        />
+
+        {shown('sort') && (
           <button
-            id={`explorer-filter-${tab.id}`}
-            className={cn(iconBtn, 'h-9 w-9')}
-            onClick={() => setSearchOpen(true)}
-            title={t('filter.findTooltip')}
-            aria-label={t('filter.find')}
+            className={sortBtn}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              openMenu(e.currentTarget, {
+                x: r.right - 232,
+                y: r.bottom + 4,
+                items: sortItems,
+                label: t('sort.label'),
+                focusFirst: e.detail === 0
+              })
+            }}
+            aria-haspopup="menu"
+            aria-label={t('sort.label')}
+            title={sortTitle}
           >
-            <Search className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+            <ArrowUpDown className="h-4 w-4" aria-hidden />
+            {!compact && <span aria-hidden>{t(SORT_LABEL[sort.key])}</span>}
+            <span aria-hidden className="mono text-[11px]">
+              {sort.dir === 'asc' ? '↑' : '↓'}
+            </span>
           </button>
         )}
 
-        <FileFilterMenu tab={tab} entries={entries} hiddenCount={filterHidden} compact={compact} />
+        {shown('view') && (
+          <div
+            role="group"
+            aria-label={t('view.label')}
+            className="flex h-9 shrink-0 items-center rounded-[10px] bg-[var(--bg)] p-0.5"
+          >
+            {(
+              [
+                ['grid', LayoutGrid, 'view.grid'],
+                ['list', List, 'view.list']
+              ] as const
+            ).map(([view, Icon, label]) => (
+              <button
+                key={view}
+                aria-pressed={tab.view === view}
+                onClick={() => patch({ view })}
+                title={t(label)}
+                aria-label={t(label)}
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-lg',
+                  tab.view === view
+                    ? 'bg-[var(--sf)] text-[var(--tx)] shadow-sm'
+                    : 'text-[var(--mu)] hover:text-[var(--tx)]'
+                )}
+              >
+                <Icon className="h-4 w-4" aria-hidden />
+              </button>
+            ))}
+          </div>
+        )}
+        {shown('newFolder') && (
+          <button
+            className={iconBtn}
+            onClick={onNewFolder}
+            disabled={!canWrite}
+            title={t('explorer.newFolderTooltip')}
+            aria-label={t('explorer.newFolder')}
+          >
+            <FolderPlus className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+          </button>
+        )}
+        {shown('info') && (
+          <button
+            className={cn(iconBtn, railTab === 'info' && 'bg-[var(--acw)] text-[var(--ac)]')}
+            aria-pressed={railTab === 'info'}
+            onClick={toggleInfo}
+            title={t('explorer.detailsTooltip')}
+            aria-label={t('explorer.details')}
+          >
+            <Info className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+          </button>
+        )}
+        {overflow.length > 0 && (
+          <button
+            ref={setMoreEl}
+            className={cn(iconBtn, 'relative')}
+            aria-haspopup="menu"
+            aria-expanded={moreOpen}
+            // 접힌 필터가 켜져 있으면 숨은 항목이 있다는 신호를 ⋯에 남긴다(X8).
+            data-active={filterFolded && filterCount > 0 ? 'true' : undefined}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              openMenu(e.currentTarget, {
+                x: r.right - 232,
+                y: r.bottom + 4,
+                items: moreItems(),
+                label: t('path.moreTools'),
+                focusFirst: e.detail === 0
+              })
+            }}
+            title={t('path.moreTools')}
+            aria-label={t('path.moreTools')}
+          >
+            <Ellipsis className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+            {filterFolded && filterCount > 0 && (
+              <span
+                aria-hidden
+                className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--ac)]"
+              />
+            )}
+          </button>
+        )}
+      </div>
 
-        <button
-          className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-semibold text-[var(--mu)] hover:bg-[var(--hv)] hover:text-[var(--tx)]"
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect()
-            setMenu({ x: r.right - 232, y: r.bottom + 4, items: sortItems, label: t('sort.label') })
-          }}
-          aria-haspopup="menu"
-          aria-label={t('sort.label')}
-          title={sortTitle}
-        >
-          <ArrowUpDown className="h-4 w-4" aria-hidden />
-          {!compact && <span aria-hidden>{t(SORT_LABEL[sort.key])}</span>}
-          <span aria-hidden className="mono text-[11px]">
-            {sort.dir === 'asc' ? '↑' : '↓'}
-          </span>
-        </button>
-
-        <div
-          role="group"
-          aria-label={t('view.label')}
-          className="flex h-9 shrink-0 items-center rounded-[10px] bg-[var(--bg)] p-0.5"
-        >
-          {(
-            [
-              ['grid', LayoutGrid, 'view.grid'],
-              ['list', List, 'view.list']
-            ] as const
-          ).map(([view, Icon, label]) => (
-            <button
-              key={view}
-              aria-pressed={tab.view === view}
-              onClick={() => patch({ view })}
-              title={t(label)}
-              aria-label={t(label)}
-              className={cn(
-                'flex h-8 w-8 items-center justify-center rounded-lg',
-                tab.view === view
-                  ? 'bg-[var(--sf)] text-[var(--tx)] shadow-sm'
-                  : 'text-[var(--mu)] hover:text-[var(--tx)]'
-              )}
-            >
-              <Icon className="h-4 w-4" aria-hidden />
-            </button>
-          ))}
-        </div>
-        <button
-          className={iconBtn}
-          onClick={onNewFolder}
-          disabled={!canWrite}
-          title={t('explorer.newFolderTooltip')}
-          aria-label={t('explorer.newFolder')}
-        >
-          <FolderPlus className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
-        </button>
-        <button
-          className={cn(iconBtn, railTab === 'info' && 'bg-[var(--acw)] text-[var(--ac)]')}
-          aria-pressed={railTab === 'info'}
-          onClick={() => useShelfStore.getState().setRailTab(railTab === 'info' ? 'shelf' : 'info')}
-          title={t('explorer.detailsTooltip')}
-          aria-label={t('explorer.details')}
-        >
-          <Info className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
-        </button>
+      {/* 도구 폭을 재는 보이지 않는 줄(X5): 지금 모양의 자리표시자. id·이름·이벤트가 없다(함정 2). */}
+      <div
+        ref={measureRef}
+        data-path-measure
+        aria-hidden
+        className="pointer-events-none invisible absolute left-0 top-0 flex w-max whitespace-nowrap"
+      >
+        <span data-measure="back" className={iconBtn} />
+        <span data-measure="up" className={iconBtn} />
+        <span data-measure="more" className={iconBtn} />
+        <span data-measure="forward" className={iconBtn} />
+        <span data-measure="reload" className={cn(iconBtn, 'h-7 w-7')} />
+        <span
+          data-measure="search"
+          className={showSearch ? searchBox(compact) : cn(iconBtn, 'h-9 w-9')}
+        />
+        <FilterTriggerPlaceholder compact={compact} count={filterCount} />
+        <span data-measure="sort" className={sortBtn}>
+          <ArrowUpDown className="h-4 w-4" />
+          {!compact && <span>{t(SORT_LABEL[sort.key])}</span>}
+          <span className="mono text-[11px]">{sort.dir === 'asc' ? '↑' : '↓'}</span>
+        </span>
+        <span data-measure="view" className="flex h-9 shrink-0 items-center rounded-[10px] p-0.5">
+          <span className="h-8 w-8" />
+          <span className="h-8 w-8" />
+        </span>
+        <span data-measure="newFolder" className={iconBtn} />
+        <span data-measure="info" className={iconBtn} />
       </div>
 
       {menu && (
@@ -535,7 +803,8 @@ export function PathBar({
           y={menu.y}
           label={menu.label}
           items={menu.items}
-          onClose={() => setMenu(null)}
+          focusFirst={menu.focusFirst}
+          onClose={closeMenu}
         />
       )}
     </div>

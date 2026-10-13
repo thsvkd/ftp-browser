@@ -303,6 +303,7 @@ export const ptBR = {
   'path.editHint': 'Clique em um espaço vazio para digitar um caminho (Ctrl+L)',
   'path.edit': 'Digitar um caminho',
   'path.hidden': 'Partes ocultas do caminho',
+  'path.moreTools': 'Mais ferramentas',
 
   'filter.find': 'Pesquisar nesta pasta',
   'filter.findTooltip': 'Pesquisar nesta pasta (Ctrl+F)',

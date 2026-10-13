@@ -435,11 +435,19 @@ function TabExplorer({
   }, [busy, key])
 
   // ---------- 오버레이 ----------
-  const [menu, setMenu] = useState<{ x: number; y: number; target: ExplorerEntry[] } | null>(null)
+  const [menu, setMenu] = useState<{
+    x: number
+    y: number
+    target: ExplorerEntry[]
+    /** 메뉴 키·Shift+F10으로 열었다: 첫 사용 가능한 항목에 포커스(explorer-ux-polish X12) */
+    keyboard?: boolean
+  } | null>(null)
   const [props, setProps] = useState<ExplorerEntry | null>(null)
   const [lightbox, setLightbox] = useState<number | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [editingPath, setEditingPath] = useState(false)
+  // 찾기 칸의 열림. Ctrl+F가 연다. 찾기가 ⋯에 접혀도 막대가 칸을 그린다(explorer-ux-polish X7).
+  const [searchOpen, setSearchOpen] = useState(false)
   const refocus = (): void => scrollRef.current?.focus({ preventScroll: true })
 
   // ---------- 선택 ----------
@@ -678,7 +686,12 @@ function TabExplorer({
     const el = cur && scrollRef.current?.querySelector(`[data-path="${CSS.escape(cur.path)}"]`)
     const r = (el ?? scrollRef.current)?.getBoundingClientRect()
     if (!r) return
-    setMenu({ x: r.left + 24, y: r.top + Math.min(r.height, 40), target: targetOf() })
+    setMenu({
+      x: r.left + 24,
+      y: r.top + Math.min(r.height, 40),
+      target: targetOf(),
+      keyboard: true
+    })
   }
 
   // ---------- 키보드 ----------
@@ -773,12 +786,7 @@ function TabExplorer({
         a: () => patch(selectAll(selection, paths)),
         r: reload,
         l: () => setEditingPath(true),
-        f: () => {
-          // 좁은 경로 막대에서는 돋보기 버튼이다: 누르면 칸이 열리며 포커스를 받는다.
-          const find = document.getElementById(`explorer-filter-${tab.id}`)
-          if (find instanceof HTMLButtonElement) find.click()
-          else find?.focus()
-        },
+        f: () => setSearchOpen(true),
         n: e.shiftKey ? () => void newFolder() : undefined,
         '=': zoom(ZOOM_STEP),
         '+': zoom(ZOOM_STEP),
@@ -882,6 +890,8 @@ function TabExplorer({
           setEditingPath(v)
           if (!v) refocus()
         }}
+        searchOpen={searchOpen}
+        onSearchOpenChange={setSearchOpen}
         entries={listable}
         filterHidden={filtered.filterCount}
         canWrite={mode === 'live'}
@@ -1058,6 +1068,7 @@ function TabExplorer({
                 : locLabel(loc)
           }
           items={menu.target.length ? itemMenu(menu.target) : backgroundMenu()}
+          focusFirst={menu.keyboard}
           onClose={(reason) => {
             setMenu(null)
             // 다른 메뉴가 열려 닫혔으면 포커스는 그 메뉴 것이다. 되돌리면 이 패널이 다시 활성이 된다(P7).
