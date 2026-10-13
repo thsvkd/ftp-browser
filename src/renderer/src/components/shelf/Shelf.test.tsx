@@ -4,7 +4,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
 import { fromFtpEntry, fromLocalEntry, type ExplorerEntry } from '@renderer/lib/explorerEntry'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
@@ -14,6 +13,7 @@ import {
   localLoc,
   remoteLoc,
   server,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from '@renderer/components/explorer/explorerTestHarness'
@@ -88,7 +88,7 @@ describe('Shelf — list and drop button', () => {
     expect(drop.hasAttribute('disabled')).toBe(false)
 
     // 막히면 사유와 함께 비활성
-    act(() => useFtpStore.setState({ connectionStatus: 'disconnected' }))
+    act(() => setConnection(server(), 'disconnected'))
     const blocked = screen.getByRole('button', { name: new RegExp(en['shelf.cantDropHere']) })
     expect(blocked.hasAttribute('disabled')).toBe(true)
     expect(blocked.textContent).toContain(en['send.invalidNotConnected'])

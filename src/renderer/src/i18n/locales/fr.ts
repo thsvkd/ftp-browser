@@ -96,6 +96,8 @@ export const fr = {
   'status.connecting': 'Connexion…',
   'status.connected': 'Connecté',
   'status.error': 'Erreur de connexion',
+  'status.connections_one': '{{count}} serveur connecté',
+  'status.connections_other': '{{count}} serveurs connectés',
   'status.folderCount_one': '{{count}} dossier',
   'status.folderCount_other': '{{count}} dossiers',
   'status.fileCount_one': '{{count}} fichier',
@@ -265,6 +267,7 @@ export const fr = {
   'sidebar.serverConnecting': 'Connexion en cours…',
   'sidebar.serverLost': 'Déconnecté · cliquez pour vous reconnecter',
   'sidebar.serverOffline': 'Non connecté · cliquez pour vous connecter',
+  'sidebar.disconnect': 'Déconnecter {{name}}',
 
   'place.desktop': 'Bureau',
   'place.downloads': 'Téléchargements',
@@ -322,7 +325,7 @@ export const fr = {
   'explorer.listing_other': 'Chargement de la liste… {{count}} entrées',
   'explorer.noMatch': 'Aucun élément ne correspond à « {{query}} »',
   'explorer.showAll': 'Tout afficher',
-  'explorer.otherServer': 'Cet onglet est un emplacement sur {{server}}',
+  'explorer.serverOffline': 'Non connecté à {{server}}',
   'explorer.connectTo': 'Se connecter à {{server}}',
   'explorer.offlineHint': 'Connectez-vous pour ouvrir cet emplacement.',
   'explorer.staleBanner': 'Connexion perdue. La dernière liste chargée est affichée.',
@@ -369,7 +372,6 @@ export const fr = {
   'send.invalidNothing': 'Rien à envoyer',
   'send.invalidIntoItself': 'Un dossier ne peut pas être placé dans lui-même',
   'send.invalidNotConnected': 'Non connecté à un serveur',
-  'send.invalidOtherServer': 'Connecté à un autre serveur',
   'send.invalidHere': 'Déjà dans ce dossier',
   'send.invalidRemoteCopy': 'La copie au sein du serveur n’est pas prise en charge',
 

@@ -46,8 +46,9 @@ interface TabsStore {
   activate: (id: string) => void
   cycleTab: (delta: number) => void
   /**
-   * 연결 성공(D3): 활성 원격 탭, 아니면 첫 원격 탭을 `server`의 `path`로 옮기고, 원격 탭이 없으면
-   * 새로 연다. `activate: false`(에이전트 연결)면 활성 탭은 그대로다.
+   * 연결 성공(MC13): 활성 탭이 `server`의 원격 탭이면 그 탭, 아니면 `server`의 첫 원격 탭을 `path`로
+   * 옮기고, 그 서버의 탭이 없으면 새로 연다. 다른 서버의 탭은 옮기지 않는다(그 서버도 연결돼 있을 수
+   * 있다). `activate: false`(에이전트 연결)면 활성 탭은 그대로다.
    */
   adoptRemote: (server: string, path: string, opts?: { activate?: boolean }) => void
   /** `loc`를 보는 탭을 다시 쓰거나 새로 열고, `name`이 있으면 그 항목을 선택한다. */
@@ -177,9 +178,10 @@ export const useTabsStore = create<TabsStore>((set, get) => {
     adoptRemote: (server, path, opts) => {
       const activate = opts?.activate ?? true
       const loc: Loc = { side: 'remote', path, server }
+      const mine = (t: Tab | undefined): boolean =>
+        t?.loc.side === 'remote' && t.loc.server === server
       const current = active()
-      const target =
-        current?.loc.side === 'remote' ? current : get().tabs.find((t) => t.loc.side === 'remote')
+      const target = mine(current) ? current : get().tabs.find(mine)
       if (!target) {
         get().openTab(loc, activate)
         return

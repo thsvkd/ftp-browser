@@ -32,6 +32,7 @@ function emit(channel: string, payload: unknown): void {
 }
 
 const SERVER = 'me@nas.local:21'
+const OFFICE_KEY = 'kim@ftp.office.lan:2121'
 const remote = (path: string): Loc => ({ side: 'remote', path, server: SERVER })
 
 /** 그 경로를 보는 원격 탭을 연다. 탭 id를 돌려준다. */
@@ -59,11 +60,9 @@ beforeEach(() => {
   })
   vi.stubGlobal('api', api)
   useFtpStore.setState({
-    connectionStatus: 'connected',
-    host: 'nas.local',
-    port: 21,
-    username: 'me',
-    error: null
+    connections: {
+      [SERVER]: { status: 'connected', host: 'nas.local', port: 21, user: 'me', error: null }
+    }
   })
   useTabsStore.setState({ tabs: [], activeId: '', recent: [] })
   useListingStore.setState({ byKey: {} })
@@ -92,8 +91,8 @@ describe('useAgentSync — remote changes', () => {
     useListingStore.getState().put(remote('/photos'), [])
     useListingStore.getState().put(remote('/other'), [])
 
-    emit('ftp:remoteChanged', { kind: 'upload', remotePath: '/photos/a.jpg' })
-    emit('ftp:remoteChanged', { kind: 'mkdir', remotePath: '/photos/new' })
+    emit('ftp:remoteChanged', { server: SERVER, kind: 'upload', remotePath: '/photos/a.jpg' })
+    emit('ftp:remoteChanged', { server: SERVER, kind: 'mkdir', remotePath: '/photos/new' })
     await vi.advanceTimersByTimeAsync(299)
     expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([])
 
@@ -101,13 +100,18 @@ describe('useAgentSync — remote changes', () => {
     expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([[SERVER, '/photos']])
 
     // 읽은 적 없는 폴더는 다시 읽지 않는다. 같은 이름으로 시작하는 형제 폴더도 다른 폴더다.
-    emit('ftp:remoteChanged', { kind: 'upload', remotePath: '/photos-old/x.jpg' })
-    emit('ftp:remoteChanged', { kind: 'delete', remotePath: '/photos/sub/deep.jpg' })
+    emit('ftp:remoteChanged', { server: SERVER, kind: 'upload', remotePath: '/photos-old/x.jpg' })
+    emit('ftp:remoteChanged', {
+      server: SERVER,
+      kind: 'delete',
+      remotePath: '/photos/sub/deep.jpg'
+    })
     await vi.advanceTimersByTimeAsync(1000)
     expect(invokeCalls(mockInvoke, 'ftp:list')).toHaveLength(1)
 
     // 다른 폴더에서 옮겨 온 것은 양쪽 폴더를 다시 읽는다.
     emit('ftp:remoteChanged', {
+      server: SERVER,
       kind: 'rename',
       remotePath: '/other/b.jpg',
       newPath: '/photos/b.jpg'
@@ -125,12 +129,13 @@ describe('useAgentSync — remote changes', () => {
     renderHook(() => useAgentSync())
     const id = openRemote('/photos/2024')
 
-    emit('ftp:remoteChanged', { kind: 'delete', remotePath: '/photos/2024' })
+    emit('ftp:remoteChanged', { server: SERVER, kind: 'delete', remotePath: '/photos/2024' })
     await vi.advanceTimersByTimeAsync(300)
     expect(tabPath(id)).toBe('/photos')
 
     useTabsStore.getState().navigate(remote('/photos/2024'))
     emit('ftp:remoteChanged', {
+      server: SERVER,
       kind: 'rename',
       remotePath: '/photos/2024',
       newPath: '/photos/2025'
@@ -139,7 +144,7 @@ describe('useAgentSync — remote changes', () => {
     expect(tabPath(id)).toBe('/photos')
 
     useTabsStore.getState().navigate(remote('/a/b/c'))
-    emit('ftp:remoteChanged', { kind: 'delete', remotePath: '/a/b' })
+    emit('ftp:remoteChanged', { server: SERVER, kind: 'delete', remotePath: '/a/b' })
     await vi.advanceTimersByTimeAsync(300)
     expect(tabPath(id)).toBe('/a')
   })
@@ -153,7 +158,7 @@ describe('useAgentSync — remote changes', () => {
       .openTab({ side: 'remote', path: '/photos/2024', server: 'kim@ftp.office.lan:2121' })
     const local = useTabsStore.getState().openTab({ side: 'local', path: '/photos/2024' })
 
-    emit('ftp:remoteChanged', { kind: 'delete', remotePath: '/photos/2024' })
+    emit('ftp:remoteChanged', { server: SERVER, kind: 'delete', remotePath: '/photos/2024' })
     await vi.advanceTimersByTimeAsync(300)
 
     expect(tabPath(background)).toBe('/photos')
@@ -161,13 +166,19 @@ describe('useAgentSync — remote changes', () => {
     expect(tabPath(local)).toBe('/photos/2024')
     expect(useTabsStore.getState().activeId).toBe(local)
 
-    // 에이전트 연결: 첫 원격 탭이 그 서버의 폴더로 간다. 활성 탭(로컬)은 그대로다.
-    emit('agent:session', { status: 'connected', host: 'ftp.office.lan', port: 2121, user: 'kim' })
+    // 에이전트 연결: 그 서버의 첫 원격 탭이 그 폴더로 간다. 활성 탭(로컬)은 그대로다.
+    emit('agent:session', {
+      server: OFFICE_KEY,
+      status: 'connected',
+      host: 'ftp.office.lan',
+      port: 2121,
+      user: 'kim'
+    })
     const s = useTabsStore.getState()
     expect(s.activeId).toBe(local)
     expect(s.tabs.map((tab) => tab.loc)).toEqual([
-      { side: 'remote', path: '/', server: 'kim@ftp.office.lan:2121' },
-      { side: 'remote', path: '/photos/2024', server: 'kim@ftp.office.lan:2121' },
+      { side: 'remote', path: '/photos', server: SERVER },
+      { side: 'remote', path: '/', server: OFFICE_KEY },
       { side: 'local', path: '/photos/2024' }
     ])
     await vi.advanceTimersByTimeAsync(0)
@@ -191,9 +202,9 @@ describe('useAgentSync — remote changes', () => {
     renderHook(() => useAgentSync())
     useListingStore.getState().put(remote('/photos'), [])
 
-    emit('ftp:remoteChanged', { kind: 'upload', remotePath: '/photos/a.jpg' })
+    emit('ftp:remoteChanged', { server: SERVER, kind: 'upload', remotePath: '/photos/a.jpg' })
     await vi.advanceTimersByTimeAsync(300)
-    emit('ftp:remoteChanged', { kind: 'upload', remotePath: '/photos/b.jpg' })
+    emit('ftp:remoteChanged', { server: SERVER, kind: 'upload', remotePath: '/photos/b.jpg' })
     await vi.advanceTimersByTimeAsync(300)
     pending[1](listing('/photos', 'b.jpg'))
     await vi.advanceTimersByTimeAsync(0)
@@ -207,9 +218,9 @@ describe('useAgentSync — remote changes', () => {
     renderHook(() => useAgentSync())
     const id = openRemote('/photos/2024')
     useListingStore.getState().put(remote('/photos'), [])
-    useFtpStore.setState({ connectionStatus: 'disconnected' })
+    useFtpStore.getState().adoptSession({ server: SERVER, status: 'disconnected' })
 
-    emit('ftp:remoteChanged', { kind: 'delete', remotePath: '/photos/2024' })
+    emit('ftp:remoteChanged', { server: SERVER, kind: 'delete', remotePath: '/photos/2024' })
     await vi.advanceTimersByTimeAsync(300)
 
     expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([])
@@ -220,10 +231,10 @@ describe('useAgentSync — remote changes', () => {
 describe('useAgentSync — agent sessions', () => {
   it('follows an agent connect: reloads servers, points the toolbar at it and a remote tab at its folder', async () => {
     // covers: Test-503
-    useFtpStore.setState({ connectionStatus: 'disconnected', host: '', username: '' })
     renderHook(() => useAgentSync())
 
     emit('agent:session', {
+      server: OFFICE_KEY,
       status: 'connected',
       serverId: 2,
       host: 'ftp.office.lan',
@@ -238,24 +249,20 @@ describe('useAgentSync — agent sessions', () => {
     expect(invokeCalls(mockInvoke, 'ftp:getRecentServers')).toHaveLength(1)
     await waitFor(() => expect(useServerStore.getState().draft.id).toBe(2))
     expect(useServerStore.getState().address).toBe('kim@ftp.office.lan:2121')
-    expect(useFtpStore.getState()).toMatchObject({
-      connectionStatus: 'connected',
+    expect(useFtpStore.getState().connections[OFFICE_KEY]).toMatchObject({
+      status: 'connected',
       host: 'ftp.office.lan',
       port: 2121,
-      username: 'kim'
+      user: 'kim'
     })
     // main이 이미 연결했으므로 렌더러가 다시 연결하지 않는다.
     expect(invokeCalls(mockInvoke, 'ftp:connect')).toEqual([])
 
-    // 해제는 GUI의 disconnect()와 같은 초기화다. main은 이미 끊었으므로 다시 끊으라고 보내지 않는다
-    // (그 사이 에이전트가 다시 연결했으면 늦게 도착한 ftp:disconnect가 그 세션을 끊는다).
-    emit('agent:session', { status: 'disconnected' })
-    expect(useFtpStore.getState()).toMatchObject({
-      connectionStatus: 'disconnected',
-      host: '',
-      port: 21,
-      username: ''
-    })
+    // 해제는 그 서버만 끊긴 것으로 둔다(다른 연결은 그대로). main은 이미 끊었으므로 다시 끊으라고
+    // 보내지 않는다(그 사이 에이전트가 다시 연결했으면 늦게 도착한 ftp:disconnect가 그 세션을 끊는다).
+    emit('agent:session', { server: OFFICE_KEY, status: 'disconnected' })
+    expect(useFtpStore.getState().connections[OFFICE_KEY].status).toBe('disconnected')
+    expect(useFtpStore.getState().connections[SERVER].status).toBe('connected')
     expect(invokeCalls(mockInvoke, 'ftp:disconnect')).toEqual([])
   })
 
@@ -265,14 +272,21 @@ describe('useAgentSync — agent sessions', () => {
     const id = openRemote('/photos')
     useServerStore.setState({ connecting: true })
 
-    emit('agent:session', { status: 'connected', serverId: 2, host: 'ftp.office.lan', port: 2121 })
-    emit('agent:session', { status: 'disconnected' })
+    emit('agent:session', {
+      server: OFFICE_KEY,
+      status: 'connected',
+      serverId: 2,
+      host: 'ftp.office.lan',
+      port: 2121
+    })
+    emit('agent:session', { server: OFFICE_KEY, status: 'disconnected' })
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(invokeCalls(mockInvoke, 'ftp:getRecentServers')).toEqual([])
     expect(useServerStore.getState().draft).toEqual(emptyDraft())
-    expect(useFtpStore.getState()).toMatchObject({
-      connectionStatus: 'connected',
+    expect(Object.keys(useFtpStore.getState().connections)).toEqual([SERVER])
+    expect(useFtpStore.getState().connections[SERVER]).toMatchObject({
+      status: 'connected',
       host: 'nas.local'
     })
     expect(tabPath(id)).toBe('/photos')

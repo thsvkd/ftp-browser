@@ -4,8 +4,6 @@ import { useT } from '@renderer/i18n'
 import { cn } from '@renderer/lib/utils'
 import { batchProgress } from '@renderer/lib/transferRate'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
-import { connectedServer } from '@renderer/lib/sendItems'
 import { useOperationStore } from '@renderer/stores/useOperationStore'
 import type { IpcResult } from '@shared/types/ipc'
 import type { OperationJob, OperationProgress } from '@shared/types/operation'
@@ -54,9 +52,7 @@ export function ActivityPill(): React.JSX.Element {
 
   useEffect(() => {
     const applyUpdate = (update: TransferUpdate): void =>
-      useTransferStore
-        .getState()
-        .applyUpdate(update, connectedServer(useFtpStore.getState()) ?? undefined)
+      useTransferStore.getState().applyUpdate(update)
     const { setJobs, updateProgress } = useOperationStore.getState()
     const unsubs = [
       window.api.on('transfer:updated', (...args: unknown[]) =>

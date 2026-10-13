@@ -7,12 +7,13 @@ import type { TransferJob } from '@shared/types/transfer'
 const LIVE = new Set<TransferJob['status']>(['pending', 'active', 'failed'])
 
 /**
- * 이 항목이 출처인 진행 중 전송의 상태 요약 `"상태:퍼센트"`. 폴더는 그 아래 작업을 합친다.
+ * 이 항목이 출처인 진행 중 전송의 상태 요약 `"상태:퍼센트"`. 폴더는 그 아래 작업을 합친다. 원격
+ * 항목은 경로와 서버가 모두 맞는 다운로드만 센다(MC32: 다른 서버의 같은 경로는 다른 파일이다).
  * 문자열을 구독하므로 진행률이 실제로 바뀔 때만 다시 그린다.
  */
 function summary(
   jobs: readonly TransferJob[],
-  entry: Pick<ExplorerEntry, 'side' | 'path'>
+  entry: Pick<ExplorerEntry, 'side' | 'path' | 'server'>
 ): string {
   const seps = entry.side === 'local' ? ['\\', '/'] : ['/']
   const mine = jobs.filter((j) => {
@@ -20,7 +21,7 @@ function summary(
     const src =
       entry.side === 'local'
         ? j.direction === 'upload' && j.localPath
-        : j.direction === 'download' && j.remotePath
+        : j.direction === 'download' && j.server === entry.server && j.remotePath
     return !!src && (src === entry.path || seps.some((s) => src.startsWith(entry.path + s)))
   })
   if (!mine.length) return ''
@@ -37,7 +38,7 @@ export function TransferRing({
   entry,
   size = 26
 }: {
-  entry: Pick<ExplorerEntry, 'side' | 'path'>
+  entry: Pick<ExplorerEntry, 'side' | 'path' | 'server'>
   size?: number
 }): React.JSX.Element | null {
   const t = useT()

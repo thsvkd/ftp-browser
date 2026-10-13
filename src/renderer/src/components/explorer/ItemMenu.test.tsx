@@ -147,7 +147,7 @@ describe('ItemMenu — contents', () => {
     expect(labels.length).toBeLessThanOrEqual(9)
     const other = within(sub).getByRole('menuitem', { name: /other:21 › x/ })
     expect(other).toHaveProperty('disabled', true)
-    expect(other.getAttribute('title')).toBe(en['send.invalidOtherServer'])
+    expect(other.getAttribute('title')).toBe(en['send.invalidNotConnected'])
 
     fireEvent.click(within(sub).getByRole('menuitem', { name: /Downloads/ }))
     await act(async () => undefined)

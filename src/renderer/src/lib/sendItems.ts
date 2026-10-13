@@ -4,7 +4,6 @@
  */
 import { toast } from 'sonner'
 import { t } from '@renderer/i18n'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { fetchEntries, useListingStore } from '@renderer/stores/useListingStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
@@ -23,43 +22,22 @@ import { pathCrumbs } from './pathCrumbs'
 import { currentPlatform } from './platform'
 import { moveRemoteFiles } from './remoteDrop'
 import { planSameSide, type SameSideItem, type SameSideOp } from './sameSidePlan'
-import { planSend, type SendConnection, type SendPlan } from './sendPlan'
-import { connKey, parseConnKey } from '@shared/connKey'
+import { connStatus, connectedKeys, savedServerOf } from './connections'
+import { planSend, type SendPlan } from './sendPlan'
+import { parseConnKey } from '@shared/connKey'
 import type { IpcResult } from '@shared/types/ipc'
 import type { FtpServer } from '@shared/types/ftp'
 import type { LocalFileEntry, LocalPlaces } from '@shared/types/local'
 
-interface FtpConnectionFields {
-  connectionStatus: string
-  host: string
-  port: number
-  /** 연결한 사용자 이름(D1). 없으면 빈 이름으로 키를 만든다. */
-  username?: string
-}
-
-/** 지금 연결의 서버 키 `"user@host:port"`(D1). 연결돼 있지 않으면 null. */
-export function connectedServer(s: FtpConnectionFields): string | null {
-  return s.connectionStatus === 'connected' ? connKey(s.host, s.port, s.username ?? '') : null
-}
-
-export function currentConnection(): SendConnection {
-  const server = connectedServer(useFtpStore.getState())
-  return { connected: server !== null, server }
-}
-
-/** 렌더 중에 쓰는 연결. 문자열 하나를 구독하므로 진행률 갱신에는 다시 그려지지 않는다. */
-export function useConnection(): SendConnection {
-  const server = useFtpStore(connectedServer)
-  return { connected: server !== null, server }
-}
-
-/** 활성 탭의 폴더를 다시 읽는다(툴바 새로 고침, 창 어디서나 F5·Ctrl+R). 다른 서버의 탭은 읽지 않는다(D2). */
+/**
+ * 활성 탭의 폴더를 다시 읽는다(툴바 새로 고침, 창 어디서나 F5·Ctrl+R). 원격 탭은 그 탭의 서버가
+ * 연결돼 있을 때만 읽는다(MC11).
+ */
 export function reloadActiveTab(): void {
   const { tabs, activeId } = useTabsStore.getState()
   const loc = tabs.find((tab) => tab.id === activeId)?.loc
   if (!loc) return
-  const { server } = currentConnection()
-  if (loc.side === 'remote' && (!server || (loc.server && loc.server !== server))) return
+  if (loc.side === 'remote' && connStatus(loc.server) !== 'connected') return
   void useListingStore.getState().load(loc)
 }
 
@@ -174,20 +152,41 @@ function transfer(
     .then((r) => r !== null)
 }
 
+/** 원격 항목을 서버별로 묶는다(처음 나온 순서). */
+function byServer(entries: readonly ExplorerEntry[]): Map<string, ExplorerEntry[]> {
+  const groups = new Map<string, ExplorerEntry[]>()
+  for (const e of entries) {
+    const key = e.server ?? ''
+    groups.set(key, [...(groups.get(key) ?? []), e])
+  }
+  return groups
+}
+
 /** 검사를 마친 계획을 실행한다. 시작에 성공한 부분(전송·같은 쪽 동작)의 항목을 돌려준다. */
 async function runParts(plan: SendPlan, dest: Loc): Promise<ExplorerEntry[]> {
   const parts: Array<[ExplorerEntry[], Promise<boolean>]> = []
-  if (plan.direction)
+  if (plan.direction === 'upload')
     parts.push([
       plan.transfer,
       transfer(
-        plan.direction,
-        // 보내는 항목은 모두 연결된 한 서버의 것이다(planSend가 막는다)
-        (plan.direction === 'upload' ? dest.server : plan.transfer[0]?.server) ?? '',
+        'upload',
+        dest.server ?? '',
         plan.transfer.map((e) => e.path),
         dest
       )
     ])
+  // 다운로드는 항목의 서버마다 한 번씩 보낸다(MC17).
+  if (plan.direction === 'download')
+    for (const [server, entries] of byServer(plan.transfer))
+      parts.push([
+        entries,
+        transfer(
+          'download',
+          server,
+          entries.map((e) => e.path),
+          dest
+        )
+      ])
   if (plan.sameSideVerb === 'move') parts.push([plan.sameSide, moveRemote(plan.sameSide, dest)])
   if (plan.sameSideVerb === 'copy') parts.push([plan.sameSide, copyLocal(plan.sameSide, dest)])
   const oks = await Promise.all(parts.map(([, run]) => run))
@@ -202,7 +201,7 @@ export async function runPlan(plan: SendPlan, dest: Loc): Promise<boolean> {
 
 /** 항목들을 `dest`로 보낸다. 막히면 사유를 토스트로 알리고 false. */
 export async function sendItems(items: readonly ExplorerEntry[], dest: Loc): Promise<boolean> {
-  const plan = planSend(items, dest, currentConnection())
+  const plan = planSend(items, dest, new Set(connectedKeys()))
   if (plan.invalid) {
     toast.error(t(plan.invalid))
     return false
@@ -233,7 +232,7 @@ async function dropShelfOnce(dest: Loc): Promise<boolean> {
     toast(t('toast.shelfEmpty'))
     return false
   }
-  const plan = planSend(items, dest, currentConnection())
+  const plan = planSend(items, dest, new Set(connectedKeys()))
   if (plan.invalid) {
     toast.error(t(plan.invalid))
     return false
@@ -264,9 +263,9 @@ export async function dropOsFiles(files: readonly File[], dest: Loc): Promise<bo
   const paths = items.map((i) => i.path)
   if (!paths.length) return false
   if (dest.side === 'local') return copyLocal(items, dest)
-  const { server } = currentConnection()
-  if (!server || dest.server !== server) {
-    toast.error(t(server ? 'send.invalidOtherServer' : 'send.invalidNotConnected'))
+  const { server } = dest
+  if (!server || connStatus(server) !== 'connected') {
+    toast.error(t('send.invalidNotConnected'))
     return false
   }
   return transfer('upload', server, paths, dest)
@@ -349,10 +348,7 @@ export function connectToServer(server: string): void {
   const { user, host, port } = parsed
   const store = useServerStore.getState()
   // 익명 연결은 저장된 사용자 이름이 비어 있어도 'anonymous'로 접속한다(useServerStore.connect).
-  const saved = store.servers.find(
-    (s) =>
-      s.host === host && s.port === port && (s.username || 'anonymous') === (user || 'anonymous')
-  )
+  const saved = savedServerOf(store.servers, server)
   if (saved) return connectSaved(saved)
   store.setAddress(user ? `${user}@${host}:${port}` : `${host}:${port}`)
   focusPassword()

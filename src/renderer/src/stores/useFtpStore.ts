@@ -5,7 +5,7 @@ import type {
   FtpConnectionState,
   ConnectionStatus
 } from '@shared/types/ftp'
-import { connKey, type ConnKey } from '@shared/connKey'
+import { connKey, parseConnKey, type ConnKey } from '@shared/connKey'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
 import { t } from '@renderer/i18n'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
@@ -17,23 +17,36 @@ interface FtpListData {
   entries: FtpFileEntry[]
 }
 
-interface FtpStore {
-  // Connection state
-  connectionStatus: ConnectionStatus
+/** 연결 하나의 상태(MC10). 끊긴 연결도 지우지 않고 `'disconnected'`로 남긴다. */
+export interface ConnInfo {
+  status: ConnectionStatus
   host: string
   port: number
-  /** 연결한 사용자 이름. 서버 키 `"user@host:port"`(D1)를 만든다. */
-  username: string
+  user: string
   error: string | null
+}
 
-  // Actions
-  connect: (config: FtpConnectPayload, initialPath?: string) => Promise<boolean>
-  disconnect: () => Promise<void>
+interface FtpStore {
+  /** 연결 키(`"user@host:port"`)별 상태. 키 순서는 처음 들어온 순서다. */
+  connections: Record<ConnKey, ConnInfo>
+
   /**
-   * Main changed the connection by itself (an agent, handoff agent-access K5): reset the
-   * session state like `disconnect()` without asking main to disconnect, then take `session`.
+   * `config`의 서버에 연결한다. 다른 연결은 건드리지 않는다. `adopt`(기본 true)면 시작 폴더를 읽어
+   * 그 서버의 원격 탭으로 옮긴다(D3·MC13). 자동 연결은 `adopt: false`로 연결만 한다.
+   */
+  connect: (
+    config: FtpConnectPayload,
+    initialPath?: string,
+    opts?: { adopt?: boolean }
+  ) => Promise<boolean>
+  /** 그 연결만 끊는다. 연결 중이면 그 시도를 버린다. */
+  disconnect: (server: ConnKey) => Promise<void>
+  /**
+   * Main changed a connection by itself (an agent, handoff agent-access K5): take the event's
+   * state for that key only, dropping any connect of the GUI that is still in flight for it.
    */
   adoptSession: (session: {
+    server: ConnKey
     status: ConnectionStatus
     host?: string
     port?: number
@@ -43,10 +56,15 @@ interface FtpStore {
 }
 
 /**
- * connect()가 await 중일 때 disconnect()가 오면, 늦게 도착한 성공/실패를
- * 커밋하지 않기 위한 세대 번호. UI에 노출하지 않는다.
+ * 키별 세대 번호. connect()가 await 중일 때 그 키의 disconnect()가 오면 늦게 도착한 성공/실패를
+ * 커밋하지 않는다. UI에 노출하지 않는다.
  */
-let connectGeneration = 0
+const connectGeneration = new Map<ConnKey, number>()
+const bump = (server: ConnKey): number => {
+  const next = (connectGeneration.get(server) ?? 0) + 1
+  connectGeneration.set(server, next)
+  return next
+}
 
 /** 원격 폴더 하나를 읽는다. 호출이 던지면 실패 값으로 바꾼다. */
 async function listDir(server: ConnKey, path: string): Promise<IpcResult<FtpListData>> {
@@ -57,87 +75,106 @@ async function listDir(server: ConnKey, path: string): Promise<IpcResult<FtpList
   }
 }
 
-/** 연결이 없을 때의 세션 상태. disconnect()와 adoptSession()이 같은 초기화를 쓴다. */
-const DISCONNECTED = {
-  connectionStatus: 'disconnected',
-  host: '',
-  port: 21,
-  username: '',
-  error: null
-} satisfies Partial<FtpStore>
+/** 키에서 호스트·포트·사용자를 꺼낸 항목. 형식이 틀린 키면 빈 값이다. */
+function infoOf(server: ConnKey, status: ConnectionStatus): ConnInfo {
+  const parsed = parseConnKey(server)
+  return {
+    status,
+    host: parsed?.host ?? '',
+    port: parsed?.port ?? 21,
+    user: parsed?.user ?? '',
+    error: null
+  }
+}
 
-export const useFtpStore = create<FtpStore>((set, get) => ({
-  connectionStatus: 'disconnected',
-  host: '',
-  port: 21,
-  username: '',
-  error: null,
+export const useFtpStore = create<FtpStore>((set, get) => {
+  /** 그 키의 항목만 바꾼다(없으면 키에서 만든다). */
+  const patch = (server: ConnKey, fields: Partial<ConnInfo>): void =>
+    set((s) => ({
+      connections: {
+        ...s.connections,
+        [server]: { ...(s.connections[server] ?? infoOf(server, 'disconnected')), ...fields }
+      }
+    }))
 
-  connect: async (config, initialPath = '/') => {
-    const generation = ++connectGeneration
-    // 시도하는 서버를 먼저 둔다: 연결 중에 취소(disconnect)하면 이 키를 끊는다.
-    set({ error: null, host: config.host, port: config.port, username: config.user })
-    const server = connKey(config.host, config.port, config.user)
-    const result = await window.api.invoke<IpcResult<void>>('ftp:connect', config)
-    if (generation !== connectGeneration) return false
-    if (result.success) {
+  return {
+    connections: {},
+
+    connect: async (config, initialPath = '/', opts) => {
+      const server = connKey(config.host, config.port, config.user)
+      const generation = bump(server)
+      // 시도하는 서버를 먼저 둔다: 연결 중에 취소(disconnect)하면 이 키를 끊는다.
+      const before = get().connections[server]?.status
+      patch(server, {
+        status: before === 'connected' ? 'connected' : 'connecting',
+        host: config.host,
+        port: config.port,
+        user: config.user,
+        error: null
+      })
+      const result = await window.api.invoke<IpcResult<void>>('ftp:connect', config)
+      if (generation !== connectGeneration.get(server)) return false
+      if (!result.success) {
+        // 저장된 비밀번호를 이 컴퓨터에서 풀 수 없으면 다시 입력하라고 알린다(E12).
+        patch(server, {
+          status: 'error',
+          error:
+            result.code === ErrorCode.SAVED_PASSWORD_UNREADABLE
+              ? t('connect.savedPasswordUnreadable')
+              : result.error
+        })
+        return false
+      }
+      patch(server, { status: 'connected' })
+      if (opts?.adopt === false) return true
       // 시작 폴더를 읽지 못하면 루트로 물러선다.
       let path = initialPath
       let listed = await listDir(server, path)
-      if (generation !== connectGeneration) return false
+      if (generation !== connectGeneration.get(server)) return false
       if (!listed.success && path !== '/') {
         path = '/'
         listed = await listDir(server, path)
-        if (generation !== connectGeneration) return false
+        if (generation !== connectGeneration.get(server)) return false
       }
       if (!listed.success) {
-        set({ error: listed.error })
+        patch(server, { error: listed.error })
         return false
       }
-      // 확정된 시작 폴더의 목록을 캐시에 넣고 원격 탭 하나를 그리로 옮겨 활성화한다(D3).
+      // 확정된 시작 폴더의 목록을 캐시에 넣고 그 서버의 원격 탭을 그리로 옮겨 활성화한다(MC13).
       useListingStore.getState().put(
         { side: 'remote', path, server },
         listed.data.entries.map((e) => fromFtpEntry(e, path, server))
       )
       useTabsStore.getState().adoptRemote(server, path)
       return true
+    },
+
+    disconnect: async (server) => {
+      bump(server)
+      await window.api.invoke('ftp:disconnect', server)
+      patch(server, { status: 'disconnected', error: null })
+    },
+
+    adoptSession: (session) => {
+      // 진행 중이던 그 키의 연결·목록 요청은 이전 세션의 것이므로 버린다.
+      bump(session.server)
+      const base = infoOf(session.server, session.status)
+      patch(session.server, {
+        ...base,
+        host: session.host ?? base.host,
+        port: session.port ?? base.port,
+        user: session.user ?? base.user
+      })
+    },
+
+    setConnectionState: (state) => {
+      patch(state.server, {
+        status: state.status,
+        host: state.host,
+        port: state.port,
+        user: state.user,
+        error: state.error ?? null
+      })
     }
-    // 저장된 비밀번호를 이 컴퓨터에서 풀 수 없으면 다시 입력하라고 알린다(E12).
-    set({
-      error:
-        result.code === ErrorCode.SAVED_PASSWORD_UNREADABLE
-          ? t('connect.savedPasswordUnreadable')
-          : result.error
-    })
-    return false
-  },
-
-  disconnect: async () => {
-    // 지금 연결(연결 중이면 그 시도)의 키. 연결 하나만 아는 동안(S3 전)의 단일 필드에서 만든다.
-    const { host, port, username } = get()
-    const server = connKey(host, port, username)
-    connectGeneration++
-    await window.api.invoke('ftp:disconnect', server)
-    set(DISCONNECTED)
-  },
-
-  adoptSession: (session) => {
-    // 진행 중이던 목록 요청은 이전 세션의 것이므로 버린다.
-    connectGeneration++
-    set({
-      ...DISCONNECTED,
-      connectionStatus: session.status,
-      host: session.host ?? '',
-      port: session.port ?? 21,
-      username: session.user ?? ''
-    })
-  },
-
-  setConnectionState: (state) => {
-    set({
-      connectionStatus: state.status,
-      host: state.host ?? get().host,
-      error: state.error ?? null
-    })
   }
-}))
+})

@@ -86,6 +86,7 @@ export const zhCN = {
   'status.connecting': '正在连接…',
   'status.connected': '已连接',
   'status.error': '连接错误',
+  'status.connections_other': '已连接 {{count}} 个服务器',
   'status.folderCount_other': '{{count}} 个文件夹',
   'status.fileCount_other': '{{count}} 个文件',
 
@@ -240,6 +241,7 @@ export const zhCN = {
   'sidebar.serverConnecting': '正在连接…',
   'sidebar.serverLost': '已断开 · 点击重新连接',
   'sidebar.serverOffline': '未连接 · 点击连接',
+  'sidebar.disconnect': '断开 {{name}}',
 
   'place.desktop': '桌面',
   'place.downloads': '下载',
@@ -296,7 +298,7 @@ export const zhCN = {
   'explorer.listing_other': '正在读取列表… 已有 {{count}} 项',
   'explorer.noMatch': '没有与“{{query}}”匹配的项目',
   'explorer.showAll': '显示全部',
-  'explorer.otherServer': '此标签页是 {{server}} 上的位置',
+  'explorer.serverOffline': '未连接到 {{server}}',
   'explorer.connectTo': '连接到 {{server}}',
   'explorer.offlineHint': '连接后即可打开此位置。',
   'explorer.staleBanner': '连接已断开。当前显示的是上次加载的列表。',
@@ -336,7 +338,6 @@ export const zhCN = {
   'send.invalidNothing': '没有可发送的项目',
   'send.invalidIntoItself': '不能将文件夹移到其自身内部',
   'send.invalidNotConnected': '未连接到服务器',
-  'send.invalidOtherServer': '已连接到其他服务器',
   'send.invalidHere': '已在此文件夹中',
   'send.invalidRemoteCopy': '不支持在服务器内部复制',
 

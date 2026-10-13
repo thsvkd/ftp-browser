@@ -95,6 +95,8 @@ export const it = {
   'status.connecting': 'Connessione in corso…',
   'status.connected': 'Connesso',
   'status.error': 'Errore di connessione',
+  'status.connections_one': '{{count}} server connesso',
+  'status.connections_other': '{{count}} server connessi',
   'status.folderCount_one': '{{count}} cartella',
   'status.folderCount_other': '{{count}} cartelle',
   'status.fileCount_one': '{{count}} file',
@@ -264,6 +266,7 @@ export const it = {
   'sidebar.serverConnecting': 'Connessione in corso…',
   'sidebar.serverLost': 'Disconnesso · clicca per riconnetterti',
   'sidebar.serverOffline': 'Non connesso · clicca per connetterti',
+  'sidebar.disconnect': 'Disconnetti {{name}}',
 
   'place.desktop': 'Desktop',
   'place.downloads': 'Download',
@@ -321,7 +324,7 @@ export const it = {
   'explorer.listing_other': 'Caricamento dell’elenco… {{count}} voci',
   'explorer.noMatch': 'Nessun elemento corrisponde a “{{query}}”',
   'explorer.showAll': 'Mostra tutto',
-  'explorer.otherServer': 'Questa scheda è una posizione su {{server}}',
+  'explorer.serverOffline': 'Non connesso a {{server}}',
   'explorer.connectTo': 'Connetti a {{server}}',
   'explorer.offlineHint': 'Connettiti per aprire questa posizione.',
   'explorer.staleBanner': 'Connessione persa. Viene mostrato l’ultimo elenco caricato.',
@@ -368,7 +371,6 @@ export const it = {
   'send.invalidNothing': 'Niente da inviare',
   'send.invalidIntoItself': 'Una cartella non può essere inserita in sé stessa',
   'send.invalidNotConnected': 'Non connesso a un server',
-  'send.invalidOtherServer': 'Connesso a un altro server',
   'send.invalidHere': 'Già in questa cartella',
   'send.invalidRemoteCopy': 'La copia all’interno del server non è supportata',
 

@@ -42,12 +42,16 @@ describe('TransferRing', () => {
         job('done.jpg', { status: 'completed', transferredBytes: 100 })
       ]
     })
-    render(<TransferRing entry={{ side: 'remote', path: '/photos/a.jpg' }} />)
+    render(
+      <TransferRing entry={{ side: 'remote', path: '/photos/a.jpg', server: 'me@nas.local:21' }} />
+    )
     expect(screen.getByRole('img', { name: 'In progress 40%' })).toBeTruthy()
     cleanup()
 
     // 폴더: 아래 작업 두 개의 합(50 + 0) / 200 = 25%
-    render(<TransferRing entry={{ side: 'remote', path: '/photos/sub' }} />)
+    render(
+      <TransferRing entry={{ side: 'remote', path: '/photos/sub', server: 'me@nas.local:21' }} />
+    )
     expect(screen.getByRole('img', { name: 'In progress 25%' })).toBeTruthy()
     act(() =>
       useTransferStore.setState((s) => ({
@@ -58,7 +62,11 @@ describe('TransferRing', () => {
     cleanup()
 
     // 끝난 전송과, 출처가 아닌 쪽(로컬 다운로드 대상)에는 고리가 없다.
-    render(<TransferRing entry={{ side: 'remote', path: '/photos/done.jpg' }} />)
+    render(
+      <TransferRing
+        entry={{ side: 'remote', path: '/photos/done.jpg', server: 'me@nas.local:21' }}
+      />
+    )
     expect(ring()).toBeNull()
     cleanup()
     render(<TransferRing entry={{ side: 'local', path: 'C:\\dl\\a.jpg' }} />)

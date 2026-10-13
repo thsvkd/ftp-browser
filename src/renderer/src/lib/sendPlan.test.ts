@@ -35,7 +35,8 @@ function local(path: string, type: ExplorerEntry['type'] = 'file'): ExplorerEntr
   }
 }
 
-const connected = { connected: true, server: 'me@h:21' }
+const connected: ReadonlySet<string> = new Set(['me@h:21'])
+const none: ReadonlySet<string> = new Set()
 const remoteDir = (path: string, server = 'me@h:21'): Loc => ({ side: 'remote', path, server })
 const localDir = (path: string): Loc => ({ side: 'local', path })
 
@@ -59,10 +60,7 @@ describe('planSend', () => {
     expect(move.sameSide).toHaveLength(1)
 
     // Local copy needs no connection.
-    const copy = planSend([local('C:\\x\\a.jpg')], localDir('C:\\y'), {
-      connected: false,
-      server: null
-    })
+    const copy = planSend([local('C:\\x\\a.jpg')], localDir('C:\\y'), none)
     expect(copy).toMatchObject({ direction: null, sameSideVerb: 'copy', invalid: null })
 
     // Mixed: one already here, one moved, one downloaded.
@@ -87,18 +85,12 @@ describe('planSend', () => {
     expect(planSend([remote('/p/dir', 'directory')], remoteDir('/p/dir2'), connected).invalid).toBe(
       null
     )
-    expect(
-      planSend([local('C:\\x\\a.jpg')], remoteDir('/p'), { connected: false, server: null }).invalid
-    ).toBe('send.invalidNotConnected')
-    expect(
-      planSend([remote('/p/a.jpg')], localDir('C:\\dl'), { connected: false, server: null }).invalid
-    ).toBe('send.invalidNotConnected')
-    expect(
-      planSend([local('C:\\x\\a.jpg')], remoteDir('/p', 'other@h:21'), connected).invalid
-    ).toBe('send.invalidOtherServer')
-    expect(
-      planSend([remote('/p/a.jpg', 'file', 'other@h:21')], localDir('C:\\dl'), connected).invalid
-    ).toBe('send.invalidOtherServer')
+    expect(planSend([local('C:\\x\\a.jpg')], remoteDir('/p'), none).invalid).toBe(
+      'send.invalidNotConnected'
+    )
+    expect(planSend([remote('/p/a.jpg')], localDir('C:\\dl'), none).invalid).toBe(
+      'send.invalidNotConnected'
+    )
     expect(planSend([remote('/p/a.jpg')], remoteDir('/q'), connected, { copy: true }).invalid).toBe(
       'send.invalidRemoteCopy'
     )

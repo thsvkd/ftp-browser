@@ -5,7 +5,6 @@ import { en } from '@renderer/i18n/locales/en'
 import { fromLocalEntry } from '@renderer/lib/explorerEntry'
 import { EMPTY_FILTER } from '@renderer/lib/fileCategories'
 import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
@@ -13,6 +12,7 @@ import {
   activeTab,
   local,
   localLoc,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from '@renderer/components/explorer/explorerTestHarness'
@@ -67,7 +67,10 @@ describe('StatusBar', () => {
 
     // 연결 상태
     expect(bar.textContent).toContain(en['status.disconnected'])
-    act(() => useFtpStore.setState({ connectionStatus: 'connected', host: 'nas.local' }))
+    act(() => {
+      setConnection('me@nas.local:21', 'connected')
+      useTabsStore.getState().openTab({ side: 'remote', path: '/', server: 'me@nas.local:21' })
+    })
     expect(bar.textContent).toContain(en['status.connected'])
     expect(bar.textContent).toContain('nas.local')
   })
@@ -101,5 +104,40 @@ describe('StatusBar', () => {
     act(() => useFileCategoryStore.getState().setHidden('image', true))
     expect(bar.textContent).toContain('4 items')
     expect(bar.textContent).toContain('1 hidden')
+  })
+
+  it("follows the active tab's server, or counts the connected servers on a local tab", () => {
+    // covers: Test-1021
+    h = setupExplorer({ connected: false })
+    const A = 'alice@a.example.com:21'
+    const B = 'bob@b.example.com:2121'
+    setConnection(A, 'disconnected')
+    setConnection(B, 'connected')
+    useTabsStore.getState().openTab({ side: 'remote', path: '/', server: B })
+    render(<StatusBar />)
+    const bar = screen.getByRole('contentinfo')
+    expect(bar.textContent).toContain('b.example.com')
+    expect(bar.textContent).toContain(en['status.connected'])
+    expect(bar.textContent).not.toContain('a.example.com')
+
+    act(() => setConnection(B, 'error'))
+    expect(bar.textContent).toContain('b.example.com')
+    expect(bar.textContent).toContain(en['status.error'])
+
+    // 로컬 탭: 연결된 서버 수
+    act(() => {
+      setConnection(A, 'connected')
+      setConnection(B, 'connected')
+      useTabsStore.getState().openTab(localLoc(DIR))
+    })
+    expect(bar.textContent).toContain('2 servers connected')
+    expect(bar.textContent).not.toContain('b.example.com')
+
+    act(() => {
+      setConnection(A, 'disconnected')
+      setConnection(B, 'error')
+    })
+    expect(bar.textContent).toContain(en['status.disconnected'])
+    expect(bar.textContent).not.toContain('servers connected')
   })
 })

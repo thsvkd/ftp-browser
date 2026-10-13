@@ -14,10 +14,11 @@ import type { EnqueueOptions } from '../transfer/TransferQueue'
 import type { TransferHub } from '../transfer/TransferHub'
 
 /**
- * 에이전트 도구가 보는 "지금 연결" (multi-connection S1의 임시 어댑터). 앱은 아직 한 번에 한 서버에만
- * 연결하므로(레지스트리 single) 도구는 연결된 세션을, 없으면 마지막으로 상태가 바뀐 세션을 매니저·파일
- * 작업·큐 자리에서 쓴다. 전송 목록은 허브 전체다. 세션의 `connectionStatus`를 그대로 다시 내 MCP 미리보기가
- * 연결이 바뀐 것을 안다. S5에서 대상 연결 고르기(agentTarget)가 이것을 대신한다.
+ * 에이전트 도구가 보는 "지금 연결" (multi-connection S1의 임시 어댑터). 도구는 마지막으로 상태가 바뀐
+ * 세션이 연결돼 있으면 그것을(에이전트·GUI가 마지막으로 연결한 서버), 아니면 연결된 첫 세션을, 그것도
+ * 없으면 마지막으로 상태가 바뀐 세션을 매니저·파일 작업·큐 자리에서 쓴다. 전송 목록은 허브 전체다.
+ * 세션의 `connectionStatus`를 그대로 다시 내 MCP 미리보기가 연결이 바뀐 것을 안다. S5에서 대상 연결
+ * 고르기(agentTarget)가 이것을 대신한다.
  */
 export class CurrentConnection extends EventEmitter {
   private last: ConnKey = ''
@@ -34,6 +35,8 @@ export class CurrentConnection extends EventEmitter {
   }
 
   private session(): FtpSession | undefined {
+    const last = this.registry.get(this.last)
+    if (last?.manager.isConnected()) return last
     const [live] = this.registry.connectedKeys()
     return this.registry.get(live ?? this.last)
   }

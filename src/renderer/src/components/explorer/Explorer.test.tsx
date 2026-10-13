@@ -21,6 +21,7 @@ import { useTabEntries } from '@renderer/hooks/useTabEntries'
 import { useConfirmStore } from '@renderer/stores/useConfirmStore'
 import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { useListingStore } from '@renderer/stores/useListingStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
@@ -41,9 +42,11 @@ import {
   renderExplorer,
   selectedNames,
   server,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from './explorerTestHarness'
+import { Explorer } from './Explorer'
 
 vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() })
@@ -287,7 +290,7 @@ describe('Explorer — loading, errors and empty states', () => {
     expect(activeTab().loc.path).toBe(DIR)
     expect(option('a.jpg')).toBeTruthy()
 
-    act(() => useFtpStore.setState({ connectionStatus: 'error' }))
+    act(() => setConnection(server(), 'error'))
     expect(option('a.jpg').closest('.grayscale-\\[\\.4\\]')).not.toBeNull()
     expect(screen.getByText(en['explorer.staleBanner'])).toBeTruthy()
     expect(screen.getByRole('button', { name: en['explorer.reconnect'] })).toBeTruthy()
@@ -563,32 +566,208 @@ describe('Explorer — drag and drop', () => {
 })
 
 describe('Explorer — remote tabs and the connection', () => {
-  it('shows a connect panel for another server without listing, and the not-connected pane when offline', async () => {
-    // covers: Test-823
+  it("lists each connected server's tab and gives an unconnected server its own panel", async () => {
+    // covers: Test-1018
+    const B = 'bob@b.lan:2121'
+    const C = 'carol@c.lan:21'
     h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
-    await renderExplorer({ side: 'remote', path: DIR, server: 'kim@nas:2121' })
-    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([])
-    expect(screen.getByText('This tab is a location on kim@nas:2121')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Connect to kim@nas:2121' }))
-    expect(useServerStore.getState().address).toBe('kim@nas:2121')
+    setConnection(B, 'connected')
+    h.handlers['ftp:list'] = (conn, path) =>
+      conn === B
+        ? { success: true, data: { path, entries: [ftp('b.jpg')] } }
+        : { success: false, error: 'wrong server', code: 'FTP_NOT_CONNECTED' }
+    await renderExplorer({ side: 'remote', path: DIR, server: B })
+    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([[B, DIR]])
+    expect(option('b.jpg')).toBeTruthy()
 
-    cleanup()
-    h.restore()
-    h = setupExplorer({ connected: false })
+    // 연결 안 된 C: 그 서버 전용 패널과 연결 버튼(누르면 C 연결 흐름)
+    act(() => useTabsStore.getState().navigate({ side: 'remote', path: DIR, server: C }))
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([[B, DIR]])
+    expect(screen.getByText(`Not connected to ${C}`)).toBeTruthy()
+    const connect = screen.getByRole('button', { name: `Connect to ${C}` }) as HTMLButtonElement
+    expect(connect.disabled).toBe(false)
+    fireEvent.click(connect)
+    expect(useServerStore.getState().address).toBe(C)
+
+    // C가 연결 중: 버튼 비활성 + 회전 표시
+    act(() => setConnection(C, 'connecting'))
+    const busy = screen.getByRole('button', { name: `Connect to ${C}` }) as HTMLButtonElement
+    expect(busy.disabled).toBe(true)
+    expect(busy.querySelector('.spin')).toBeTruthy()
+
+    // C가 끊김: 지난 목록이 있으면 흐리게 + 배너, 없으면 끊김 패널
+    act(() => {
+      useListingStore
+        .getState()
+        .put({ side: 'remote', path: DIR, server: C }, [fromFtpEntry(ftp('c.jpg'), DIR, C)])
+      setConnection(C, 'error')
+    })
+    expect(option('c.jpg').closest('.grayscale-\\[\\.4\\]')).not.toBeNull()
+    expect(screen.getByText(en['explorer.staleBanner'])).toBeTruthy()
+    act(() => useTabsStore.getState().navigate({ side: 'remote', path: '/never', server: C }))
+    expect(screen.getByText(en['listError.lost'])).toBeTruthy()
+    expect(screen.queryByText(/This tab is a location on/)).toBeNull()
+  })
+
+  it('auto-connects a saved server with a saved password once each time its tab is shown', async () => {
+    // covers: Test-1019
+    const C = 'carol@c.lan:21'
     const saved: FtpServer = {
-      id: 1,
+      id: 7,
       name: 'Studio',
-      host: 'nas',
+      host: 'c.lan',
       port: 21,
-      username: '',
+      username: 'carol',
       secure: false,
-      hasPassword: false
+      hasPassword: true
     }
-    useServerStore.setState({ servers: [saved], connecting: false })
-    await renderExplorer({ side: 'remote', path: DIR, server: 'kim@nas:2121' })
-    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([])
-    expect(screen.getByText(en['explorer.notConnected'])).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Studio/ })).toBeTruthy()
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    const draft = { ...useServerStore.getState().draft, host: 'toolbar.lan' }
+    useServerStore.setState({ servers: [saved], draft, connecting: false })
+    const connects = (): unknown[][] => invokeCalls(h.invoke, 'ftp:connect')
+    const home = useTabsStore.getState().openTab(localLoc(LDIR))
+    h.local[LDIR] = []
+    render(<Explorer />)
+    await flush()
+    const show = async (id: string): Promise<void> => {
+      act(() => useTabsStore.getState().activate(id))
+      await flush()
+    }
+
+    const tabC = useTabsStore.getState().openTab({ side: 'remote', path: DIR, server: C }, false)
+    await show(tabC)
+    expect(connects()).toHaveLength(1)
+    expect(connects()[0][0]).toMatchObject({
+      id: 7,
+      host: 'c.lan',
+      port: 21,
+      user: 'carol',
+      savedPasswordOf: 7
+    })
+    expect(useServerStore.getState().draft).toBe(draft)
+    expect(useServerStore.getState().connecting).toBe(false)
+    expect(useFtpStore.getState().connections[C].status).toBe('connected')
+
+    // 보는 중에 C를 끊으면 다시 잇지 않는다. 다른 탭에 갔다 돌아오면 한 번 더
+    await act(() => useFtpStore.getState().disconnect(C))
+    await flush()
+    expect(connects()).toHaveLength(1)
+    await show(home)
+    await show(tabC)
+    expect(connects()).toHaveLength(2)
+
+    // 실패한 뒤 같은 탭에 머무는 동안은 다시 부르지 않는다
+    h.handlers['ftp:connect'] = () => ({ success: false, error: '530 Login incorrect' })
+    await act(() => useFtpStore.getState().disconnect(C))
+    await show(home)
+    await show(tabC)
+    expect(connects()).toHaveLength(3)
+    act(() => setConnection(C, 'disconnected'))
+    await flush()
+    expect(connects()).toHaveLength(3)
+
+    // 끊김(error)으로는 부르지 않는다
+    act(() => setConnection(C, 'error'))
+    await show(home)
+    await show(tabC)
+    expect(connects()).toHaveLength(3)
+
+    // 저장 비밀번호가 없으면 0회
+    useServerStore.setState({ servers: [{ ...saved, hasPassword: false }] })
+    act(() => setConnection(C, 'disconnected'))
+    await show(home)
+    await show(tabC)
+    expect(connects()).toHaveLength(3)
+  })
+
+  it('does not auto-connect a server that is already connecting', async () => {
+    // covers: Test-1034
+    const C = 'carol@c.lan:21'
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    useServerStore.setState({
+      servers: [
+        {
+          id: 7,
+          name: 'Studio',
+          host: 'c.lan',
+          port: 21,
+          username: 'carol',
+          secure: false,
+          hasPassword: true
+        }
+      ],
+      connecting: false
+    })
+    setConnection(C, 'connecting')
+    await renderExplorer({ side: 'remote', path: DIR, server: C })
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toEqual([])
+    act(() => setConnection(C, 'connected'))
+    await flush()
+    act(() => setConnection(C, 'disconnected'))
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toEqual([])
+  })
+
+  it("runs every remote action of a tab on that tab's connection", async () => {
+    // covers: Test-1028
+    const B = 'bob@b.lan:2121'
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg'), ftp('b.jpg')] } })
+    setConnection(B, 'connected')
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: true,
+      data: 'data:image/png;base64,AA=='
+    })
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['1'], skipped: [], conflicts: [], totalBytes: 1 }
+    })
+    await renderExplorer({ side: 'remote', path: DIR, server: B })
+    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([[B, DIR]])
+
+    // 라이트박스
+    listbox().focus()
+    key('Home')
+    key(' ')
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:downloadPreview')[0][0]).toBe(B)
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    await flush()
+
+    // 이름 바꾸기
+    key('Home')
+    key('F2')
+    const input = within(option('a.jpg')).getByRole('textbox', { name: en['menu.newName'] })
+    fireEvent.change(input, { target: { value: 'c.jpg' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([[B, `${DIR}/a.jpg`, `${DIR}/c.jpg`]])
+
+    // 삭제
+    fireEvent.click(option('b.jpg'))
+    key('Delete')
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toEqual([
+      [B, [{ path: `${DIR}/b.jpg`, isDirectory: false }]]
+    ])
+
+    // OS 파일 드롭은 그 서버로 업로드
+    h.api.getPathForFile.mockReturnValue('C:\\in\\x.jpg')
+    const file = new File(['x'], 'x.jpg')
+    const drop = { types: ['Files'], files: [file], dropEffect: '' }
+    fireEvent.drop(listbox(), { dataTransfer: drop })
+    await flush()
+    expect(invokeCalls(h.invoke, 'transfer:send')).toEqual([
+      [B, { direction: 'upload', sources: ['C:\\in\\x.jpg'], destDir: DIR }]
+    ])
+
+    // 새 폴더
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:mkdir')).toEqual([[B, `${DIR}/New folder`]])
+    expect(
+      [...h.invoke.mock.calls].filter((c) => String(c[0]).startsWith('ftp:') && c[1] === server())
+    ).toEqual([])
   })
 
   it('restores the scroll position of a tab after switching away and back', async () => {

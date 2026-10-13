@@ -46,9 +46,9 @@ interface TransferStore {
   setJobs: (jobs: TransferJob[]) => void
   /**
    * 메인이 보낸 변경분을 목록에 반영한다. 순서는 유지하고, 처음 보는 작업은 뒤에 붙인다. 메타가 없는
-   * 배치(MCP·재시작 전)는 처음 볼 때 `server`(그때 연결의 서버 키)로 메타를 정해 둔다.
+   * 배치(MCP·재시작 전)는 처음 볼 때 그 작업들의 연결(`job.server`)로 메타를 정해 둔다.
    */
-  applyUpdate: (update: TransferUpdate, server?: string) => void
+  applyUpdate: (update: TransferUpdate) => void
   cancel: (id: string) => Promise<void>
   clearCompleted: () => Promise<void>
   /** 실패한 작업을 같은 id·배치로 다시 돈다(`transfer:retry`). 실패하면 토스트. */
@@ -86,8 +86,11 @@ function refreshDownloadedDirs(): void {
   for (const dir of dirs) useListingStore.getState().invalidate('local', undefined, dir)
 }
 
-/** 메타가 없는 배치(MCP·재시작 전): 첫 파일 이름과 공통 대상 폴더로 이름표를 만든다. */
-export function fallbackBatchMeta(jobs: readonly TransferJob[], server?: string): BatchMeta {
+/**
+ * 메타가 없는 배치(MCP·재시작 전): 첫 파일 이름과 공통 대상 폴더로 이름표를 만든다. 원격 목적지(업로드,
+ * 서버 간 복사)의 서버는 작업의 연결(`job.server`, 받는 쪽)이다.
+ */
+export function fallbackBatchMeta(jobs: readonly TransferJob[]): BatchMeta {
   const side = jobs[0]?.direction === 'download' ? 'local' : 'remote'
   const seps = side === 'local' ? ['\\', '/'] : ['/']
   const dirs = jobs.map(
@@ -99,6 +102,7 @@ export function fallbackBatchMeta(jobs: readonly TransferJob[], server?: string)
       common = parentPath(side, common) ?? ''
   }
   const name = jobs[0]?.fileName ?? ''
+  const server = jobs[0]?.server
   return {
     label: jobs.length > 1 ? t('activity.labelMany', { name, count: jobs.length - 1 }) : name,
     to: { side, path: common, ...(side === 'remote' && server ? { server } : {}) }
@@ -114,7 +118,7 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
 
   setJobs: (jobs) => set({ jobs }),
 
-  applyUpdate: ({ upserts, removedIds }, server) => {
+  applyUpdate: ({ upserts, removedIds }) => {
     if (upserts.length === 0 && removedIds.length === 0) return
 
     const jobs = [...get().jobs]
@@ -157,7 +161,7 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
       const key = batchId ?? `job:${id}`
       if (batchMeta[key]) continue
       const list = jobs.filter((j) => (j.batchId ?? `job:${j.id}`) === key)
-      batchMeta = { ...batchMeta, [key]: fallbackBatchMeta(list, server) }
+      batchMeta = { ...batchMeta, [key]: fallbackBatchMeta(list) }
     }
     for (const id of removedIds) delete rates[id]
     if (removedIds.length === 0) {

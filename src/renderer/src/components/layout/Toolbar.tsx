@@ -8,7 +8,9 @@ import {
   Unplug
 } from 'lucide-react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
-import { useServerStore } from '@renderer/stores/useServerStore'
+import { connectingKey, useServerStore } from '@renderer/stores/useServerStore'
+import { useActiveTab } from '@renderer/stores/useTabsStore'
+import { useConnStatus } from '@renderer/lib/connections'
 import { useLayoutStore } from '@renderer/stores/useLayoutStore'
 import { formatPaneShortcut, type PaneSide } from '@renderer/lib/sidebarLayout'
 import { currentPlatform } from '@renderer/lib/platform'
@@ -51,13 +53,21 @@ interface ToolbarProps {
 }
 
 export function Toolbar({ onSettingsClick }: ToolbarProps): React.JSX.Element {
-  const connectionStatus = useFtpStore((s) => s.connectionStatus)
-  const disconnect = useFtpStore((s) => s.disconnect)
+  // 연결 표시·해제는 활성 탭의 서버를 따른다(MC16)
+  const tab = useActiveTab()
+  const server = tab?.loc.side === 'remote' ? tab.loc.server : undefined
+  const isConnected = useConnStatus(server) === 'connected'
   const connecting = useServerStore((s) => s.connecting)
   const cancel = useServerStore((s) => s.cancel)
   const t = useT()
 
-  const isConnected = connectionStatus === 'connected'
+  // 그 서버만 끊는다. 시작 폴더를 읽는 동안에도 연결됨으로 보이는데, 그때 그 서버를 끊는 건 연결
+  // 취소다(실패로 보이지 않게).
+  const disconnect = (): void => {
+    if (!server) return
+    if (connectingKey() === server) cancel()
+    else void useFtpStore.getState().disconnect(server)
+  }
 
   return (
     <div className="relative z-30 flex h-[52px] shrink-0 items-center gap-2 border-b border-[var(--bd)] bg-[var(--sf)] px-3">
@@ -94,8 +104,7 @@ export function Toolbar({ onSettingsClick }: ToolbarProps): React.JSX.Element {
 
       {isConnected && (
         <button
-          // 시작 폴더를 읽는 동안에도 연결됨으로 보인다. 그때 끊는 건 연결 취소다(실패로 보이지 않게).
-          onClick={connecting ? cancel : disconnect}
+          onClick={disconnect}
           className={btn(
             'secondary',
             'md',

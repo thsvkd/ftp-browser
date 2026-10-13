@@ -135,12 +135,11 @@ app.whenReady().then(() => {
 
   // 연결마다 세션(매니저·파일 작업·전송 큐·풀·썸네일·폴더 미리보기 큐)이 하나다. 세션 팩토리가 쓰는
   // 캐시·생성기는 앱에 하나라 레지스트리보다 먼저 만든다(multi-connection §8-4).
-  // 연결은 아직 하나다(single, S3에서 다중 연결을 켠다).
   const cacheManager = new CacheManager(db)
   const generator = new ThumbnailGenerator()
   const folderCache = new RemoteFolderPreviewCache(db)
   const shared = { cacheManager, generator, folderCache, ...thumbnailEvents(win) }
-  const registry = new ConnectionRegistry((key) => createSession(key, shared), { single: true })
+  const registry = new ConnectionRegistry((key) => createSession(key, shared))
   const hub = new TransferHub(registry)
 
   // Register IPC handlers

@@ -86,6 +86,7 @@ export const zhTW = {
   'status.connecting': '正在連線…',
   'status.connected': '已連線',
   'status.error': '連線錯誤',
+  'status.connections_other': '已連線 {{count}} 個伺服器',
   'status.folderCount_other': '{{count}} 個資料夾',
   'status.fileCount_other': '{{count}} 個檔案',
 
@@ -240,6 +241,7 @@ export const zhTW = {
   'sidebar.serverConnecting': '連線中…',
   'sidebar.serverLost': '已中斷連線 · 點擊以重新連線',
   'sidebar.serverOffline': '未連線 · 點擊以連線',
+  'sidebar.disconnect': '中斷 {{name}}',
 
   'place.desktop': '桌面',
   'place.downloads': '下載',
@@ -296,7 +298,7 @@ export const zhTW = {
   'explorer.listing_other': '正在讀取清單… 已有 {{count}} 項',
   'explorer.noMatch': '沒有符合「{{query}}」的項目',
   'explorer.showAll': '顯示全部',
-  'explorer.otherServer': '此分頁是 {{server}} 上的位置',
+  'explorer.serverOffline': '未連線到 {{server}}',
   'explorer.connectTo': '連線到 {{server}}',
   'explorer.offlineHint': '連線後即可開啟此位置。',
   'explorer.staleBanner': '連線已中斷。目前顯示的是上次載入的清單。',
@@ -336,7 +338,6 @@ export const zhTW = {
   'send.invalidNothing': '沒有可傳送的項目',
   'send.invalidIntoItself': '無法將資料夾移到其自身內部',
   'send.invalidNotConnected': '未連線到伺服器',
-  'send.invalidOtherServer': '已連線到其他伺服器',
   'send.invalidHere': '已在此資料夾中',
   'send.invalidRemoteCopy': '不支援在伺服器內部複製',
 

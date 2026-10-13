@@ -96,6 +96,8 @@ export const de = {
   'status.connecting': 'Verbindung wird hergestellt…',
   'status.connected': 'Verbunden',
   'status.error': 'Verbindungsfehler',
+  'status.connections_one': '{{count}} Server verbunden',
+  'status.connections_other': '{{count}} Server verbunden',
   'status.folderCount_one': '{{count}} Ordner',
   'status.folderCount_other': '{{count}} Ordner',
   'status.fileCount_one': '{{count}} Datei',
@@ -266,6 +268,7 @@ export const de = {
   'sidebar.serverConnecting': 'Verbindung wird hergestellt…',
   'sidebar.serverLost': 'Getrennt · Klicken zum erneuten Verbinden',
   'sidebar.serverOffline': 'Nicht verbunden · Klicken zum Verbinden',
+  'sidebar.disconnect': '{{name}} trennen',
 
   'place.desktop': 'Desktop',
   'place.downloads': 'Downloads',
@@ -323,7 +326,7 @@ export const de = {
   'explorer.listing_other': 'Liste wird geladen… {{count}} Einträge',
   'explorer.noMatch': 'Keine Elemente passen zu „{{query}}“',
   'explorer.showAll': 'Alle anzeigen',
-  'explorer.otherServer': 'Dieser Tab zeigt einen Ort auf {{server}}',
+  'explorer.serverOffline': 'Nicht mit {{server}} verbunden',
   'explorer.connectTo': 'Mit {{server}} verbinden',
   'explorer.offlineHint': 'Stellen Sie eine Verbindung her, um diesen Ort zu öffnen.',
   'explorer.staleBanner': 'Verbindung verloren. Die zuletzt geladene Liste wird angezeigt.',
@@ -370,7 +373,6 @@ export const de = {
   'send.invalidNothing': 'Nichts zu senden',
   'send.invalidIntoItself': 'Ein Ordner kann nicht in sich selbst verschoben werden',
   'send.invalidNotConnected': 'Nicht mit einem Server verbunden',
-  'send.invalidOtherServer': 'Mit einem anderen Server verbunden',
   'send.invalidHere': 'Bereits in diesem Ordner',
   'send.invalidRemoteCopy': 'Kopieren innerhalb des Servers wird nicht unterstützt',
 

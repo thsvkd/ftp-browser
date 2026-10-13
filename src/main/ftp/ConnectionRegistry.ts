@@ -89,14 +89,6 @@ export interface ConnectResult {
   cancelled?: boolean
 }
 
-export interface RegistryOptions {
-  /**
-   * 연결은 아직 하나다(S1~S2): connect가 다른 세션을 먼저 끊는다. 렌더러가 연결 하나만 아는 동안
-   * 에이전트의 connect도 지금처럼 이전 연결을 바꾼다. S3에서 지운다(MC5).
-   */
-  single?: boolean
-}
-
 /**
  * 연결 키(`user@host:port`)마다 세션 하나. 세션은 그 키로 처음 connect할 때 만들고 지우지 않는다(끊긴
  * 세션의 큐에 남은 작업을 다시 연결한 뒤 재시도할 수 있다). 매니저의 이벤트는 키를 모르므로 여기서
@@ -110,16 +102,13 @@ export class ConnectionRegistry extends EventEmitter {
   /** 진행 중인 로그인. 같은 키로 동시에 온 connect는 이것을 함께 기다린다. */
   private logins = new Map<ConnKey, Promise<ConnectResult>>()
 
-  constructor(
-    private newSession: (key: ConnKey) => FtpSession,
-    private options: RegistryOptions = {}
-  ) {
+  constructor(private newSession: (key: ConnKey) => FtpSession) {
     super()
   }
 
   /**
-   * 그 키의 세션으로 연결한다. 이미 연결돼 있으면 다시 로그인하지 않는다: 로그인은 매니저가 `connecting`을
-   * 알려 그 연결의 풀·썸네일 큐를 비운다(§8-7).
+   * 그 키의 세션으로 연결한다. 다른 키의 세션은 건드리지 않는다(MC5). 이미 연결돼 있으면 다시 로그인하지
+   * 않는다: 로그인은 매니저가 `connecting`을 알려 그 연결의 풀·썸네일 큐를 비운다(§8-7).
    */
   connect(payload: FtpConnectPayload): Promise<ConnectResult> {
     const key = connKey(payload.host, payload.port, payload.user)
@@ -133,12 +122,6 @@ export class ConnectionRegistry extends EventEmitter {
   }
 
   private async login(session: FtpSession, payload: FtpConnectPayload): Promise<ConnectResult> {
-    if (this.options.single) {
-      const others = this.sessions().filter(
-        (s) => s !== session && s.manager.getStatus() !== 'disconnected'
-      )
-      await Promise.all(others.map((s) => s.manager.disconnect()))
-    }
     const result = await session.manager.connect(payload)
     return { server: session.key, ...result }
   }

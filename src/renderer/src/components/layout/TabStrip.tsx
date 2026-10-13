@@ -3,7 +3,8 @@ import { Copy, Laptop, Plus, Server, X } from 'lucide-react'
 import { useT } from '@renderer/i18n'
 import type { Loc } from '@renderer/lib/explorerEntry'
 import { SPRING_MS } from '@renderer/lib/explorerLayout'
-import { loadPlaces, locLabel, sourceLabel, useConnection } from '@renderer/lib/sendItems'
+import { connectedKeys } from '@renderer/lib/connections'
+import { loadPlaces, locLabel, sourceLabel } from '@renderer/lib/sendItems'
 import { cn } from '@renderer/lib/utils'
 import { useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
 import { SourceBadge } from '@renderer/components/common/SourceBadge'
@@ -98,7 +99,6 @@ export function TabStrip(): React.JSX.Element {
   const t = useT()
   const tabs = useTabsStore((s) => s.tabs)
   const activeId = useTabsStore((s) => s.activeId)
-  const conn = useConnection()
   const listRef = useRef<HTMLDivElement>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
 
@@ -129,7 +129,8 @@ export function TabStrip(): React.JSX.Element {
     const home = (await loadPlaces())?.home
     const locs: Loc[] = [
       ...(home ? [{ side: 'local' as const, path: home }] : []),
-      ...(conn.server ? [{ side: 'remote' as const, path: '/', server: conn.server }] : [])
+      // 연결된 서버마다 루트 하나(연결된 순서, MC31). 메뉴를 여는 순간 읽는다
+      ...connectedKeys().map((server) => ({ side: 'remote' as const, path: '/', server }))
     ]
     setMenu({
       x,

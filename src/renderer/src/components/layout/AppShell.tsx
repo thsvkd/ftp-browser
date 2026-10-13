@@ -14,6 +14,7 @@ import { useLocalThumbnailListener } from '@renderer/hooks/useLocalThumbnailList
 import { useUpdateListener } from '@renderer/hooks/useUpdateListener'
 import { useElementWidth } from '@renderer/hooks/useElementWidth'
 import { useAgentSync } from '@renderer/hooks/useAgentSync'
+import { useConnectionStatus } from '@renderer/hooks/useConnectionStatus'
 import { dropShelf, reloadActiveTab } from '@renderer/lib/sendItems'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
@@ -49,6 +50,7 @@ export function AppShell(): React.JSX.Element {
   useLocalThumbnailListener()
   useUpdateListener()
   useAgentSync()
+  useConnectionStatus()
 
   // 시작 화면은 홈 폴더의 로컬 탭 하나다(D23).
   useEffect(() => {

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { en } from '@renderer/i18n/locales/en'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
+import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { useDnd } from '@renderer/components/explorer/dnd'
 import { Explorer } from '@renderer/components/explorer/Explorer'
@@ -14,6 +15,7 @@ import {
   option,
   remoteLoc,
   server,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from '@renderer/components/explorer/explorerTestHarness'
@@ -186,5 +188,40 @@ describe('TabStrip — the new-tab menu opened by a real click', () => {
     await settle()
     expect(paths()).toEqual(['C:\\work', 'C:\\work'])
     expect(screen.queryByRole('menu')).toBeNull()
+  })
+  it('lists a root for every connected server in the + menu, in connection order', async () => {
+    // covers: Test-1039
+    const [A, B, C, D] = ['a@a.lan:21', 'b@b.lan:21', 'c@c.lan:21', 'd@d.lan:21']
+    useFtpStore.setState({ connections: {} })
+    setConnection(A, 'connected')
+    setConnection(B, 'connected')
+    setConnection(C, 'disconnected')
+    setConnection(D, 'connecting')
+    render(<TabStrip />)
+    nativeClick(screen.getByRole('button', { name: en['tabs.new'] }))
+    await settle()
+    const menu = screen.getByRole('menu', { name: en['tabs.new'] })
+    const rows = Array.from(menu.querySelectorAll('[role="menuitem"], [role="separator"]')).map(
+      (el) => (el.getAttribute('role') === 'separator' ? '—' : (el.textContent ?? ''))
+    )
+    expect(rows.slice(0, 4)).toEqual([
+      expect.stringMatching(/^This PC › me/),
+      expect.stringMatching(/^a\.lan:21 › /),
+      expect.stringMatching(/^b\.lan:21 › /),
+      '—'
+    ])
+    expect(rows.some((r) => /c\.lan|d\.lan/.test(r))).toBe(false)
+    expect(rows[4]).toMatch(new RegExp(en['tabs.duplicate']))
+
+    nativeClick(within(menu).getByRole('menuitem', { name: /^b\.lan:21 › / }))
+    await settle()
+    expect(activeTab().loc).toEqual({ side: 'remote', path: '/', server: B })
+
+    // 연결된 서버가 없으면 원격 항목이 없다
+    useFtpStore.setState({ connections: {} })
+    nativeClick(screen.getByRole('button', { name: en['tabs.new'] }))
+    await settle()
+    const empty = screen.getByRole('menu', { name: en['tabs.new'] })
+    expect(within(empty).queryAllByRole('menuitem', { name: /lan:21/ })).toEqual([])
   })
 })

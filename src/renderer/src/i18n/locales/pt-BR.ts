@@ -93,6 +93,8 @@ export const ptBR = {
   'status.connecting': 'Conectando…',
   'status.connected': 'Conectado',
   'status.error': 'Erro de conexão',
+  'status.connections_one': '{{count}} servidor conectado',
+  'status.connections_other': '{{count}} servidores conectados',
   'status.folderCount_one': '{{count}} pasta',
   'status.folderCount_other': '{{count}} pastas',
   'status.fileCount_one': '{{count}} arquivo',
@@ -263,6 +265,7 @@ export const ptBR = {
   'sidebar.serverConnecting': 'Conectando…',
   'sidebar.serverLost': 'Desconectado · clique para reconectar',
   'sidebar.serverOffline': 'Não conectado · clique para conectar',
+  'sidebar.disconnect': 'Desconectar {{name}}',
 
   'place.desktop': 'Área de trabalho',
   'place.downloads': 'Downloads',
@@ -320,7 +323,7 @@ export const ptBR = {
   'explorer.listing_other': 'Carregando a lista… {{count}} entradas',
   'explorer.noMatch': 'Nenhum item corresponde a “{{query}}”',
   'explorer.showAll': 'Mostrar tudo',
-  'explorer.otherServer': 'Esta guia é um local em {{server}}',
+  'explorer.serverOffline': 'Não conectado a {{server}}',
   'explorer.connectTo': 'Conectar a {{server}}',
   'explorer.offlineHint': 'Conecte-se para abrir este local.',
   'explorer.staleBanner': 'Conexão perdida. Mostrando a última lista carregada.',
@@ -367,7 +370,6 @@ export const ptBR = {
   'send.invalidNothing': 'Nada para enviar',
   'send.invalidIntoItself': 'Uma pasta não pode ser movida para dentro dela mesma',
   'send.invalidNotConnected': 'Não conectado a um servidor',
-  'send.invalidOtherServer': 'Conectado a outro servidor',
   'send.invalidHere': 'Já está nesta pasta',
   'send.invalidRemoteCopy': 'Copiar dentro do servidor não é compatível',
 

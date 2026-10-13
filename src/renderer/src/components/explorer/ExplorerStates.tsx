@@ -153,22 +153,32 @@ export function ListErrorPanel({
   )
 }
 
-/** 다른 서버의 원격 탭(D2): 목록을 읽지 않고 그 서버에 연결하는 버튼을 보인다. */
-export function OtherServerPanel({
+/**
+ * 그 탭의 서버가 연결 안 됨(MC11): 목록을 읽지 않고 그 서버에 연결하는 버튼을 보인다. 연결 중이면
+ * 버튼에 회전 표시를 두고 막는다.
+ */
+export function ServerOfflinePanel({
   server,
+  connecting,
   onConnect
 }: {
   server: string
+  connecting: boolean
   onConnect: () => void
 }): React.JSX.Element {
   const t = useT()
   return (
     <Panel
       icon={ServerOff}
-      title={t('explorer.otherServer', { server })}
+      title={t('explorer.serverOffline', { server })}
       actions={
-        <button onClick={onConnect} className={btn('primary')}>
-          <Plug className="h-4 w-4" aria-hidden /> {t('explorer.connectTo', { server })}
+        <button onClick={onConnect} disabled={connecting} className={btn('primary')}>
+          {connecting ? (
+            <Loader className="spin h-4 w-4" aria-hidden />
+          ) : (
+            <Plug className="h-4 w-4" aria-hidden />
+          )}{' '}
+          {t('explorer.connectTo', { server })}
         </button>
       }
     >
@@ -177,7 +187,7 @@ export function OtherServerPanel({
   )
 }
 
-/** 연결이 없을 때의 원격 탭: 지금 `NotConnectedPane`(안내 + 최근 서버 칩)을 그대로 그린다. */
+/** 서버가 없는 원격 위치(만들지 않지만 있으면): `NotConnectedPane`(안내 + 최근 서버 칩)을 그린다. */
 export function OfflinePanel({ connecting }: { connecting: boolean }): React.JSX.Element {
   const t = useT()
   return (
