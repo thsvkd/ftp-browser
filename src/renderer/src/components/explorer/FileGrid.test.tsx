@@ -23,9 +23,11 @@ import {
   renderExplorer,
   selectedNames,
   server,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from './explorerTestHarness'
+import { connKey, MAIN_VIEWER } from '@shared/connKey'
 import { ZOOM_STEP } from './FileGrid'
 
 let h: ExplorerHarness
@@ -62,7 +64,7 @@ describe('FileGrid — viewport thumbnail batches (migrated)', () => {
   const lastBatch = (): Item[] => {
     const batches = invokeCalls(h.invoke, 'thumbnail:requestBatch')
     if (!batches.length) throw new Error('no thumbnail:requestBatch')
-    return batches[batches.length - 1][1] as Item[]
+    return batches[batches.length - 1][2] as Item[]
   }
   const indexOf = (n: string): number => Number(n.slice(3, 6))
   const scrollTo = async (top: number): Promise<void> => {
@@ -187,7 +189,7 @@ describe('FileGrid — viewport thumbnail batches (migrated)', () => {
     expect(lastCancel).toBeGreaterThanOrEqual(0)
     const after = h.invoke.mock.calls.slice(lastCancel + 1)
     const batches = after.filter((call) => call[0] === 'thumbnail:requestBatch')
-    expect(batches.map((call) => (call[2] as Item[]).map((r) => r.remotePath))).toContainEqual([
+    expect(batches.map((call) => (call[3] as Item[]).map((r) => r.remotePath))).toContainEqual([
       '/sub/new000.jpg'
     ])
   })
@@ -269,5 +271,51 @@ describe('FileGrid — selection does not resize a tile', () => {
     expect(picked.style.height).toBe(box('b.jpg').style.height)
     expect(picked.classList.contains('ring-2')).toBe(true)
     expect(picked.classList.contains('ring-[var(--ac)]')).toBe(true)
+  })
+})
+
+describe('FileGrid — thumbnails are per connection', () => {
+  it('batches for its own connection and never shows another connection’s thumbnail', async () => {
+    // covers: Test-1023
+    const A = server()
+    const B = connKey('example.org', 21, 'kim')
+    const dataUrl = (id: string): string => `data:image/jpeg;base64,${id}`
+    const keyOf = (conn: string): string =>
+      generateCacheKeyRenderer(conn, '/p.jpg', 1000, MODIFIED_AT)
+    expect(keyOf(A)).not.toBe(keyOf(B))
+    h = setupExplorer({ remote: { '/': [ftp('p.jpg', { size: 1000 })] } })
+    setConnection(B, 'connected')
+    // 같은 경로·크기·시각의 A 썸네일만 있다.
+    useThumbnailStore.setState({
+      thumbnails: { [keyOf(A)]: { dataUrl: dataUrl('QQ=='), width: 1, height: 1 } }
+    })
+
+    await renderExplorer({ side: 'remote', path: '/', server: B })
+
+    const batches = invokeCalls(h.invoke, 'thumbnail:requestBatch')
+    expect(batches[batches.length - 1]).toEqual([
+      B,
+      MAIN_VIEWER,
+      [
+        {
+          remotePath: '/p.jpg',
+          fileName: 'p.jpg',
+          fileSize: 1000,
+          modifiedAt: MODIFIED_AT,
+          priority: 0
+        }
+      ]
+    ])
+    expect(option('p.jpg').querySelector('img')).toBeNull()
+
+    act(() =>
+      useThumbnailStore.setState({
+        thumbnails: {
+          [keyOf(A)]: { dataUrl: dataUrl('QQ=='), width: 1, height: 1 },
+          [keyOf(B)]: { dataUrl: dataUrl('Qg=='), width: 1, height: 1 }
+        }
+      })
+    )
+    expect(option('p.jpg').querySelector('img')?.getAttribute('src')).toBe(dataUrl('Qg=='))
   })
 })

@@ -11,7 +11,7 @@ import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { Tile } from './Tile'
 import type { ItemProps } from './useItem'
-import type { ConnKey } from '@shared/connKey'
+import { MAIN_VIEWER, type ConnKey } from '@shared/connKey'
 
 /** Ctrl+휠·Ctrl+= / Ctrl+− 한 번에 바뀌는 타일 크기(px) */
 export const ZOOM_STEP = 16
@@ -83,7 +83,7 @@ export function FileGrid({
       .map((x) => x.request)
     // 창을 벗어난 실패 항목은 에러를 지워, 다시 보일 때 재요청되게 한다.
     for (const key of Object.keys(errors)) if (!windowKeys.has(key)) clearError(key)
-    window.api.invoke('thumbnail:requestBatch', server, requests)
+    window.api.invoke('thumbnail:requestBatch', server, MAIN_VIEWER, requests)
   }, [server, visibleStart, visibleEnd, items, cols])
 
   useEffect(() => {

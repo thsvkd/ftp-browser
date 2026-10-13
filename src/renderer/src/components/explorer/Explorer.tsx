@@ -70,6 +70,7 @@ import { useServerStore } from '@renderer/stores/useServerStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useActiveTab, useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
+import { MAIN_VIEWER } from '@shared/connKey'
 import { isSafeLocalName, isSafeRemoteName, uniqueLocalNames } from '@shared/entryName'
 import type { IpcResult } from '@shared/types/ipc'
 import { startDrag, useDnd, useDropTarget } from './dnd'
@@ -253,13 +254,14 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
   // 원격 위치가 바뀌면 대기 중인 썸네일·폴더 미리보기를 먼저 취소한다. layout effect라 그리드의
   // 새 배치(passive effect)보다 먼저 나간다(thumbnail-viewport-priority D14, 함정 2).
   const remoteKey = remote && gate === 'live' ? key : null
+  const remoteServer = remote ? loc.server : undefined
   useLayoutEffect(() => {
-    if (!remoteKey) return
-    // 연결 하나의 대기를 취소한다(null = 모든 연결)
-    window.api.invoke('thumbnail:cancelAll', null)
-    window.api.invoke('gallery:cancelAll', null)
-    useGalleryStore.getState().clearRemote()
-  }, [remoteKey])
+    if (!remoteKey || !remoteServer) return
+    // 이 패널(뷰어)의 대기만 취소한다. 서버가 바뀌는 이동일 수 있어 모든 연결에서(null) 뺀다(§4.3-4)
+    window.api.invoke('thumbnail:cancelAll', null, MAIN_VIEWER)
+    window.api.invoke('gallery:cancelAll', null, MAIN_VIEWER)
+    useGalleryStore.getState().clearRemote(remoteServer)
+  }, [remoteKey, remoteServer])
 
   useEffect(() => {
     void loadPlaces()

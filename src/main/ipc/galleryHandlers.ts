@@ -6,7 +6,7 @@ import type { RemoteFolderPreviewCache } from '../ftp/RemoteFolderPreviewCache'
 import { LocalThumbnailManager } from '../local/LocalThumbnailManager'
 import { ipcError } from '../utils/errorClassifier'
 import { getParentRemotePath, normalizeRemotePath } from '../utils/remotePath'
-import { sessionsOf } from './thumbnailHandlers'
+import { INVALID_VIEWER, isViewerId, sessionsOf } from './thumbnailHandlers'
 import { isImageFile } from '@shared/constants'
 import { parseConnKey } from '@shared/connKey'
 import type { RemoteChangedEvent } from '@shared/types/ftp'
@@ -86,8 +86,9 @@ export function registerGalleryHandlers(
       conn: unknown,
       req: RemoteFolderPreviewRequest
     ): Promise<IpcResult<RemoteFolderPreview | null>> => {
+      if (!isViewerId(req?.viewerId)) return INVALID_VIEWER
       try {
-        const preview = await registry.require(conn).gallery.request(req.remotePath)
+        const preview = await registry.require(conn).gallery.request(req.remotePath, req.viewerId)
         return { success: true, data: preview }
       } catch (err) {
         return sessionIpcError(err)
@@ -95,11 +96,15 @@ export function registerGalleryHandlers(
     }
   )
 
-  // conn이 없으면(null) 모든 세션의 대기를 취소한다
-  ipcMain.handle('gallery:cancelAll', (_event, conn?: string | null): IpcResult<void> => {
-    for (const session of sessionsOf(registry, conn)) session.gallery.cancelAll()
-    return { success: true, data: undefined }
-  })
+  // conn이 null이면 모든 세션에서 그 뷰어를 폴더 미리보기 소유에서 뺀다
+  ipcMain.handle(
+    'gallery:cancelAll',
+    (_event, conn: string | null, viewerId: unknown): IpcResult<void> => {
+      if (!isViewerId(viewerId)) return INVALID_VIEWER
+      for (const session of sessionsOf(registry, conn)) session.gallery.cancelAll(viewerId)
+      return { success: true, data: undefined }
+    }
+  )
 
   ipcMain.handle(
     'gallery:localFolderPreview',

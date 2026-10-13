@@ -7,7 +7,7 @@ import { FolderCountBadge } from './FolderCountBadge'
 import { useT } from '@renderer/i18n'
 import type { IpcResult } from '@shared/types/ipc'
 import type { RemoteFolderPreview } from '@shared/types/gallery'
-import type { ConnKey } from '@shared/connKey'
+import { MAIN_VIEWER, type ConnKey } from '@shared/connKey'
 
 /** 미리보기가 없을 때의 폴더 글리프(이모지 대신 lucide, 기준선 #16). */
 function FolderGlyph({ size }: { size: number }): React.JSX.Element {
@@ -51,7 +51,7 @@ export function RemoteFolderThumbnail({
       const result = await window.api.invoke<IpcResult<RemoteFolderPreview | null>>(
         'gallery:remoteFolderPreview',
         server,
-        { remotePath: folderPath }
+        { remotePath: folderPath, viewerId: MAIN_VIEWER }
       )
       if (result.success) {
         setResolved(storeKey, result.data)

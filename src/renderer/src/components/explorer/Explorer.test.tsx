@@ -21,12 +21,14 @@ import { useTabEntries } from '@renderer/hooks/useTabEntries'
 import { useConfirmStore } from '@renderer/stores/useConfirmStore'
 import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useActiveTab, useTabsStore } from '@renderer/stores/useTabsStore'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
+import { connKey, MAIN_VIEWER } from '@shared/connKey'
 import type { FtpServer } from '@shared/types/ftp'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
 import { useDnd } from './dnd'
@@ -1621,5 +1623,40 @@ describe('Explorer — file type filter', () => {
     // (4) 필터를 풀면 선택이 되살아난다.
     act(() => useTabsStore.getState().patchTab(activeTab().id, { filter: EMPTY_FILTER }))
     expect(hook.result.current.selected.map((e) => e.name)).toEqual(['b.txt'])
+  })
+})
+
+describe('Explorer — remote location change cancels this panel’s pending work', () => {
+  it('cancels thumbnails and folder previews before the new batch and clears only that server’s previews', async () => {
+    // covers: Test-1024
+    h = setupExplorer({
+      remote: { '/': [ftp('dir', { dir: true })], '/sub': [ftp('new.jpg', { size: 1000 })] }
+    })
+    await renderExplorer(remoteLoc('/'))
+    const other = connKey('other.example', 21, 'kim')
+    const resolved = { status: 'resolved', preview: null } as const
+    useGalleryStore.setState({
+      remoteFolderPreviews: {
+        [`${server()}|/photos`]: resolved,
+        [`${other}|/photos`]: resolved
+      }
+    })
+    h.invoke.mockClear()
+
+    act(() => useTabsStore.getState().navigate(remoteLoc('/sub')))
+    await flush()
+
+    const calls = h.invoke.mock.calls
+    const cancelThumbs = calls.findIndex((c) => c[0] === 'thumbnail:cancelAll')
+    const cancelGallery = calls.findIndex((c) => c[0] === 'gallery:cancelAll')
+    const firstBatch = calls.findIndex((c) => c[0] === 'thumbnail:requestBatch')
+    expect(cancelThumbs).toBeGreaterThanOrEqual(0)
+    expect(cancelGallery).toBeGreaterThanOrEqual(0)
+    expect(firstBatch).toBeGreaterThan(Math.max(cancelThumbs, cancelGallery))
+    expect(calls[cancelThumbs]).toEqual(['thumbnail:cancelAll', null, MAIN_VIEWER])
+    expect(calls[cancelGallery]).toEqual(['gallery:cancelAll', null, MAIN_VIEWER])
+    expect(Object.keys(useGalleryStore.getState().remoteFolderPreviews)).toEqual([
+      `${other}|/photos`
+    ])
   })
 })

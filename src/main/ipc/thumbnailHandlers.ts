@@ -44,13 +44,20 @@ export function registerThumbnailHandlers(
   )
 
   // 원격 그리드의 뷰포트 배치(보이는 행 ± 한 화면, 가까운 순 priority). 단순 묶음 요청이 아니라
-  // 직전 배치를 **교체**한다: 직전 배치에서 아직 시작하지 않았고 이번에 빠진 항목은 버린다.
-  // 진행 중 다운로드와 단건 thumbnail:request 항목은 그대로 둔다(docs/handoff/thumbnail-viewport-priority.md).
+  // 그 (연결, 뷰어)의 직전 배치를 **교체**한다: 직전 배치에서 아직 시작하지 않았고 이번에 빠진 항목은
+  // 다른 뷰어도 원하지 않을 때만 버린다. 진행 중 다운로드와 단건 thumbnail:request 항목은 그대로 둔다
+  // (docs/handoff/thumbnail-viewport-priority.md, multi-connection.md §4.3).
   ipcMain.handle(
     'thumbnail:requestBatch',
-    (_event, conn: unknown, requests: ThumbnailRequest[]): IpcResult<string[]> => {
+    (
+      _event,
+      conn: unknown,
+      viewerId: unknown,
+      requests: ThumbnailRequest[]
+    ): IpcResult<string[]> => {
+      if (!isViewerId(viewerId)) return INVALID_VIEWER
       try {
-        const keys = registry.require(conn).thumbs.requestBatch(requests)
+        const keys = registry.require(conn).thumbs.requestBatch(viewerId, requests)
         return { success: true, data: keys }
       } catch (err) {
         return sessionIpcError(err)
@@ -58,11 +65,15 @@ export function registerThumbnailHandlers(
     }
   )
 
-  // conn이 없으면(null) 모든 세션의 대기를 취소한다
-  ipcMain.handle('thumbnail:cancelAll', (_event, conn?: string | null): IpcResult<void> => {
-    for (const session of sessionsOf(registry, conn)) session.thumbs.cancelAll()
-    return { success: true, data: undefined }
-  })
+  // conn이 null이면 모든 세션에서 그 뷰어의 배치를 취소한다
+  ipcMain.handle(
+    'thumbnail:cancelAll',
+    (_event, conn: string | null, viewerId: unknown): IpcResult<void> => {
+      if (!isViewerId(viewerId)) return INVALID_VIEWER
+      for (const session of sessionsOf(registry, conn)) session.thumbs.cancelAll(viewerId)
+      return { success: true, data: undefined }
+    }
+  )
 
   ipcMain.handle('cache:getStats', (): IpcResult<{ totalBytes: number; totalCount: number }> => {
     const stats = cacheManager.getStats()
@@ -75,12 +86,16 @@ export function registerThumbnailHandlers(
   })
 }
 
-/** 취소 채널의 대상: 그 키의 세션, `null`·없음이면 모든 세션 */
-export function sessionsOf(
-  registry: ConnectionRegistry,
-  conn: string | null | undefined
-): FtpSession[] {
-  if (conn === null || conn === undefined) return registry.sessions()
+/** 뷰어 id(패널 id)는 1~64자 문자열이다(multi-connection §4.3-1) */
+export function isViewerId(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 64
+}
+
+export const INVALID_VIEWER = { success: false, error: 'Invalid viewer id.' } as const
+
+/** 취소 채널의 대상: 그 키의 세션, `null`이면 모든 세션 */
+export function sessionsOf(registry: ConnectionRegistry, conn: string | null): FtpSession[] {
+  if (conn === null) return registry.sessions()
   const session = registry.get(conn)
   return session ? [session] : []
 }
