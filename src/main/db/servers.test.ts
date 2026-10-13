@@ -415,6 +415,23 @@ describe('recent paths per connection', () => {
     expect(read('me@nas.local:21')).toEqual(['/a', '/b'])
     expect(paths('nas.local', 21)).toEqual(['me /a', 'me /b'])
 
+    // 호스트 철자만 다르게 같은 경로를 기록해도 행이 늘지 않고, 20개도 한 키로 센다
+    nextMs()
+    recordRecentPath(db, 'me@NAS.local:21', '/b')
+    expect(read('me@nas.local:21')).toEqual(['/b', '/a'])
+    expect(paths('NAS.local', 21)).toEqual(['me /b'])
+    expect(paths('nas.local', 21)).toEqual(['me /a'])
+    for (let i = 0; i <= 20; i++) {
+      nextMs()
+      recordRecentPath(db, i < 20 ? 'me@NAS.local:21' : 'me@nas.local:21', `/c${i}`)
+    }
+    expect(read('me@nas.local:21')).toEqual(Array.from({ length: 20 }, (_, i) => `/c${20 - i}`))
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS n FROM remote_recent_paths WHERE lower(host) = 'nas.local'")
+        .get()
+    ).toEqual({ n: 20 })
+
     // 키마다 20개를 남긴다
     const many = Array.from({ length: 25 }, (_, i) => `/p${i}`)
     for (const p of many) {
@@ -433,24 +450,30 @@ describe('recent paths per connection', () => {
     const { id } = saveServer(db, base, plain('pw'))
     addPath('nas.local', 21, 'me', '/photos')
     addPath('nas.local', 21, 'guest', '/guest')
+    // 옛 테이블에서 호스트 철자 그대로 복사된 행(SH9)도 저장 행을 따라간다
+    addPath('NAS.local', 21, 'me', '/old-case')
     // 새 주소에 같은 사용자·경로의 행이 이미 있어도 실패하지 않는다
     addPath('nas.local', 2121, 'me', '/photos')
 
     saveServer(db, { ...base, id, port: 2121 }, plain('pw'))
-    expect(paths('nas.local', 2121)).toEqual(['guest /guest', 'me /photos'])
+    expect(paths('nas.local', 2121)).toEqual(['guest /guest', 'me /old-case', 'me /photos'])
     expect(paths('nas.local', 21)).toEqual([])
+    expect(paths('NAS.local', 21)).toEqual([])
 
     // 사용자만 바꾸면 아무 행도 옮기지 않는다
     saveServer(db, { ...base, id, port: 2121, username: 'you' }, plain('pw'))
-    expect(paths('nas.local', 2121)).toEqual(['guest /guest', 'me /photos'])
+    expect(paths('nas.local', 2121)).toEqual(['guest /guest', 'me /old-case', 'me /photos'])
 
-    // 지우면 그 host·port의 모든 사용자 행과 옛 테이블 행이 지워지고, 다른 주소의 행은 남는다
+    // 지우면 그 host·port의 모든 사용자 행(호스트 철자만 다른 행 포함)과 옛 테이블 행이 지워지고,
+    // 다른 주소의 행은 남는다
     addPath('other.lan', 21, 'me', '/keep')
+    addPath('NAS.local', 2121, 'me', '/photos')
     db.prepare(
       "INSERT INTO server_recent_paths (server_host, server_port, path) VALUES ('nas.local', 2121, '/old')"
     ).run()
     deleteServer(db, id!)
     expect(paths('nas.local', 2121)).toEqual([])
+    expect(paths('NAS.local', 2121)).toEqual([])
     expect(
       db
         .prepare("SELECT COUNT(*) AS n FROM server_recent_paths WHERE server_host = 'nas.local'")
