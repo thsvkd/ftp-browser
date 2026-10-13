@@ -364,8 +364,8 @@ describe('filterLabel', () => {
       filterLabel(filter({ categories: ['image', 'raw', 'doc', 'code'] }), all, nameOf, 'NOEXT', 2)
     ).toBe('IMAGE, RAW +2')
     // Hidden and unknown ids are not part of the label.
-    expect(filterLabel(filter({ categories: ['video', 'gone', 'raw'] }), all, nameOf, 'NOEXT')).toBe(
-      'RAW'
-    )
+    expect(
+      filterLabel(filter({ categories: ['video', 'gone', 'raw'] }), all, nameOf, 'NOEXT')
+    ).toBe('RAW')
   })
 })

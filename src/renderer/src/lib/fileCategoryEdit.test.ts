@@ -94,8 +94,12 @@ describe('addCustom / renameCustom / deleteCustom', () => {
 
     const added = addExtension(o, resolveCategories(o), 'custom-1', 'TXT')
     expect(added.result).toBe('added')
-    o = addExtension(added.overrides, resolveCategories(added.overrides), 'custom-1', 'md')
-      .overrides
+    o = addExtension(
+      added.overrides,
+      resolveCategories(added.overrides),
+      'custom-1',
+      'md'
+    ).overrides
     expect(extsOf(o, 'custom-1')).toEqual(['txt', 'md'])
     o = removeExtension(o, 'custom-1', 'txt')
     expect(extsOf(o, 'custom-1')).toEqual(['md'])

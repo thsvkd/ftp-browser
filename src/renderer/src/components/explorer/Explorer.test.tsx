@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
 import { optId } from '@renderer/lib/explorerLayout'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
+import { EMPTY_FILTER } from '@renderer/lib/fileCategories'
 import { gridLayout } from '@renderer/lib/gridGeometry'
 import { useConfirmStore } from '@renderer/stores/useConfirmStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
@@ -310,10 +311,14 @@ describe('Explorer — loading, errors and empty states', () => {
 
     act(() => useTabsStore.getState().navigate(remoteLoc('/docs')))
     await flush()
-    act(() => useTabsStore.getState().patchTab(activeTab().id, { photosOnly: true }))
+    act(() =>
+      useTabsStore
+        .getState()
+        .patchTab(activeTab().id, { filter: { ...EMPTY_FILTER, categories: ['image'] } })
+    )
     expect(screen.getByText('1 other file hidden by the photo filter')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: en['explorer.showAll'] }))
-    expect(activeTab().photosOnly).toBe(false)
+    expect(activeTab().filter).toEqual(EMPTY_FILTER)
     expect(option('b.txt')).toBeTruthy()
   })
 })

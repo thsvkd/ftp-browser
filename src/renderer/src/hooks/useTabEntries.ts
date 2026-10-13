@@ -1,7 +1,9 @@
 import { useMemo } from 'react'
 import { filterEntries } from '@renderer/lib/entryList'
 import { locKey, type ExplorerEntry } from '@renderer/lib/explorerEntry'
+import { EMPTY_FILTER } from '@renderer/lib/fileCategories'
 import { connectedServer } from '@renderer/lib/sendItems'
+import { useTabMatcher } from './useFileFilter'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
@@ -12,7 +14,7 @@ const NONE: ExplorerEntry[] = []
 export interface TabEntries {
   /** 그 폴더의 목록 전체(숨김 포함) */
   all: ExplorerEntry[]
-  /** 탭의 찾기·사진만과 숨김 설정을 거친 항목 */
+  /** 탭의 찾기·파일 종류 필터와 숨김 설정을 거친 항목 */
   visible: ExplorerEntry[]
   /** 보이는 항목 중 탭이 고른 것 */
   selected: ExplorerEntry[]
@@ -32,11 +34,11 @@ export function useTabEntries(tab: Tab | undefined): TabEntries {
   const all = (listed && cached) || NONE
   const showHidden = useSettingsStore((s) => s.showHidden)
   const query = tab?.query ?? ''
-  const photosOnly = tab?.photosOnly ?? false
+  const matcher = useTabMatcher(tab?.filter ?? EMPTY_FILTER)
   const sel = tab?.sel
   const visible = useMemo(
-    () => filterEntries(all, { query, photosOnly, showHidden }).visible,
-    [all, query, photosOnly, showHidden]
+    () => filterEntries(all, { query, matcher, showHidden }).visible,
+    [all, query, matcher, showHidden]
   )
   const selected = useMemo(() => {
     const set = new Set(sel)

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { filterEntries, sortEntries } from './entryList'
 import type { ExplorerEntry } from './explorerEntry'
+import { EMPTY_FILTER, EMPTY_OVERRIDES, createMatcher, resolveCategories } from './fileCategories'
 
 function entry(name: string, over: Partial<ExplorerEntry> = {}): ExplorerEntry {
   return {
@@ -79,8 +80,13 @@ describe('sortEntries', () => {
   })
 })
 
+const photoMatcher = createMatcher(
+  { ...EMPTY_FILTER, categories: ['image', 'raw', 'video'] },
+  resolveCategories(EMPTY_OVERRIDES)
+)
+
 describe('filterEntries', () => {
-  it('filters by query (initials too) and photos, and counts what each filter removed', () => {
+  it('filters by query (initials too) and file type, and counts what each filter removed', () => {
     // covers: Test-772
     const list = [
       entry('.hidden.jpg', { category: 'image' }),
@@ -92,32 +98,67 @@ describe('filterEntries', () => {
       entry('sub', { type: 'directory' })
     ]
 
-    const all = filterEntries(list, { query: '', photosOnly: false, showHidden: false })
+    const all = filterEntries(list, { query: '', matcher: null, showHidden: false })
     expect(all.visible).toHaveLength(6)
-    expect(all).toMatchObject({ hiddenCount: 1, queryCount: 0, photosCount: 0 })
+    expect(all).toMatchObject({ hiddenCount: 1, queryCount: 0, filterCount: 0 })
 
-    expect(
-      filterEntries(list, { query: '', photosOnly: false, showHidden: true }).hiddenCount
-    ).toBe(0)
+    expect(filterEntries(list, { query: '', matcher: null, showHidden: true }).hiddenCount).toBe(0)
 
-    const sky = filterEntries(list, { query: 'sK', photosOnly: false, showHidden: false })
+    const sky = filterEntries(list, { query: 'sK', matcher: null, showHidden: false })
     expect(names(sky.visible)).toEqual(['Sky.PNG'])
     expect(sky.queryCount).toBe(5)
 
     // ㄴ arrives as 's' (2-beolsik); typed jamo match the same initials.
     expect(
-      names(filterEntries(list, { query: 's', photosOnly: false, showHidden: false }).visible)
+      names(filterEntries(list, { query: 's', matcher: null, showHidden: false }).visible)
     ).toEqual(['나무.jpg', 'Sky.PNG', 'shot.cr3', 'notes.txt', 'sub'])
     expect(
-      names(filterEntries(list, { query: 'ㄴㅁ', photosOnly: false, showHidden: false }).visible)
+      names(filterEntries(list, { query: 'ㄴㅁ', matcher: null, showHidden: false }).visible)
     ).toEqual(['나무.jpg'])
     // Substring, not only prefix.
     expect(
-      names(filterEntries(list, { query: 'ip', photosOnly: false, showHidden: false }).visible)
+      names(filterEntries(list, { query: 'ip', matcher: null, showHidden: false }).visible)
     ).toEqual(['clip.mp4'])
 
-    const photos = filterEntries(list, { query: '', photosOnly: true, showHidden: false })
+    const photos = filterEntries(list, { query: '', matcher: photoMatcher, showHidden: false })
     expect(names(photos.visible)).toEqual(['나무.jpg', 'Sky.PNG', 'shot.cr3', 'clip.mp4', 'sub'])
-    expect(photos).toMatchObject({ hiddenCount: 1, queryCount: 0, photosCount: 1 })
+    expect(photos).toMatchObject({ hiddenCount: 1, queryCount: 0, filterCount: 1 })
+  })
+
+  it('reproduces the old photos-only result with a three-category matcher and counts each entry once', () => {
+    // covers: Test-934
+    const list = [
+      entry('.hidden.jpg', { category: 'image' }),
+      entry('나무.jpg', { category: 'image' }),
+      entry('Sky.PNG', { category: 'image' }),
+      entry('shot.cr3', { category: 'raw' }),
+      entry('clip.mp4', { category: 'video' }),
+      entry('notes.txt', { category: 'doc' }),
+      entry('sub', { type: 'directory' })
+    ]
+    const photos = filterEntries(list, { query: '', matcher: photoMatcher, showHidden: false })
+    expect(names(photos.visible)).toEqual(['나무.jpg', 'Sky.PNG', 'shot.cr3', 'clip.mp4', 'sub'])
+    expect(photos).toMatchObject({ hiddenCount: 1, queryCount: 0, filterCount: 1 })
+
+    const none = filterEntries(list, { query: '', matcher: null, showHidden: false })
+    expect(none.filterCount).toBe(0)
+    expect(none.visible).toHaveLength(6)
+
+    // Search first: only what passed the search can be removed by the filter.
+    const withQuery = filterEntries(list, { query: 's', matcher: photoMatcher, showHidden: false })
+    expect(names(withQuery.visible)).toEqual(['나무.jpg', 'Sky.PNG', 'shot.cr3', 'sub'])
+    expect(withQuery).toMatchObject({ hiddenCount: 1, queryCount: 1, filterCount: 1 })
+    expect(
+      withQuery.visible.length +
+        withQuery.hiddenCount +
+        withQuery.queryCount +
+        withQuery.filterCount
+    ).toBe(list.length)
+
+    // A hidden file is counted as hidden even when the filter would also drop it.
+    const hiddenDoc = [entry('.x.txt', { category: 'doc' })]
+    expect(
+      filterEntries(hiddenDoc, { query: '', matcher: photoMatcher, showHidden: false })
+    ).toMatchObject({ hiddenCount: 1, filterCount: 0 })
   })
 })

@@ -57,29 +57,32 @@ export const EMPTY_OVERRIDES: CategoryOverrides = Object.freeze({
 
 const words = (s: string): readonly string[] => s.split(' ')
 
-export const DEFAULT_CATEGORIES: readonly { id: DefaultCategoryId; extensions: readonly string[] }[] =
-  [
-    { id: 'image', extensions: words('jpg jpeg png gif webp bmp tif tiff svg heic heif avif ico psd') },
-    { id: 'raw', extensions: words('cr2 cr3 nef arw dng orf rw2 raf srw pef crw nrw srf sr2 x3f') },
-    {
-      id: 'video',
-      extensions: words('mp4 mkv mov avi wmv flv webm m4v mpg mpeg m2ts mts 3gp')
-    },
-    { id: 'audio', extensions: words('mp3 flac wav aac m4a ogg opus wma aiff') },
-    {
-      id: 'doc',
-      extensions: words(
-        'pdf doc docx xls xlsx ppt pptx odt ods odp txt md rtf csv epub hwp hwpx log'
-      )
-    },
-    { id: 'archive', extensions: words('zip rar 7z tar gz tgz bz2 xz zst iso dmg') },
-    {
-      id: 'code',
-      extensions: words(
-        'js ts jsx tsx py java c cpp h cs go rs rb php sh ps1 json yaml yml toml xml html css sql mjs cjs scss'
-      )
-    }
-  ]
+export const DEFAULT_CATEGORIES: readonly {
+  id: DefaultCategoryId
+  extensions: readonly string[]
+}[] = [
+  {
+    id: 'image',
+    extensions: words('jpg jpeg png gif webp bmp tif tiff svg heic heif avif ico psd')
+  },
+  { id: 'raw', extensions: words('cr2 cr3 nef arw dng orf rw2 raf srw pef crw nrw srf sr2 x3f') },
+  {
+    id: 'video',
+    extensions: words('mp4 mkv mov avi wmv flv webm m4v mpg mpeg m2ts mts 3gp')
+  },
+  { id: 'audio', extensions: words('mp3 flac wav aac m4a ogg opus wma aiff') },
+  {
+    id: 'doc',
+    extensions: words('pdf doc docx xls xlsx ppt pptx odt ods odp txt md rtf csv epub hwp hwpx log')
+  },
+  { id: 'archive', extensions: words('zip rar 7z tar gz tgz bz2 xz zst iso dmg') },
+  {
+    id: 'code',
+    extensions: words(
+      'js ts jsx tsx py java c cpp h cs go rs rb php sh ps1 json yaml yml toml xml html css sql mjs cjs scss'
+    )
+  }
+]
 
 /** 앞뒤 공백·앞쪽 점을 지우고 소문자로. 쓸 수 없는 값(빈 값, 공백·슬래시, 끝 점, `..`)은 null. */
 export function normalizeExtension(raw: string): string | null {

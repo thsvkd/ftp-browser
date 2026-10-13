@@ -235,7 +235,7 @@ export function StaleBanner({ onReconnect }: { onReconnect: () => void }): React
 export function EmptyPanel(p: {
   query: string
   queryCount: number
-  photosCount: number
+  filterCount: number
   shelfCount: number
   canWrite: boolean
   onClearQuery: () => void
@@ -256,11 +256,11 @@ export function EmptyPanel(p: {
         }
       />
     )
-  if (p.photosCount)
+  if (p.filterCount)
     return (
       <Panel
         icon={ImageIcon}
-        title={t('explorer.hiddenByPhotos', { count: p.photosCount })}
+        title={t('explorer.hiddenByPhotos', { count: p.filterCount })}
         actions={
           <button onClick={p.onShowAll} className={btn('secondary')}>
             {t('explorer.showAll')}

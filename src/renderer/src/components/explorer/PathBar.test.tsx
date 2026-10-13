@@ -98,11 +98,7 @@ describe('PathBar — find, photos, sort and view', () => {
     expect(screen.getAllByRole('option')).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: en['filter.clear'] }))
 
-    const photos = screen.getByRole('button', { name: en['filter.photosOnly'] })
-    fireEvent.click(photos)
-    expect(activeTab().photosOnly).toBe(true)
-    expect(photos.getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getAllByRole('option')).toHaveLength(2)
+    expect(screen.getAllByRole('option')).toHaveLength(3)
 
     fireEvent.click(screen.getByRole('button', { name: en['sort.label'] }))
     fireEvent.click(screen.getByRole('menuitem', { name: en['file.size'] }))

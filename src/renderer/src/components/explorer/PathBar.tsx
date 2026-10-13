@@ -8,7 +8,6 @@ import {
   ChevronRight,
   FolderOpen,
   FolderPlus,
-  ImageIcon,
   Info,
   LayoutGrid,
   List,
@@ -246,8 +245,6 @@ export interface PathBarProps {
   tab: Tab
   editing: boolean
   onEditingChange: (editing: boolean) => void
-  /** 사진만 칩으로 빠진 수 */
-  photosHidden: number
   canWrite: boolean
   onNewFolder: () => void
   onReload: () => void
@@ -258,7 +255,6 @@ export function PathBar({
   tab,
   editing,
   onEditingChange,
-  photosHidden,
   canWrite,
   onNewFolder,
   onReload
@@ -429,28 +425,6 @@ export function PathBar({
           <Search className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
         </button>
       )}
-
-      <button
-        aria-pressed={tab.photosOnly}
-        onClick={() => patch({ photosOnly: !tab.photosOnly })}
-        title={t('filter.photosOnly')}
-        aria-label={t('filter.photosOnly')}
-        className={cn(
-          'flex h-9 shrink-0 items-center gap-1.5 rounded-full border text-[12.5px] font-semibold',
-          compact ? 'px-2.5' : 'px-3',
-          tab.photosOnly
-            ? 'border-transparent bg-[var(--acw)] text-[var(--ac)]'
-            : 'border-[var(--bd)] text-[var(--mu)] hover:bg-[var(--hv)]'
-        )}
-      >
-        <ImageIcon className="h-4 w-4" aria-hidden />
-        {!compact && <span aria-hidden>{t('category.image')}</span>}
-        {tab.photosOnly && photosHidden > 0 && (
-          <span aria-hidden className="mono rounded-full bg-[var(--sf)] px-1.5 text-[10.5px]">
-            −{photosHidden}
-          </span>
-        )}
-      </button>
 
       <button
         className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-semibold text-[var(--mu)] hover:bg-[var(--hv)] hover:text-[var(--tx)]"

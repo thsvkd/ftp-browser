@@ -73,8 +73,7 @@ export function removeExtension(o: CategoryOverrides, id: string, raw: string): 
   if (!isDefaultId(id)) return editCustom(o, id, (list) => list.filter((x) => x !== ext))
   return editDefault(o, id, (e) => ({
     added: e.added.filter((x) => x !== ext),
-    removed:
-      baseOf(id).includes(ext) && !e.removed.includes(ext) ? [...e.removed, ext] : e.removed
+    removed: baseOf(id).includes(ext) && !e.removed.includes(ext) ? [...e.removed, ext] : e.removed
   }))
 }
 

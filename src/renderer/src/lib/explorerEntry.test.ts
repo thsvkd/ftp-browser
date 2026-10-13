@@ -1,4 +1,6 @@
+/** @vitest-environment jsdom */
 import { describe, expect, it } from 'vitest'
+import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { categoryOf, fromFtpEntry, fromLocalEntry } from './explorerEntry'
 
 describe('ExplorerEntry', () => {
@@ -76,5 +78,32 @@ describe('ExplorerEntry', () => {
     expect(categoryOf('report.pdf')).toBe('doc')
     expect(categoryOf('README')).toBe('other')
     expect(categoryOf('data.xyz')).toBe('other')
+  })
+
+  it('does not depend on the file category settings (icons and thumbnails stay put)', () => {
+    // covers: Test-952
+    const store = useFileCategoryStore.getState()
+    const before = useFileCategoryStore.getState().overrides
+    try {
+      store.removeExtension('image', 'jpg')
+      store.setHidden('image', true)
+      expect(categoryOf('a.jpg')).toBe('image')
+      const entry = fromFtpEntry(
+        {
+          name: 'a.jpg',
+          type: 'file',
+          size: 1,
+          modifiedAt: '',
+          rawModifiedAt: '',
+          isImage: true
+        },
+        '/',
+        's'
+      )
+      expect(entry.category).toBe('image')
+      expect(entry.isImage).toBe(true)
+    } finally {
+      useFileCategoryStore.setState({ overrides: before })
+    }
   })
 })

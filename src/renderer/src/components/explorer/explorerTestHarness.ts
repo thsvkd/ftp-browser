@@ -7,7 +7,9 @@ import { act, render, screen, type RenderResult } from '@testing-library/react'
 import { vi, type Mock } from 'vitest'
 import { connectedServer } from '@renderer/lib/sendItems'
 import type { Loc } from '@renderer/lib/explorerEntry'
+import { EMPTY_OVERRIDES } from '@renderer/lib/fileCategories'
 import { useConfirmStore } from '@renderer/stores/useConfirmStore'
+import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
@@ -146,6 +148,7 @@ export function setupExplorer(
     error: null
   })
   useTabsStore.setState({ tabs: [], activeId: '', recent: [] })
+  useFileCategoryStore.setState({ overrides: EMPTY_OVERRIDES })
   useListingStore.setState({ byKey: {} })
   useShelfStore.setState({ items: [], railTab: 'shelf' })
   useSettingsStore.setState({
