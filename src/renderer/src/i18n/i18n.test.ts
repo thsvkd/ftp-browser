@@ -128,4 +128,17 @@ describe('file category filter messages', () => {
       expect(m['filter.clearType'], code).not.toBe(m['filter.clear'])
     }
   })
+
+  it('no longer carries the photos-only chip messages in any locale', () => {
+    // covers: Test-953
+    const gone = [
+      'filter.photosOnly',
+      'explorer.hiddenByPhotos',
+      ...['one', 'other', 'few', 'many'].map((c) => `explorer.hiddenByPhotos_${c}`)
+    ]
+    for (const { code } of LOCALES) {
+      const m = MESSAGES[code] as Record<string, string | undefined>
+      for (const key of gone) expect(m[key], `${code} ${key}`).toBeUndefined()
+    }
+  })
 })

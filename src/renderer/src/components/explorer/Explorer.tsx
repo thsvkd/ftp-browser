@@ -19,7 +19,7 @@ import {
 import { toast } from 'sonner'
 import { useT } from '@renderer/i18n'
 import { useElementWidth } from '@renderer/hooks/useElementWidth'
-import { useTabMatcher } from '@renderer/hooks/useFileFilter'
+import { useAllCategories, useCategoryName, useTabMatcher } from '@renderer/hooks/useFileFilter'
 import { useTypeAhead } from '@renderer/hooks/useTypeAhead'
 import { shouldDeferToNativeContextMenu } from '@renderer/lib/debugTools'
 import { filterEntries, sortEntries } from '@renderer/lib/entryList'
@@ -31,7 +31,7 @@ import {
   type Loc
 } from '@renderer/lib/explorerEntry'
 import { LABEL_H, PAD, ROW, optId } from '@renderer/lib/explorerLayout'
-import { EMPTY_FILTER } from '@renderer/lib/fileCategories'
+import { EMPTY_FILTER, filterLabel } from '@renderer/lib/fileCategories'
 import { flyTo, sourcesFor } from '@renderer/lib/flyTo'
 import { gridLayout } from '@renderer/lib/gridGeometry'
 import { currentPlatform } from '@renderer/lib/platform'
@@ -164,6 +164,14 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     mode === 'pending' || mode === 'stale' || (mode === 'live' && !!listing?.refreshing)
 
   const matcher = useTabMatcher(tab.filter)
+  const allCategories = useAllCategories()
+  const nameOfCategory = useCategoryName()
+  const filterText = filterLabel(tab.filter, allCategories, nameOfCategory, t('filter.noExtension'))
+  // 필터 드롭다운의 개수 기준: 숨김 파일 설정은 반영하고 찾기는 반영하지 않는다(E19).
+  const listable = useMemo(
+    () => (showHidden ? base : base.filter((e) => !e.hidden)),
+    [base, showHidden]
+  )
   const filtered = useMemo(() => {
     const f = filterEntries(base, { query: tab.query, matcher, showHidden })
     return { ...f, visible: sortEntries(f.visible, tab.sort) }
@@ -695,6 +703,8 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
           setEditingPath(v)
           if (!v) refocus()
         }}
+        entries={listable}
+        filterHidden={filtered.filterCount}
         canWrite={mode === 'live'}
         onNewFolder={() => void newFolder()}
         onReload={reload}
@@ -806,10 +816,11 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
             query={tab.query}
             queryCount={filtered.queryCount}
             filterCount={filtered.filterCount}
+            filterText={filterText}
             shelfCount={shelfCount}
             canWrite={mode === 'live'}
             onClearQuery={() => patch({ query: '' })}
-            onShowAll={() => patch({ filter: EMPTY_FILTER })}
+            onClearFilter={() => patch({ filter: EMPTY_FILTER })}
             onNewFolder={() => void newFolder()}
             onDropShelf={() => void dropShelf(loc)}
           />

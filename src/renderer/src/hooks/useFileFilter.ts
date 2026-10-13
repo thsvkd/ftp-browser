@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useT, type MessageKey } from '@renderer/i18n'
 import {
   createMatcher,
   visibleCategories,
@@ -21,6 +22,12 @@ export function useAllCategories(): ResolvedCategory[] {
 export function useCategories(): ResolvedCategory[] {
   const all = useAllCategories()
   return useMemo(() => visibleCategories(all), [all])
+}
+
+/** 카테고리 이름: 기본은 번역 키, 사용자 카테고리는 입력한 문자열. */
+export function useCategoryName(): (c: ResolvedCategory) => string {
+  const t = useT()
+  return (c) => (c.kind === 'default' ? t(c.nameKey as MessageKey) : (c.name ?? ''))
 }
 
 /** 탭 필터의 매처. 필터가 없으면 null. `filter`는 통째로 교체되는 값이어야 메모가 먹는다. */

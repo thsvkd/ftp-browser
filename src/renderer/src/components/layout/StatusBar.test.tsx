@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { en } from '@renderer/i18n/locales/en'
 import { fromLocalEntry } from '@renderer/lib/explorerEntry'
+import { EMPTY_FILTER } from '@renderer/lib/fileCategories'
+import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
@@ -68,5 +70,36 @@ describe('StatusBar', () => {
     act(() => useFtpStore.setState({ connectionStatus: 'connected', host: 'nas.local' }))
     expect(bar.textContent).toContain(en['status.connected'])
     expect(bar.textContent).toContain('nas.local')
+  })
+
+  it('counts with the same type filter as the explorer, and ignores it once its category is hidden', () => {
+    // covers: Test-947
+    h = setupExplorer({ connected: false })
+    const entries = [
+      local(DIR, 'docs', { dir: true }),
+      local(DIR, 'a.jpg'),
+      local(DIR, 'b.jpg'),
+      local(DIR, 'c.txt'),
+      local(DIR, '.env')
+    ].map(fromLocalEntry)
+    useListingStore.getState().put(localLoc(DIR), entries)
+    useTabsStore.getState().openTab(localLoc(DIR))
+    render(<StatusBar />)
+    const bar = screen.getByRole('contentinfo')
+    expect(bar.textContent).toContain('4 items')
+    expect(bar.textContent).toContain('1 hidden')
+
+    act(() =>
+      useTabsStore
+        .getState()
+        .patchTab(activeTab().id, { filter: { ...EMPTY_FILTER, categories: ['image'] } })
+    )
+    expect(bar.textContent).toContain('3 items')
+    expect(bar.textContent).toContain('2 hidden')
+
+    // 설정에서 그 카테고리를 숨기면 필터가 꺼진 것으로 보인다(E15).
+    act(() => useFileCategoryStore.getState().setHidden('image', true))
+    expect(bar.textContent).toContain('4 items')
+    expect(bar.textContent).toContain('1 hidden')
   })
 })

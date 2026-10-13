@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
+import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
+import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import { useDnd } from './dnd'
@@ -100,6 +102,14 @@ describe('PathBar — find, photos, sort and view', () => {
 
     expect(screen.getAllByRole('option')).toHaveLength(3)
 
+    const filter = screen.getByRole('button', { name: en['filter.button'] })
+    fireEvent.click(filter)
+    fireEvent.click(screen.getByRole('checkbox', { name: /Images/ }))
+    expect(activeTab().filter.categories).toEqual(['image'])
+    expect(filter.getAttribute('data-active')).toBe('true')
+    expect(screen.getAllByRole('option')).toHaveLength(2)
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+
     fireEvent.click(screen.getByRole('button', { name: en['sort.label'] }))
     fireEvent.click(screen.getByRole('menuitem', { name: en['file.size'] }))
     expect(activeTab().sort.key).toBe('size')
@@ -126,6 +136,42 @@ describe('PathBar — find, photos, sort and view', () => {
     expect(screen.queryByRole('textbox', { name: en['filter.find'] })).toBeNull()
     fireEvent.keyDown(listbox(), { key: 'f', ctrlKey: true })
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: en['filter.find'] }))
+  })
+})
+
+describe('PathBar — file type filter button', () => {
+  const button = (): HTMLElement => screen.getByRole('button', { name: en['filter.button'] })
+
+  it('shows the active state, a count badge and the hidden count, and drops the photos-only chip', async () => {
+    // covers: Test-944
+    expect(button().getAttribute('data-active')).toBeNull()
+    expect(button().textContent).toBe('Filter')
+    expect(button().title).toBe(en['filter.buttonTooltip'])
+    expect(screen.queryByRole('button', { name: /Photos and videos only/ })).toBeNull()
+
+    act(() =>
+      useTabsStore.getState().patchTab(activeTab().id, {
+        filter: { categories: ['image', 'video'], extensions: ['log'], noExtension: false }
+      })
+    )
+    expect(button().getAttribute('data-active')).toBe('true')
+    expect(button().textContent).toBe('Filter3')
+    // notes.txt는 이미지·비디오·.log 어디에도 없어 하나가 가려진다.
+    expect(button().title).toBe('Filter: Images, Videos, .log · 1 hidden')
+
+    // 해석되지 않는(숨긴) 카테고리 id는 배지에 세지 않는다.
+    act(() => useFileCategoryStore.getState().setHidden('video', true))
+    expect(button().textContent).toBe('Filter2')
+    expect(button().title).toBe('Filter: Images, .log · 1 hidden')
+
+    // 좁은 막대에서는 라벨이 숨고 배지는 남는다.
+    cleanup()
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 800 })
+    await renderExplorer(remoteLoc('/a/b/c'), {
+      filter: { categories: ['image'], extensions: ['log'], noExtension: false }
+    })
+    expect(button().textContent).toBe('2')
+    expect(button().getAttribute('aria-label')).toBe(en['filter.button'])
   })
 })
 

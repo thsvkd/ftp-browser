@@ -6,6 +6,7 @@ import {
   createEvent,
   fireEvent,
   render,
+  renderHook,
   screen,
   within
 } from '@testing-library/react'
@@ -16,12 +17,14 @@ import { optId } from '@renderer/lib/explorerLayout'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
 import { EMPTY_FILTER } from '@renderer/lib/fileCategories'
 import { gridLayout } from '@renderer/lib/gridGeometry'
+import { useTabEntries } from '@renderer/hooks/useTabEntries'
 import { useConfirmStore } from '@renderer/stores/useConfirmStore'
+import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
-import { useTabsStore } from '@renderer/stores/useTabsStore'
+import { useActiveTab, useTabsStore } from '@renderer/stores/useTabsStore'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import type { FtpServer } from '@shared/types/ftp'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
@@ -316,10 +319,81 @@ describe('Explorer — loading, errors and empty states', () => {
         .getState()
         .patchTab(activeTab().id, { filter: { ...EMPTY_FILTER, categories: ['image'] } })
     )
-    expect(screen.getByText('1 other file hidden by the photo filter')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: en['explorer.showAll'] }))
+    expect(screen.getByText('No “Images” files in this folder.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: en['filter.clearType'] }))
     expect(activeTab().filter).toEqual(EMPTY_FILTER)
     expect(option('b.txt')).toBeTruthy()
+  })
+
+  it('names the cause in the empty panel: the type filter first, then find, then an empty folder', async () => {
+    // covers: Test-946
+    h = setupExplorer({
+      remote: {
+        '/empty': [],
+        '/docs': [ftp('b.txt')],
+        '/mixed': [ftp('b.txt'), ftp('c.txt')],
+        '/withdir': [ftp('b.txt'), ftp('sub', { dir: true })]
+      }
+    })
+    const setFilter = (categories: string[]): void =>
+      act(() =>
+        useTabsStore
+          .getState()
+          .patchTab(activeTab().id, { filter: { ...EMPTY_FILTER, categories } })
+      )
+    const go = async (path: string): Promise<void> => {
+      act(() => useTabsStore.getState().navigate(remoteLoc(path)))
+      await flush()
+    }
+    await renderExplorer(remoteLoc('/empty'))
+    // (1) 정말 빈 폴더
+    expect(screen.getByText(en['explorer.empty'])).toBeTruthy()
+
+    // (2) 찾기만 걸려 일치 없음: 찾기 분기의 버튼은 `Clear filter`다(막대의 X와 패널, 둘 다 찾기를 지운다).
+    await go('/mixed')
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'zzz' }))
+    expect(screen.getByText('No items match "zzz"')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: en['filter.clear'] })).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: en['filter.clearType'] })).toBeNull()
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: '' }))
+
+    // (3) 필터로 파일이 모두 가려졌다: 필터 문구와 전용 버튼, 두 카테고리면 라벨이 둘.
+    await go('/docs')
+    setFilter(['image'])
+    expect(screen.getByText('No “Images” files in this folder.')).toBeTruthy()
+    setFilter(['image', 'video'])
+    expect(screen.getByText('No “Images, Videos” files in this folder.')).toBeTruthy()
+    setFilter(['image'])
+    fireEvent.click(screen.getByRole('button', { name: en['filter.clearType'] }))
+    expect(activeTab().filter).toEqual(EMPTY_FILTER)
+    expect(option('b.txt')).toBeTruthy()
+
+    // (4) 찾기 `b`는 일치하는데 필터가 막았다: 필터 문구가 먼저다. 두 버튼은 이름이 다르다.
+    await go('/mixed')
+    act(() =>
+      useTabsStore.getState().patchTab(activeTab().id, {
+        query: 'b',
+        filter: { ...EMPTY_FILTER, categories: ['image'] }
+      })
+    )
+    expect(screen.getByText('No “Images” files in this folder.')).toBeTruthy()
+    expect(screen.queryByText(/No items match/)).toBeNull()
+    expect(screen.getAllByRole('button', { name: en['filter.clear'] })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: en['filter.clearType'] })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: en['filter.clear'] }))
+    expect(activeTab().query).toBe('')
+    expect(activeTab().filter.categories).toEqual(['image'])
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'b' }))
+    fireEvent.click(screen.getByRole('button', { name: en['filter.clearType'] }))
+    expect(activeTab().query).toBe('b')
+    expect(activeTab().filter).toEqual(EMPTY_FILTER)
+
+    // (5) 하위 폴더가 있으면 파일이 모두 가려져도 패널 없이 폴더만 보인다.
+    await go('/withdir')
+    setFilter(['image'])
+    expect(option('sub')).toBeTruthy()
+    expect(screen.queryByText(/files in this folder/)).toBeNull()
+    expect(screen.queryByText(en['explorer.empty'])).toBeNull()
   })
 })
 
@@ -868,5 +942,162 @@ describe('Explorer — local rename and delete (migrated)', () => {
     expect(toastError).toHaveBeenCalledWith('Failed to delete', {
       description: 'channel not allowed'
     })
+  })
+})
+
+describe('Explorer — file type filter', () => {
+  const FDIR = '/c'
+  const shown = (): string[] =>
+    screen
+      .getAllByRole('option')
+      .map((o) => (o.getAttribute('data-path') ?? '').split('/').pop() ?? '')
+  const filterButton = (): HTMLElement => screen.getByRole('button', { name: en['filter.button'] })
+  const openMenu = (): HTMLElement => {
+    fireEvent.click(filterButton())
+    return screen.getByRole('dialog')
+  }
+  const pick = (name: string | RegExp): void => {
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('checkbox', { name }))
+  }
+  const closeMenu = (): void => {
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+  }
+  const setup = async (patch = {}): Promise<void> => {
+    h = setupExplorer({
+      remote: {
+        [FDIR]: [
+          ftp('a.jpg'),
+          ftp('a.PNG'),
+          ftp('b.cr3'),
+          ftp('c.mp4'),
+          ftp('d.txt'),
+          ftp('README'),
+          ftp('.hidden.jpg'),
+          ftp('sub', { dir: true })
+        ],
+        '/d': [ftp('x.png'), ftp('y.txt')]
+      }
+    })
+    await renderExplorer(remoteLoc(FDIR), patch)
+  }
+
+  it('filters by categories and extensions (OR), ANDs with find, and survives navigation per tab', async () => {
+    // covers: Test-945
+    await setup()
+    expect(shown()).toEqual(['sub', 'a.jpg', 'a.PNG', 'b.cr3', 'c.mp4', 'd.txt', 'README'])
+
+    openMenu()
+    pick(/Images/)
+    expect(shown()).toEqual(['sub', 'a.jpg', 'a.PNG'])
+    pick(/RAW/)
+    pick(/Videos/)
+    // 이미지+RAW+비디오는 옛 "사진만"과 같은 항목이다.
+    expect(shown()).toEqual(['sub', 'a.jpg', 'a.PNG', 'b.cr3', 'c.mp4'])
+    pick(/RAW/)
+    pick(/Videos/)
+
+    // 카테고리(이미지) + 확장자(.txt)는 합집합이다.
+    fireEvent.click(screen.getByRole('button', { name: /Advanced/ }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('checkbox', { name: '.txt (1)' }))
+    expect(shown()).toEqual(['sub', 'a.jpg', 'a.PNG', 'd.txt'])
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('checkbox', { name: '.txt (1)' }))
+
+    // 찾기는 AND이고, 드롭다운의 개수는 찾기를 반영하지 않는다(E19).
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'a' }))
+    expect(shown()).toEqual(['a.jpg', 'a.PNG'])
+    expect(
+      within(screen.getByRole('dialog'))
+        .getByRole('checkbox', { name: /Images/ })
+        .closest('label')?.textContent
+    ).toBe('Images (2)')
+    closeMenu()
+
+    // 폴더를 옮기면 찾기는 지워지고 필터는 남는다. 다른 탭은 영향이 없다.
+    const second = useTabsStore.getState().openTab(remoteLoc('/d'), false)
+    act(() => useTabsStore.getState().navigate(remoteLoc('/d')))
+    await flush()
+    expect(activeTab().query).toBe('')
+    expect(activeTab().filter.categories).toEqual(['image'])
+    expect(shown()).toEqual(['x.png'])
+    expect(useTabsStore.getState().tabs.find((t) => t.id === second)!.filter).toEqual(EMPTY_FILTER)
+
+    // 선택은 보이는 항목만 센다.
+    act(() => useTabsStore.getState().navigate(remoteLoc(FDIR)))
+    await flush()
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: '' }))
+    key('a', { ctrlKey: true })
+    expect(selectedNames()).toEqual(['a.PNG', 'a.jpg', 'sub'])
+  })
+
+  it('applies edits made in settings straight away', async () => {
+    // covers: Test-951
+    await setup()
+    const store = useFileCategoryStore.getState()
+    store.removeExtension('image', 'png')
+    const id = store.addCustom('Docs')!
+    store.addExtension(id, 'txt')
+
+    const dialog = openMenu()
+    expect(
+      within(dialog)
+        .getByRole('checkbox', { name: /Images/ })
+        .closest('label')?.textContent
+    ).toBe('Images (1)')
+    expect(
+      within(dialog).getByRole('checkbox', { name: /Docs/ }).closest('label')?.textContent
+    ).toBe('Docs (1)')
+    pick(/Images/)
+    expect(shown()).toEqual(['sub', 'a.jpg'])
+    pick(/Docs/)
+    expect(shown()).toEqual(['sub', 'a.jpg', 'd.txt'])
+    closeMenu()
+
+    // 이미지 카테고리를 숨기면 드롭다운에서 사라지고 걸려 있던 이미지 체크는 무시된다(E15).
+    act(() => useFileCategoryStore.getState().setHidden('image', true))
+    expect(shown()).toEqual(['sub', 'd.txt'])
+    openMenu()
+    expect(screen.queryByRole('checkbox', { name: /Images/ })).toBeNull()
+    expect(activeTab().filter.categories).toEqual(['image', id])
+    closeMenu()
+    act(() => useFileCategoryStore.getState().setHidden('image', false))
+    expect(shown()).toEqual(['sub', 'a.jpg', 'd.txt'])
+  })
+
+  it('does not act on a selected item the filter hides', async () => {
+    // covers: Test-954
+    h = setupExplorer({ remote: { [FDIR]: [ftp('a.jpg'), ftp('b.txt')] } })
+    await renderExplorer(remoteLoc(FDIR))
+    const bPath = `${FDIR}/b.txt`
+    const deletes = (): unknown[][] => invokeCalls(h.invoke, 'ftp:deleteBatch')
+    const hook = renderHook(() => useTabEntries(useActiveTab()))
+
+    // (1) 양성 대조: 필터가 없으면 b.txt가 삭제 대상에 든다.
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { sel: [bPath] }))
+    key('Delete')
+    await flush()
+    expect(JSON.stringify(deletes())).toContain(bPath)
+    const callsBefore = deletes().length
+
+    // (2) 이미지 필터가 b.txt를 가리면 삭제 대상이 아니다.
+    act(() =>
+      useTabsStore.getState().patchTab(activeTab().id, {
+        sel: [bPath],
+        filter: { ...EMPTY_FILTER, categories: ['image'] }
+      })
+    )
+    expect(hook.result.current.selected).toEqual([])
+    key('Delete')
+    await flush()
+    expect(deletes()).toHaveLength(callsBefore)
+
+    // (3) 확인창을 켜도 숨은 선택 때문에 뜨지 않는다.
+    useSettingsStore.setState({ confirmBeforeDelete: true })
+    key('Delete')
+    await flush()
+    expect(useConfirmStore.getState().request).toBeNull()
+
+    // (4) 필터를 풀면 선택이 되살아난다.
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { filter: EMPTY_FILTER }))
+    expect(hook.result.current.selected.map((e) => e.name)).toEqual(['b.txt'])
   })
 })
