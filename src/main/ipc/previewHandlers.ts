@@ -45,7 +45,8 @@ export function registerPreviewHandlers(db: Database.Database, registry: Connect
     'ftp:downloadPreview',
     async (_event, conn: unknown, req: PreviewRequest): Promise<IpcResult<string>> => {
       try {
-        const ftpManager = registry.require(conn).manager
+        const session = registry.require(conn)
+        const ftpManager = session.manager
         if (req.fileSize > MAX_IMAGE_SIZE_BYTES) {
           return { success: false, error: 'File too large for preview' }
         }
@@ -54,13 +55,7 @@ export function registerPreviewHandlers(db: Database.Database, registry: Connect
         const mime = MIME_MAP[ext] || 'image/jpeg'
 
         // 캐시 키 생성
-        const cacheKey = generateCacheKey(
-          ftpManager.getHost(),
-          ftpManager.getPort(),
-          req.remotePath,
-          req.fileSize,
-          req.modifiedAt
-        )
+        const cacheKey = generateCacheKey(session.key, req.remotePath, req.fileSize, req.modifiedAt)
 
         // 캐시 조회
         const cached = cacheManager.lookup(cacheKey)

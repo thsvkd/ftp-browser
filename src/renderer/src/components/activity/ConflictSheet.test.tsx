@@ -27,6 +27,9 @@ function conflict(name: string, overrides: Partial<TransferConflict> = {}): Tran
   }
 }
 
+/** 원격 쪽 연결 */
+const K = 'me@nas.local:21'
+
 const REQUEST: TransferSendRequest = {
   direction: 'download',
   sources: ['/photos'],
@@ -58,7 +61,7 @@ function answerConflicts(conflicts: TransferConflict[]): void {
 async function startSend(): Promise<{ pending: Promise<TransferSendResult | null> }> {
   let pending!: Promise<TransferSendResult | null>
   act(() => {
-    pending = useTransferStore.getState().send(REQUEST, {
+    pending = useTransferStore.getState().send(K, REQUEST, {
       label: 'photos',
       to: { side: 'local', path: 'C:\\dl' }
     })
@@ -70,6 +73,7 @@ async function startSend(): Promise<{ pending: Promise<TransferSendResult | null
 function secondDecisions(): Record<string, string> | undefined {
   const sends = invokeCalls(mockInvoke, 'transfer:send')
   expect(sends).toHaveLength(2)
+  expect(sends.map(([conn]) => conn)).toEqual([K, K])
   return (sends[1][1] as TransferSendRequest).decisions
 }
 
@@ -194,15 +198,21 @@ describe('ConflictSheet', () => {
     const moved = { target: '/dst/a.jpg', source: '/src/a.jpg', folder: false }
     let answer!: Promise<Record<string, string> | null>
     act(() => {
-      answer = useTransferStore.getState().askConflicts('move', [conflict('a.jpg', moved)])
+      answer = useTransferStore
+        .getState()
+        .askConflicts('move', [conflict('a.jpg', moved)], { server: K })
     })
     await screen.findByRole('alertdialog')
-    // 원격 이동: 있던 것도 보내는 것도 원격 파일이다(원격 썸네일 요청 두 건).
+    // 원격 이동: 있던 것도 보내는 것도 그 연결의 원격 파일이다(원격 썸네일 요청 두 건).
     expect(
-      invokeCalls(mockInvoke, 'thumbnail:request').map(
-        ([, r]) => (r as { remotePath: string }).remotePath
-      )
-    ).toEqual(['/dst/a.jpg', '/src/a.jpg'])
+      invokeCalls(mockInvoke, 'thumbnail:request').map(([conn, r]) => [
+        conn,
+        (r as { remotePath: string }).remotePath
+      ])
+    ).toEqual([
+      [K, '/dst/a.jpg'],
+      [K, '/src/a.jpg']
+    ])
     await userEvent.setup().click(screen.getByRole('button', { name: 'Overwrite' }))
     await expect(answer).resolves.toEqual({ '/dst/a.jpg': 'overwrite' })
 

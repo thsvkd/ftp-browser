@@ -12,9 +12,7 @@ import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import {
-  HOST,
   MODIFIED_AT,
-  PORT,
   flush,
   ftp,
   listbox,
@@ -60,7 +58,7 @@ describe('FileGrid — viewport thumbnail batches (migrated)', () => {
   }
   const name = (i: number): string => `img${String(i).padStart(3, '0')}.jpg`
   const key = (i: number): string =>
-    generateCacheKeyRenderer(HOST, PORT, `/${name(i)}`, 1000, MODIFIED_AT)
+    generateCacheKeyRenderer(server(), `/${name(i)}`, 1000, MODIFIED_AT)
   const lastBatch = (): Item[] => {
     const batches = invokeCalls(h.invoke, 'thumbnail:requestBatch')
     if (!batches.length) throw new Error('no thumbnail:requestBatch')

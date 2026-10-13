@@ -8,6 +8,7 @@ import type { CacheManager } from './CacheManager'
 
 const HOST = 'example.org'
 const PORT = 21
+const CONN = `me@${HOST}:${PORT}`
 const MODIFIED_AT = '2024-05-01T10:20:30.000Z'
 
 function remotePath(i: number): string {
@@ -25,7 +26,7 @@ function req(i: number, priority = 0): ThumbnailRequest {
 }
 
 function keyOf(i: number): string {
-  return generateCacheKey(HOST, PORT, remotePath(i), 1000, MODIFIED_AT)
+  return generateCacheKey(CONN, remotePath(i), 1000, MODIFIED_AT)
 }
 
 function range(from: number, to: number): number[] {
@@ -97,6 +98,7 @@ function createHarness(options: { holdFirstConnect?: boolean } = {}): Harness {
   const ftp = {
     getHost: () => HOST,
     getPort: () => PORT,
+    getConnKey: () => CONN,
     createSecondaryClient: vi.fn(async () => {
       counts.created++
       if (options.holdFirstConnect && counts.created === 1) {

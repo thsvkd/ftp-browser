@@ -3,8 +3,8 @@ import { toast } from 'sonner'
 import { t } from '@renderer/i18n'
 import { parentPath, type Loc } from '@renderer/lib/explorerEntry'
 import { nextRate, type RateSample } from '@renderer/lib/transferRate'
-import { currentConn } from './useFtpStore'
 import { useListingStore } from './useListingStore'
+import type { ConnKey } from '@shared/connKey'
 import type {
   ConflictDecision,
   TransferConflict,
@@ -28,6 +28,8 @@ export interface ConflictPrompt {
   /** 전송 방향, 또는 같은 쪽 보내기의 원격 이동·로컬 복사(D32) */
   direction: TransferDirection | 'move' | 'copy'
   conflicts: TransferConflict[]
+  /** 원격 카드의 연결(받는 쪽, 같은 쪽 원격 이동이면 그 서버). 로컬 복사에는 없다 */
+  server?: ConnKey
 }
 
 type Decisions = Record<string, ConflictDecision>
@@ -52,14 +54,19 @@ interface TransferStore {
   /** 실패한 작업을 같은 id·배치로 다시 돈다(`transfer:retry`). 실패하면 토스트. */
   retry: (ids: string[]) => Promise<void>
   /**
-   * 강제 배치로 보낸다(`transfer:send`, D8). 충돌이 있으면 시트의 결정을 받아 다시 보내고,
-   * 취소하면 null. 실패하면 토스트 후 null. 큐에 넣었으면 `meta`를 그 배치에 붙인다.
+   * 강제 배치로 보낸다(`transfer:send(conn, req)`, D8). `conn`은 원격 쪽 연결이다. 충돌이 있으면 시트의
+   * 결정을 받아 다시 보내고, 취소하면 null. 실패하면 토스트 후 null. 큐에 넣었으면 `meta`를 그 배치에 붙인다.
    */
-  send: (request: TransferSendRequest, meta: BatchMeta) => Promise<TransferSendResult | null>
-  /** 충돌 시트에 묻는다. 결정을 돌려주고, 취소하면 null. */
+  send: (
+    conn: ConnKey,
+    request: TransferSendRequest,
+    meta: BatchMeta
+  ) => Promise<TransferSendResult | null>
+  /** 충돌 시트에 묻는다. `servers.server`는 원격 카드의 연결. 결정을 돌려주고, 취소하면 null. */
   askConflicts: (
     direction: ConflictPrompt['direction'],
-    conflicts: TransferConflict[]
+    conflicts: TransferConflict[],
+    servers?: { server?: ConnKey }
   ) => Promise<Decisions | null>
   /** 충돌 시트의 답. `null`은 보내기 취소다. */
   resolveConflicts: (id: string, decisions: Decisions | null) => void
@@ -174,7 +181,7 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
     if (!result.success) toast.error(t('toast.retryFailed'), { description: result.error })
   },
 
-  send: async (request, meta) => {
+  send: async (conn, request, meta) => {
     const id = `send${++sendSeq}`
     set((s) => ({ pendingSends: [...s.pendingSends, { id, label: meta.label }] }))
     try {
@@ -182,7 +189,7 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
       for (;;) {
         const result = await window.api.invoke<IpcResult<TransferSendResult>>(
           'transfer:send',
-          currentConn(),
+          conn,
           req
         )
         if (!result.success) {
@@ -197,7 +204,7 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
           return data
         }
         // 결정을 모아 같은 요청을 다시 보낸다. 그사이 새로 생긴 충돌은 main이 다시 돌려준다.
-        const decisions = await get().askConflicts(req.direction, data.conflicts)
+        const decisions = await get().askConflicts(req.direction, data.conflicts, { server: conn })
         if (!decisions) return null
         req = { ...req, decisions: { ...req.decisions, ...decisions } }
       }
@@ -206,11 +213,13 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
     }
   },
 
-  askConflicts: (direction, conflicts) => {
+  askConflicts: (direction, conflicts, servers = {}) => {
     const id = `ask${++sendSeq}`
     return new Promise((resolve) => {
       conflictAnswers.set(id, resolve)
-      set((s) => ({ conflictQueue: [...s.conflictQueue, { id, direction, conflicts }] }))
+      set((s) => ({
+        conflictQueue: [...s.conflictQueue, { id, direction, conflicts, ...servers }]
+      }))
     })
   },
 

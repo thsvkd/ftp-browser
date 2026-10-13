@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Clock, RotateCcw } from 'lucide-react'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
-import { currentConn, useFtpStore } from '@renderer/stores/useFtpStore'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
+import type { ExplorerEntry } from '@renderer/lib/explorerEntry'
 import { useT } from '@renderer/i18n'
-import type { FtpFileEntry } from '@shared/types/ftp'
 
 /** 대기가 이만큼 길어지면 "느린 응답"을 보인다. */
 const SLOW_MS = 3000
 
 interface ThumbnailImageProps {
-  entry: Pick<FtpFileEntry, 'name' | 'size' | 'modifiedAt'>
+  /** `server`는 그 항목의 연결. 키·요청이 그 연결의 것이다(원격 항목은 늘 갖는다) */
+  entry: Pick<ExplorerEntry, 'name' | 'size' | 'modifiedAt' | 'server'>
   /** 항목의 원격 경로(D30) */
   remotePath: string
   /** 그리드 밖(선반·정보·라이트박스): 스토어에 없으면 마운트 때 단건 요청(priority 1)을 보낸다. */
@@ -79,16 +79,15 @@ export function ThumbnailImage({
   request = false,
   showSlow = true
 }: ThumbnailImageProps): React.JSX.Element {
-  const host = useFtpStore((s) => s.host)
-  const port = useFtpStore((s) => s.port)
-  const cacheKey = generateCacheKeyRenderer(host, port, remotePath, entry.size, entry.modifiedAt)
+  const server = entry.server ?? ''
+  const cacheKey = generateCacheKeyRenderer(server, remotePath, entry.size, entry.modifiedAt)
 
   const thumbnailData = useThumbnailStore((s) => s.thumbnails[cacheKey])
   const thumbnailError = useThumbnailStore((s) => s.errors[cacheKey])
   const clearError = useThumbnailStore((s) => s.clearError)
 
   const send = (priority: number): void => {
-    window.api.invoke('thumbnail:request', currentConn(), {
+    window.api.invoke('thumbnail:request', server, {
       remotePath,
       fileName: entry.name,
       fileSize: entry.size,
@@ -102,14 +101,14 @@ export function ThumbnailImage({
     if (!request) return
     const { thumbnails, errors } = useThumbnailStore.getState()
     if (thumbnails[cacheKey] || errors[cacheKey]) return
-    window.api.invoke('thumbnail:request', currentConn(), {
+    window.api.invoke('thumbnail:request', server, {
       remotePath,
       fileName: entry.name,
       fileSize: entry.size,
       modifiedAt: entry.modifiedAt,
       priority: 1
     })
-  }, [request, cacheKey, remotePath, entry.name, entry.size, entry.modifiedAt])
+  }, [request, cacheKey, server, remotePath, entry.name, entry.size, entry.modifiedAt])
 
   // ↻ 재시도는 직접 요청한다.
   const retry = (): void => {

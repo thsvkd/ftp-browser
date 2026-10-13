@@ -68,14 +68,14 @@ export function registerGalleryHandlers(
   // 캐시 키는 normalize된 path 기준이므로 invalidation도 동일하게 normalize해야 한다.
   registry.on('mutation', (event: RemoteChangedEvent) => {
     if (!registry.get(event.server)?.manager.isConnected()) return
-    const { host, port } = parseConnKey(event.server)!
+    const { host, port, user } = parseConnKey(event.server)!
 
-    folderCache.invalidate(host, port, getParentRemotePath(event.remotePath))
-    folderCache.invalidate(host, port, normalizeRemotePath(event.remotePath))
+    folderCache.invalidate(host, port, user, getParentRemotePath(event.remotePath))
+    folderCache.invalidate(host, port, user, normalizeRemotePath(event.remotePath))
 
     if (event.kind === 'rename' && event.newPath) {
-      folderCache.invalidate(host, port, getParentRemotePath(event.newPath))
-      folderCache.invalidate(host, port, normalizeRemotePath(event.newPath))
+      folderCache.invalidate(host, port, user, getParentRemotePath(event.newPath))
+      folderCache.invalidate(host, port, user, normalizeRemotePath(event.newPath))
     }
   })
 

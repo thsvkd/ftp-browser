@@ -58,7 +58,7 @@ import {
 } from '@renderer/lib/sendItems'
 import { cn } from '@renderer/lib/utils'
 import { confirmDelete } from '@renderer/stores/useConfirmStore'
-import { currentConn, useFtpStore } from '@renderer/stores/useFtpStore'
+import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
@@ -343,7 +343,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     const targets = entries.map((e) => ({ path: e.path, isDirectory: e.type === 'directory' }))
     try {
       const r = remote
-        ? await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', currentConn(), targets)
+        ? await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', loc.server, targets)
         : await window.api.invoke<IpcResult<void>>('local:deleteBatch', targets)
       if (!r.success) toast.error(t('toast.deleteFailed'), { description: r.error })
     } catch (err) {
@@ -372,7 +372,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     const target = joinPath(entry.side, parentPath(entry.side, entry.path) ?? loc.path, next)
     try {
       const r = remote
-        ? await window.api.invoke<IpcResult<void>>('ftp:rename', currentConn(), entry.path, target)
+        ? await window.api.invoke<IpcResult<void>>('ftp:rename', loc.server, entry.path, target)
         : await window.api.invoke<IpcResult<void>>('local:rename', entry.path, target)
       if (r.success) {
         unshelve([entry])
@@ -396,7 +396,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     const path = joinPath(loc.side, loc.path, name)
     try {
       const r = remote
-        ? await window.api.invoke<IpcResult<void>>('ftp:mkdir', currentConn(), path)
+        ? await window.api.invoke<IpcResult<void>>('ftp:mkdir', loc.server, path)
         : await window.api.invoke<IpcResult<void>>('local:mkdir', path)
       if (!r.success) {
         toast.error(t('toast.createFolderFailed'), { description: r.error })
@@ -768,7 +768,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
                 items={items}
                 scrollRef={scrollRef}
                 layout={layout}
-                remote={remote && gate === 'live'}
+                server={remote && gate === 'live' ? loc.server : undefined}
                 itemProps={itemProps}
                 setSelection={(sel) => patch(selectMany(selection, sel))}
                 getSelection={() =>

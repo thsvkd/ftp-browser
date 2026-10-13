@@ -64,8 +64,7 @@ export function createThumbnailPreviewer(
       return Promise.resolve({ ok: false, error: 'Image is too large to preview.' })
     }
     const cacheKey = generateCacheKey(
-      ftp.getHost(),
-      ftp.getPort(),
+      ftp.getConnKey(),
       req.remotePath,
       req.fileSize,
       req.modifiedAt

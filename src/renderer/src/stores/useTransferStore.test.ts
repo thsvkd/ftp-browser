@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fallbackBatchMeta, useTransferStore } from './useTransferStore'
-import { currentConn } from './useFtpStore'
 import { useListingStore } from './useListingStore'
 import { useSettingsStore } from './useSettingsStore'
 import type { Loc } from '@renderer/lib/explorerEntry'
@@ -112,13 +111,15 @@ describe('useTransferStore.send', () => {
     })
     const request = { direction: 'download' as const, sources: ['/p/a.jpg'], destDir: 'C:\\dl' }
 
-    const sent = useTransferStore.getState().send(request, { label: 'a.jpg', to })
+    const sent = useTransferStore
+      .getState()
+      .send('me@nas.local:21', request, { label: 'a.jpg', to })
     expect(useTransferStore.getState().pendingSends).toEqual([
       { id: expect.any(String), label: 'a.jpg' }
     ])
     const result = await sent
 
-    expect(invoke).toHaveBeenCalledWith('transfer:send', currentConn(), request)
+    expect(invoke).toHaveBeenCalledWith('transfer:send', 'me@nas.local:21', request)
     expect(result?.batchId).toBe('b1')
     expect(useTransferStore.getState().batchMeta).toEqual({ b1: { label: 'a.jpg', to } })
     expect(useTransferStore.getState().pendingSends).toEqual([])

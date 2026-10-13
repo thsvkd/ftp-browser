@@ -100,4 +100,24 @@ describe('useListingStore', () => {
       code: 'FTP_PERMISSION_DENIED'
     })
   })
+
+  it('lists a remote folder through its own server and refuses a remote folder without one', async () => {
+    // covers: Test-1017
+    const B = 'u2@other.example:2121'
+    const loading = useListingStore.getState().load({ side: 'remote', server: B, path: '/b' })
+    expect(invoke.mock.calls).toEqual([['ftp:list', B, '/b']])
+    pending[0].resolve({ success: true, data: { path: '/b', entries: [ftp('x')] } })
+    await loading
+    expect(get({ side: 'remote', server: B, path: '/b' }).entries[0]).toMatchObject({
+      side: 'remote',
+      server: B,
+      path: '/b/x'
+    })
+
+    invoke.mockClear()
+    const noServer: Loc = { side: 'remote', path: '/c' }
+    await useListingStore.getState().load(noServer)
+    expect(invoke).not.toHaveBeenCalled()
+    expect(get(noServer)).toMatchObject({ status: 'error', entries: [], refreshing: false })
+  })
 })

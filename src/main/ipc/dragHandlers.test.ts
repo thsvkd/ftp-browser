@@ -100,3 +100,42 @@ describe('drag:start', () => {
     expect(startDrag).not.toHaveBeenCalled()
   })
 })
+
+describe('drag:start with two connections', () => {
+  beforeEach(() => {
+    handlers.clear()
+    tempRoot = mkdtempSync(join(tmpdir(), 'drag-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tempRoot, { recursive: true, force: true })
+  })
+
+  it('downloads through the secondary client of the connection it names', async () => {
+    // covers: Test-973
+    const A = 'u1@nas.local:21'
+    const B = 'u2@nas.local:21'
+    const secondary = new Map<string, ReturnType<typeof vi.fn>>()
+    const registry = new ConnectionRegistry((key) => {
+      const session = fakeSession(key)
+      const create = vi.fn().mockResolvedValue({
+        downloadTo: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn()
+      })
+      secondary.set(key, create)
+      Object.assign(remoteOf(session), { createSecondaryClient: create })
+      return session
+    })
+    await registry.connect(payloadOf(A))
+    await registry.connect(payloadOf(B))
+    registerDragHandlers(registry)
+
+    const result = (await handlers.get('drag:start')!({ sender: { startDrag: vi.fn() } }, B, {
+      files: [{ remotePath: '/srv/a.jpg', fileName: 'a.jpg', size: 1 }]
+    })) as IpcResult<void>
+
+    expect(result.success).toBe(true)
+    expect(secondary.get(B)).toHaveBeenCalled()
+    expect(secondary.get(A)).not.toHaveBeenCalled()
+  })
+})

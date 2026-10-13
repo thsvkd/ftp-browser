@@ -75,7 +75,7 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
 
   connect: async (config, initialPath = '/') => {
     const generation = ++connectGeneration
-    // 시도하는 서버를 먼저 둔다: 연결 중에 취소(disconnect)하면 이 키를 끊는다(currentConn).
+    // 시도하는 서버를 먼저 둔다: 연결 중에 취소(disconnect)하면 이 키를 끊는다.
     set({ error: null, host: config.host, port: config.port, username: config.user })
     const server = connKey(config.host, config.port, config.user)
     const result = await window.api.invoke<IpcResult<void>>('ftp:connect', config)
@@ -113,7 +113,9 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
   },
 
   disconnect: async () => {
-    const server = currentConn()
+    // 지금 연결(연결 중이면 그 시도)의 키. 연결 하나만 아는 동안(S3 전)의 단일 필드에서 만든다.
+    const { host, port, username } = get()
+    const server = connKey(host, port, username)
     connectGeneration++
     await window.api.invoke('ftp:disconnect', server)
     set(DISCONNECTED)
@@ -139,12 +141,3 @@ export const useFtpStore = create<FtpStore>((set, get) => ({
     })
   }
 }))
-
-/**
- * 원격 IPC의 연결 인자(multi-connection §8-6, S1 임시): 앱은 아직 한 번에 한 서버에만 연결하므로 지금
- * 연결(연결 중이면 그 시도)의 키다. S2에서 호출부가 탭·항목의 `server`를 넘기고 이 함수는 없어진다.
- */
-export function currentConn(): ConnKey {
-  const { host, port, username } = useFtpStore.getState()
-  return connKey(host, port, username)
-}

@@ -72,6 +72,8 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
     const there = kind === 'existing' || sameSide ? side : side === 'local' ? 'remote' : 'local'
     const entry: ExplorerEntry = {
       side: there,
+      // 원격 카드는 그 연결의 파일이다(썸네일 키·요청이 entry.server를 쓴다). 로컬 카드에는 두지 않는다
+      ...(there === 'remote' && prompt.server ? { server: prompt.server } : {}),
       path: kind === 'existing' ? conflict.target : conflict.source,
       name: conflict.name,
       type: conflict.folder ? 'directory' : 'file',

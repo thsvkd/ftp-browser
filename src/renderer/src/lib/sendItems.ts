@@ -114,7 +114,9 @@ async function sameSideOps(
   const platform = currentPlatform()
   const first = planSameSide(items, listing.data, dest, platform)
   if (!first.conflicts.length) return first.ops
-  const decisions = await useTransferStore.getState().askConflicts(verb, first.conflicts)
+  // 원격 이동의 두 카드는 그 서버의 파일이다. 로컬 복사에는 연결이 없다(MC33)
+  const servers = verb === 'move' ? { server: dest.server } : {}
+  const decisions = await useTransferStore.getState().askConflicts(verb, first.conflicts, servers)
   return decisions && planSameSide(items, listing.data, dest, platform, decisions).ops
 }
 
@@ -125,6 +127,7 @@ async function moveRemote(items: readonly SameSideItem[], dest: Loc): Promise<bo
     ops.filter((o) => o.overwrite).map((o) => joinPath('remote', dest.path, o.name))
   )
   return moveRemoteFiles(
+    dest.server ?? '',
     ops.map((o) => ({ remotePath: o.source, fileName: o.name, size: 0 })),
     dest.path,
     replace
@@ -154,10 +157,17 @@ async function copyLocal(items: readonly SameSideItem[], dest: Loc): Promise<boo
   }
 }
 
-function transfer(direction: 'upload' | 'download', paths: string[], dest: Loc): Promise<boolean> {
+/** 원격 쪽 연결로 보낸다: 업로드는 목적지의 서버, 다운로드는 항목의 서버(`conn`). */
+function transfer(
+  direction: 'upload' | 'download',
+  conn: string,
+  paths: string[],
+  dest: Loc
+): Promise<boolean> {
   return useTransferStore
     .getState()
     .send(
+      conn,
       { direction, sources: paths, destDir: dest.path },
       { label: batchLabel(paths.map(baseName)), to: dest }
     )
@@ -172,6 +182,8 @@ async function runParts(plan: SendPlan, dest: Loc): Promise<ExplorerEntry[]> {
       plan.transfer,
       transfer(
         plan.direction,
+        // 보내는 항목은 모두 연결된 한 서버의 것이다(planSend가 막는다)
+        (plan.direction === 'upload' ? dest.server : plan.transfer[0]?.server) ?? '',
         plan.transfer.map((e) => e.path),
         dest
       )
@@ -252,12 +264,12 @@ export async function dropOsFiles(files: readonly File[], dest: Loc): Promise<bo
   const paths = items.map((i) => i.path)
   if (!paths.length) return false
   if (dest.side === 'local') return copyLocal(items, dest)
-  const { connected, server } = currentConnection()
-  if (!connected || (dest.server ?? null) !== server) {
-    toast.error(t(connected ? 'send.invalidOtherServer' : 'send.invalidNotConnected'))
+  const { server } = currentConnection()
+  if (!server || dest.server !== server) {
+    toast.error(t(server ? 'send.invalidOtherServer' : 'send.invalidNotConnected'))
     return false
   }
-  return transfer('upload', paths, dest)
+  return transfer('upload', server, paths, dest)
 }
 
 /**

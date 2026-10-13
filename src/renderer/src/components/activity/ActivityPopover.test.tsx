@@ -178,7 +178,7 @@ describe('ActivityPopover transfers', () => {
 
     let pending!: Promise<unknown>
     act(() => {
-      pending = useTransferStore.getState().send(request, meta)
+      pending = useTransferStore.getState().send('me@nas.local:21', request, meta)
     })
     expect(screen.getByText('Preparing photos…')).toBeTruthy()
     await act(async () => {
@@ -188,7 +188,7 @@ describe('ActivityPopover transfers', () => {
     expect(screen.queryByText('Preparing photos…')).toBeNull()
 
     act(() => {
-      pending = useTransferStore.getState().send(request, meta)
+      pending = useTransferStore.getState().send('me@nas.local:21', request, meta)
     })
     expect(screen.getByText('Preparing photos…')).toBeTruthy()
     await act(async () => {

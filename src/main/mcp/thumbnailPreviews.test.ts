@@ -26,6 +26,7 @@ function fakeFtp(): {
   const ftp = Object.assign(emitter, {
     getHost: () => 'ftp.example.com',
     getPort: () => 21,
+    getConnKey: () => 'me@ftp.example.com:21',
     runOnMainClient: vi.fn(),
     createSecondaryClient: vi.fn(async () => {
       stats.created++

@@ -7,8 +7,7 @@ import {
   type Loc,
   type Side
 } from '@renderer/lib/explorerEntry'
-import { currentConn } from './useFtpStore'
-import type { ErrorCodeType, IpcResult } from '@shared/types/ipc'
+import { ErrorCode, type ErrorCodeType, type IpcResult } from '@shared/types/ipc'
 import type { FtpListResult } from '@shared/types/ftp'
 import type { LocalListResult } from '@shared/types/local'
 
@@ -39,16 +38,14 @@ const generations = new Map<string, number>()
 export async function fetchEntries(loc: Loc): Promise<IpcResult<ExplorerEntry[]>> {
   try {
     if (loc.side === 'remote') {
-      const r = await window.api.invoke<IpcResult<FtpListResult>>(
-        'ftp:list',
-        currentConn(),
-        loc.path
-      )
+      const { server } = loc
+      // 원격 위치는 늘 연결 키를 갖는다. 없으면 어느 연결에서 읽을지 모르므로 묻지 않는다.
+      if (!server) {
+        return { success: false, error: 'Not connected', code: ErrorCode.FTP_NOT_CONNECTED }
+      }
+      const r = await window.api.invoke<IpcResult<FtpListResult>>('ftp:list', server, loc.path)
       return r.success
-        ? {
-            success: true,
-            data: r.data.entries.map((e) => fromFtpEntry(e, loc.path, loc.server ?? ''))
-          }
+        ? { success: true, data: r.data.entries.map((e) => fromFtpEntry(e, loc.path, server)) }
         : r
     }
     const r = await window.api.invoke<IpcResult<LocalListResult>>('local:list', loc.path)
