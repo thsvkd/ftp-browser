@@ -421,6 +421,8 @@ export const ptBR = {
   'toast.pathCopied_one': '{{count}} caminho copiado',
   'toast.pathCopied_other': '{{count}} caminhos copiados',
   'toast.alreadyOnShelf': 'Já está na prateleira',
+  'toast.shelfDropSkipped_one': '{{count}} item solto não pôde ser lido',
+  'toast.shelfDropSkipped_other': '{{count}} itens soltos não puderam ser lidos',
   'toast.shelfEmpty': 'A prateleira está vazia. Selecione itens e pressione Shift+S.',
   'toast.sendSkipped_one': '{{count}} item ignorado',
   'toast.sendSkipped_other': '{{count}} itens ignorados',

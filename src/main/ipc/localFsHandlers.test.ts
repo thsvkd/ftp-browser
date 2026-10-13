@@ -24,7 +24,7 @@ import type { BrowserWindow } from 'electron'
 import { isSafeCopyName, registerLocalFsHandlers } from './localFsHandlers'
 import type { OperationManager } from '../operation/OperationManager'
 import type { IpcResult } from '@shared/types/ipc'
-import type { LocalPlaces } from '@shared/types/local'
+import type { LocalFileEntry, LocalPlaces } from '@shared/types/local'
 import { MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
 
 type Handler = (event: unknown, ...args: unknown[]) => Promise<IpcResult<void>>
@@ -278,10 +278,10 @@ describe('localFsHandlers', () => {
       const file = path.join(tmpDir, 'a.txt')
       await fs.writeFile(file, 'hello')
 
-      const result = (await handler('local:stat')(null, [file, path.join(tmpDir, 'nope')])) as {
-        success: true
-        data: Array<{ path: string; name: string; type: string; size: number }>
-      }
+      const result = (await handler('local:stat')(null, [
+        file,
+        path.join(tmpDir, 'nope')
+      ])) as unknown as IpcResult<LocalFileEntry[]> & { success: true }
 
       expect(result.success).toBe(true)
       expect(result.data).toHaveLength(1)

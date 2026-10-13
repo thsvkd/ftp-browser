@@ -424,6 +424,8 @@ export const fr = {
   'toast.pathCopied_one': '{{count}} chemin copié',
   'toast.pathCopied_other': '{{count}} chemins copiés',
   'toast.alreadyOnShelf': 'Déjà sur l’étagère',
+  'toast.shelfDropSkipped_one': '{{count}} élément déposé n’a pas pu être lu',
+  'toast.shelfDropSkipped_other': '{{count}} éléments déposés n’ont pas pu être lus',
   'toast.shelfEmpty': 'L’étagère est vide. Sélectionnez des éléments et appuyez sur Maj+S.',
   'toast.sendSkipped_one': '{{count}} élément ignoré',
   'toast.sendSkipped_other': '{{count}} éléments ignorés',

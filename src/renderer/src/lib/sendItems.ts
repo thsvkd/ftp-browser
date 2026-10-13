@@ -10,7 +10,14 @@ import { useServerStore } from '@renderer/stores/useServerStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
-import { joinPath, locKey, sameLoc, type ExplorerEntry, type Loc } from './explorerEntry'
+import {
+  fromLocalEntry,
+  joinPath,
+  locKey,
+  sameLoc,
+  type ExplorerEntry,
+  type Loc
+} from './explorerEntry'
 import { flyTo } from './flyTo'
 import { pathCrumbs } from './pathCrumbs'
 import { currentPlatform } from './platform'
@@ -19,7 +26,7 @@ import { planSameSide, type SameSideItem, type SameSideOp } from './sameSidePlan
 import { planSend, type SendConnection, type SendPlan } from './sendPlan'
 import type { IpcResult } from '@shared/types/ipc'
 import type { FtpServer } from '@shared/types/ftp'
-import type { LocalPlaces } from '@shared/types/local'
+import type { LocalFileEntry, LocalPlaces } from '@shared/types/local'
 
 interface FtpConnectionFields {
   connectionStatus: string
@@ -250,6 +257,40 @@ export async function dropOsFiles(files: readonly File[], dest: Loc): Promise<bo
     return false
   }
   return transfer('upload', paths, dest)
+}
+
+/**
+ * OS에서 끌어 온 파일·폴더를 선반에 담는다. 폴더는 펼치지 않고 항목 하나다. 새로 담은 수를 돌려준다.
+ * `getPathForFile`은 드롭 이벤트 안에서 await 앞에 모두 부른다(DataTransfer는 그때만 믿을 수 있다).
+ */
+export async function shelveOsFiles(files: readonly File[]): Promise<number> {
+  if (!files.length) return 0
+  const paths = files.map((f) => window.api.getPathForFile(f)).filter(Boolean)
+  if (!paths.length) {
+    toast(t('toast.shelfDropSkipped', { count: files.length }))
+    return 0
+  }
+  let entries: LocalFileEntry[]
+  try {
+    const result = await window.api.invoke<IpcResult<LocalFileEntry[]>>('local:stat', paths)
+    if (!result.success) {
+      toast.error(t('toast.shelfDropSkipped', { count: files.length }), {
+        description: result.error
+      })
+      return 0
+    }
+    entries = result.data
+  } catch (err) {
+    toast.error(t('toast.shelfDropSkipped', { count: files.length }), {
+      description: err instanceof Error ? err.message : String(err)
+    })
+    return 0
+  }
+  const missing = files.length - entries.length
+  if (missing > 0) toast(t('toast.shelfDropSkipped', { count: missing }))
+  const added = useShelfStore.getState().add(entries.map(fromLocalEntry))
+  if (entries.length && !added) toast(t('toast.alreadyOnShelf'))
+  return added
 }
 
 let places: LocalPlaces | null = null

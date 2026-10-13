@@ -422,6 +422,8 @@ export const it = {
   'toast.pathCopied_one': 'Copiato {{count}} percorso',
   'toast.pathCopied_other': 'Copiati {{count}} percorsi',
   'toast.alreadyOnShelf': 'Già nel ripiano',
+  'toast.shelfDropSkipped_one': 'Impossibile leggere {{count}} elemento rilasciato',
+  'toast.shelfDropSkipped_other': 'Impossibile leggere {{count}} elementi rilasciati',
   'toast.shelfEmpty': 'Il ripiano è vuoto. Seleziona gli elementi e premi Maiusc+S.',
   'toast.sendSkipped_one': 'Saltato {{count}} elemento',
   'toast.sendSkipped_other': 'Saltati {{count}} elementi',

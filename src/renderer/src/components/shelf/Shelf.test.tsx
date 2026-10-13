@@ -19,6 +19,9 @@ import {
 } from '@renderer/components/explorer/explorerTestHarness'
 import { AppShell } from '@renderer/components/layout/AppShell'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
+import { useDnd } from '@renderer/components/explorer/dnd'
+import { installDropGuard } from '@renderer/lib/osDropGuard'
+import type { LocalFileEntry } from '@shared/types/local'
 import { Shelf } from './Shelf'
 
 vi.mock('sonner', () => ({
@@ -276,5 +279,128 @@ describe('Shelf — same-side conflicts', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(copies()).toHaveLength(1)
     expect(shelfNames()).toEqual(['b.jpg'])
+  })
+})
+
+describe('Shelf — OS drops', () => {
+  const dt = (types: string[], files: File[] = []): Record<string, unknown> => ({
+    types,
+    files,
+    dropEffect: ''
+  })
+  const osFile = (name: string, path: string): File => {
+    h.api.getPathForFile.mockImplementation((f: File) => (f.name === name ? path : ''))
+    return new File(['x'], name)
+  }
+  const statOf = (...entries: LocalFileEntry[]): void => {
+    h.handlers['local:stat'] = () => ({ success: true, data: entries })
+  }
+  const target = (): HTMLElement => document.querySelector<HTMLElement>('[data-shelf-target]')!
+  const stats = (): unknown[][] => invokeCalls(h.invoke, 'local:stat')
+
+  it('takes OS files on an empty and a filled shelf, and keeps the copy effect under the document guard', async () => {
+    // covers: Test-877
+    h = setupExplorer({ local: { 'C:\\dl': [] } })
+    useTabsStore.getState().openTab(localLoc('C:\\dl'))
+    render(<Shelf />)
+
+    // 빈 선반
+    const empty = dt(['Files'])
+    expect(fireEvent.dragOver(target(), { dataTransfer: empty })).toBe(false)
+    expect(empty.dropEffect).toBe('copy')
+    expect(screen.getByText(en['shelf.dropHere'])).toBeTruthy()
+    const a = osFile('a.jpg', 'C:\\in\\a.jpg')
+    statOf(local('C:\\in', 'a.jpg'))
+    fireEvent.drop(target(), { dataTransfer: dt(['Files'], [a]) })
+    await waitFor(() => expect(shelfNames()).toEqual(['a.jpg']))
+    expect(stats()).toEqual([[['C:\\in\\a.jpg']]])
+    expect(useDnd.getState().over).toBeNull()
+
+    // 채운 선반
+    const filled = dt(['Files'])
+    expect(fireEvent.dragOver(target(), { dataTransfer: filled })).toBe(false)
+    expect(filled.dropEffect).toBe('copy')
+    const b = osFile('b.jpg', 'C:\\in\\b.jpg')
+    statOf(local('C:\\in', 'b.jpg'))
+    fireEvent.drop(target(), { dataTransfer: dt(['Files'], [b]) })
+    await waitFor(() => expect(shelfNames()).toEqual(['a.jpg', 'b.jpg']))
+    expect(useDnd.getState().over).toBeNull()
+    cleanup()
+    h.restore()
+
+    // 문서 가드를 켠 채로: 대상이 전파를 멈춰 가드가 'none'으로 덮지 않는다(함정 6)
+    h = setupExplorer({ local: { 'C:\\dl': [] } })
+    useTabsStore.getState().openTab(localLoc('C:\\dl'))
+    const uninstall = installDropGuard(document)
+    try {
+      render(<AppShell />)
+      await screen.findByRole('region', { name: en['shelf.title'] })
+      const over = dt(['Files'])
+      fireEvent.dragOver(target(), { dataTransfer: over })
+      expect(over.dropEffect).toBe('copy')
+    } finally {
+      uninstall()
+    }
+  })
+
+  it('ignores drags that are neither OS files nor in-app items, and still shelves in-app drags', () => {
+    // covers: Test-878
+    h = setupExplorer({ local: { 'C:\\dl': [] } })
+    useTabsStore.getState().openTab(localLoc('C:\\dl'))
+    render(<Shelf />)
+
+    const text = dt(['text/plain'])
+    expect(fireEvent.dragOver(target(), { dataTransfer: text })).toBe(true)
+    expect(text.dropEffect).toBe('')
+    fireEvent.drop(target(), { dataTransfer: dt(['text/plain'], [new File(['x'], 'z.txt')]) })
+    expect(stats()).toEqual([])
+    expect(shelfNames()).toEqual([])
+
+    // 앱 안 드래그는 지금처럼 담고 local:stat을 부르지 않는다(회귀)
+    act(() => useDnd.setState({ items: [remoteItem('a.jpg')], over: null, thumbs: [] }))
+    fireEvent.drop(target(), { dataTransfer: dt([]) })
+    expect(shelfNames()).toEqual(['a.jpg'])
+    expect(stats()).toEqual([])
+  })
+
+  it('shows an OS folder as one folder row, leaves it out of the total, and drops it into remote and local tabs', async () => {
+    // covers: Test-881
+    h = setupExplorer({ remote: { '/dst': [] }, local: { 'C:\\dl': [] } })
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['t1'], skipped: [], conflicts: [], totalBytes: 0 }
+    })
+    useTabsStore.getState().openTab(remoteLoc('/dst'))
+    render(<Shelf />)
+
+    const folder = osFile('docs', 'C:\\in\\docs')
+    // 실제 폴더 항목은 크기가 0이 아니다. 합계에 더하면 안 된다
+    statOf(local('C:\\in', 'docs', { dir: true, size: 4096 }))
+    fireEvent.drop(target(), { dataTransfer: dt(['Files'], [folder]) })
+    await waitFor(() => expect(shelfNames()).toEqual(['docs']))
+    expect(row('docs').getAttribute('aria-label')).toBe(
+      `docs, ${en['sidebar.thisPc']}, ${en['send.folderContents']}`
+    )
+    expect(screen.getByText('0 B')).toBeTruthy()
+    expect(screen.queryByText('4 KB')).toBeNull()
+
+    // 원격 탭: 폴더 경로 하나를 업로드로 보내고, 성공하면 선반이 빈다
+    fireEvent.click(screen.getByRole('button', { name: /^Upload 1 to dst\s*→/ }))
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    expect(invokeCalls(h.invoke, 'transfer:send')).toEqual([
+      [{ direction: 'upload', sources: ['C:\\in\\docs'], destDir: '/dst' }]
+    ])
+
+    // 로컬 탭: local:copyFiles로 복사한다
+    fireEvent.drop(target(), { dataTransfer: dt(['Files'], [folder]) })
+    await waitFor(() => expect(shelfNames()).toEqual(['docs']))
+    act(() => {
+      useTabsStore.getState().openTab(localLoc('C:\\dl'))
+    })
+    fireEvent.click(await screen.findByRole('button', { name: /^Copy 1 to dl\s*→/ }))
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    expect(invokeCalls(h.invoke, 'local:copyFiles')).toEqual([
+      [['C:\\in\\docs'], 'C:\\dl', ['docs']]
+    ])
   })
 })
