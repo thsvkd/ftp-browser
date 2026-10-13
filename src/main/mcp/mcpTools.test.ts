@@ -465,8 +465,8 @@ describe('several connections', () => {
 
     expect(result.isError).toBe(true)
     expect(textOf(result)).toBe(
-      `AMBIGUOUS: 2 servers are connected: nas.local (${A}), Office (id ${office}, ${B}). ` +
-        'Pass server with an id, name or host from list_servers.'
+      `AMBIGUOUS: 2 servers are connected: me@nas.local:21, kim@ftp.office.lan:2121 (Office, id ${office}). ` +
+        'Pass server with one of the user@host:port keys listed.'
     )
     expect(h.remote.list).not.toHaveBeenCalled()
     expect(h.connections.remotes.get(B)!.list).not.toHaveBeenCalled()
@@ -607,5 +607,74 @@ describe('several connections', () => {
     } finally {
       await fs.rm(tmp, { recursive: true, force: true })
     }
+  })
+})
+
+describe('two users on one host', () => {
+  const RA = 'ra@127.0.0.1:2121'
+  const RB2 = 'rb2@127.0.0.1:2121'
+  const NEXT = 'Pass server with one of the user@host:port keys listed.'
+
+  beforeEach(() => {
+    // 기본 세션은 끊고 RA·RB2만 연결한다
+    h.remote.setOffline()
+    h.connections.add(RA)
+    h.connections.add(RB2)
+  })
+
+  it('get_status gives the saved serverId and name only to the connection of the saved user', async () => {
+    // covers: Test-1155
+    const id = addServer(h.db, { name: 'Lab', host: '127.0.0.1', port: 2121, user: 'ra' })
+
+    const { connections } = dataOf<{ connections: Array<Record<string, unknown>> }>(
+      await call(client, 'get_status')
+    )
+
+    expect(connections.find((c) => c.server === RA)).toMatchObject({ serverId: id, name: 'Lab' })
+    const rb2 = connections.find((c) => c.server === RB2)!
+    expect(rb2).toMatchObject({
+      host: '127.0.0.1',
+      port: 2121,
+      user: 'rb2',
+      status: 'connected',
+      lastUsed: false
+    })
+    expect(rb2).not.toHaveProperty('serverId')
+    expect(rb2).not.toHaveProperty('name')
+
+    const { tools } = await client.listTools()
+    expect(tools.find((t) => t.name === 'get_status')!.description).toContain(
+      'saved server with the same user'
+    )
+  })
+
+  it('AMBIGUOUS lists the keys to pass, and a listed key picks that connection', async () => {
+    // covers: Test-1156
+    const id = addServer(h.db, { host: '127.0.0.1', port: 2121, user: 'ra' })
+
+    const result = await call(client, 'list_directory', { path: '/' })
+    expect(result.isError).toBe(true)
+    expect(textOf(result)).toBe(
+      `AMBIGUOUS: 2 servers are connected: ${RA} (id ${id}), ${RB2}. ${NEXT}`
+    )
+    for (const key of [RA, RB2]) expect(h.connections.remotes.get(key)!.list).not.toHaveBeenCalled()
+
+    // 저장 행의 사용자는 연결되지 않고 다른 사용자 둘이 연결된 저장 서버
+    const backup = addServer(h.db, { host: 'backup.lan', user: 'admin' })
+    h.connections.add('guest@backup.lan:21')
+    h.connections.add('other@backup.lan:21')
+    expect(textOf(await call(client, 'list_directory', { path: '/', server: backup }))).toBe(
+      `AMBIGUOUS: 2 connections match backup.lan: guest@backup.lan:21, other@backup.lan:21. ${NEXT}`
+    )
+
+    // 안내에 나온 키를 넘기면 그 연결의 목록이다
+    const rb2 = h.connections.remotes.get(RB2)!
+    rb2.addDir('/inbox')
+    const listed = dataOf<ListPage>(
+      await call(client, 'list_directory', { path: '/', server: RB2 })
+    )
+    expect(listed.entries.map((e) => e.name)).toEqual(['inbox'])
+    expect(rb2.list).toHaveBeenCalledWith('/')
+    expect(h.connections.remotes.get(RA)!.list).not.toHaveBeenCalled()
   })
 })

@@ -90,7 +90,7 @@ const NEXT: Record<string, string> = {
   TARGET_EXISTS: 'Choose another name, or delete the existing item first.',
   INVALID_PATH: 'Use a normalized absolute path.',
   BUSY: 'Wait for the running jobs with wait_for_jobs (the user can cancel them in the app).',
-  AMBIGUOUS: 'Pass server with an id, name or host from list_servers.',
+  AMBIGUOUS: 'Pass server with one of the user@host:port keys listed.',
   JOB_FAILED: 'Some items may already be gone: list the parent folder to see what is left.',
   [ErrorCode.FTP_PERMISSION_DENIED]: PARENT_NEXT,
   // pyftpdlib처럼 없는 디렉터리에 550 대신 501을 주는 서버가 있다.
@@ -240,10 +240,11 @@ const TOOLS = [
     name: 'get_status',
     risk: 'read',
     description:
-      'Show the FTP connections of FTP Browser (server as user@host:port, the saved server ' +
-      'serverId and name, host, port, user, status, and lastUsed: the default for tools called ' +
-      'without server), and how many transfers and file operations are pending, active, ' +
-      'completed, failed or cancelled (finished file operations drop out after a few seconds). ' +
+      'Show the FTP connections of FTP Browser (server as user@host:port, serverId and name of ' +
+      'the saved server with the same user, host, port, user, status, and lastUsed: the default ' +
+      'for tools called without server), and how many transfers and file operations are ' +
+      'pending, active, completed, failed or cancelled (finished file operations drop out after ' +
+      'a few seconds). ' +
       'Call it first to learn whether you need to connect.',
     input: z.object({}),
     async run(_input, { connections, db, transfers, operations, target }) {

@@ -3,18 +3,25 @@ import type { FtpServer } from '@shared/types/ftp'
 import { listServers } from '../db/servers'
 import { AgentError, resolveServer, type AgentDeps, type AgentSession } from './agentOps'
 
-/** 그 연결의 저장 행: 같은 host(대소문자 무시)·port에 사용자까지 같은 행, 없으면 host·port만 같은 행 */
+/**
+ * 그 연결의 저장 행: 같은 host(대소문자 무시)·port에 사용자까지 같은 행. 사용자가 다른 연결에는 없다
+ * (same-host-accounts SH12: 그 id를 넘기면 다른 계정이 연결될 수 있다).
+ */
 export function savedOf(servers: FtpServer[], key: ConnKey): FtpServer | undefined {
   const { host, port, user } = parseConnKey(key)!
-  const at = servers.filter((s) => s.host.toLowerCase() === host.toLowerCase() && s.port === port)
-  return at.find((s) => (s.username || 'anonymous') === user) ?? at[0]
+  return servers.find(
+    (s) =>
+      s.host.toLowerCase() === host.toLowerCase() &&
+      s.port === port &&
+      (s.username || 'anonymous') === user
+  )
 }
 
-/** `이름 (id N, user@host:port)`, 저장되지 않은 연결은 `host (user@host:port)` */
+/** 넘길 키를 앞에(SH13): `user@host:port (별칭, id N)`·`user@host:port (id N)`, 저장 행이 없으면 키만 */
 function describe(servers: FtpServer[], key: ConnKey): string {
   const saved = savedOf(servers, key)
-  if (saved) return `${saved.name || saved.host} (id ${saved.id}, ${key})`
-  return `${parseConnKey(key)!.host} (${key})`
+  if (!saved) return key
+  return `${key} (${saved.name ? `${saved.name}, ` : ''}id ${saved.id})`
 }
 
 /** 저장 서버의 연결: 사용자까지 같은 것, 없으면 그 host:port의 유일한 연결 */

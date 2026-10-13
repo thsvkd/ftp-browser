@@ -114,6 +114,28 @@ describe('resolveTarget — no argument and no last connection (rules 3 and 4)',
     const id = addServer(h.db, { name: 'Office', host: 'ftp.office.lan', port: 2121, user: 'kim' })
     const both = failure()
     expect(both.code).toBe('AMBIGUOUS')
-    expect(both.message).toBe(`2 servers are connected: nas.local (${A}), Office (id ${id}, ${B}).`)
+    expect(both.message).toBe(`2 servers are connected: ${A}, ${B} (Office, id ${id}).`)
+  })
+})
+
+describe('resolveTarget — a disconnected key of another user on a saved address', () => {
+  it('does not send the agent to the saved server of another user', () => {
+    // covers: Test-1157
+    const RA = 'ra@127.0.0.1:2121'
+    const RB2 = 'rb2@127.0.0.1:2121'
+    const id = addServer(h.db, { host: '127.0.0.1', port: 2121, user: 'ra' })
+    h.connections.add(RA).setOffline()
+    h.connections.add(RB2).setOffline()
+
+    const rb2 = failure(RB2)
+    expect(rb2.code).toBe('NOT_CONNECTED')
+    expect(rb2.message).toBe(
+      `${RB2} is not connected. It is not a saved server; connect to it in FTP Browser first.`
+    )
+    expect(rb2.message).not.toContain('Call connect with server')
+
+    const ra = failure(RA)
+    expect(ra.code).toBe('NOT_CONNECTED')
+    expect(ra.message).toBe(`${RA} is not connected. Call connect with server ${id} first.`)
   })
 })
