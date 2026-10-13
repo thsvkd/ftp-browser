@@ -51,19 +51,26 @@ export function RemoteFolderThumbnail({
     if (requestedRef.current) return
     requestedRef.current = true
     setPending(storeKey)
+    // 이 요청이 쓴 대기 항목. 답이 올 때 항목이 바뀌었으면(clearRemote로 지워졌거나 다른 요청이 덮었다)
+    // 그 답은 낡았으니 쓰지 않는다. 쓰면 좌우 바꾸기·이동으로 취소된 옛 뷰어의 'Cancelled'가 새 뷰어로
+    // 다시 요청할 타일을 오류로 묶는다(split-view P17).
+    const mine = useGalleryStore.getState().remoteFolderPreviews[storeKey]
+    const current = (): boolean =>
+      useGalleryStore.getState().remoteFolderPreviews[storeKey] === mine
     try {
       const result = await window.api.invoke<IpcResult<RemoteFolderPreview | null>>(
         'gallery:remoteFolderPreview',
         server,
         { remotePath: folderPath, viewerId }
       )
+      if (!current()) return
       if (result.success) {
         setResolved(storeKey, result.data)
       } else {
         setError(storeKey, result.error)
       }
     } catch (err) {
-      setError(storeKey, err instanceof Error ? err.message : String(err))
+      if (current()) setError(storeKey, err instanceof Error ? err.message : String(err))
     }
   }, [server, folderPath, viewerId, storeKey, setPending, setResolved, setError])
 

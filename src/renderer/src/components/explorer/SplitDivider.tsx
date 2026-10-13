@@ -32,10 +32,13 @@ export function SplitDivider({
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
+    // 창이 포커스를 잃으면(끄는 중 Alt+Tab) 버튼을 놓는 것을 못 받을 수 있다: 거기서 끝낸다.
+    window.addEventListener('blur', onUp)
     return () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
+      window.removeEventListener('blur', onUp)
     }
   }, [dragging, rootRef])
 
@@ -56,6 +59,7 @@ export function SplitDivider({
         e.currentTarget.setPointerCapture?.(e.pointerId)
         setDragging(true)
       }}
+      onLostPointerCapture={() => setDragging(false)}
       onDoubleClick={() => useTabsStore.getState().setSplitRatio(0.5)}
     />
   )

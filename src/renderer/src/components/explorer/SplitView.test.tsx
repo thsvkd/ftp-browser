@@ -578,6 +578,22 @@ describe('SplitView — panes', () => {
     fireEvent.doubleClick(divider)
     expect(ratio()).toBe(0.5)
 
+    // 창이 포커스를 잃거나 포인터 캡처를 잃으면 끌기가 끝난다(버튼을 창 밖에서 놓은 경우).
+    fireEvent.pointerDown(divider, { clientX: 500, clientY: 300, button: 0, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 400, clientY: 300, pointerId: 1 })
+    expect(ratio()).toBe(0.4)
+    fireEvent.blur(window)
+    fireEvent.pointerMove(window, { clientX: 600, clientY: 300, pointerId: 1 })
+    expect(ratio()).toBe(0.4)
+    expect(divider.dataset.dragging).toBeUndefined()
+    fireEvent.pointerDown(divider, { clientX: 400, clientY: 300, button: 0, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 450, clientY: 300, pointerId: 1 })
+    expect(ratio()).toBe(0.45)
+    fireEvent.lostPointerCapture(divider)
+    fireEvent.pointerMove(window, { clientX: 600, clientY: 300, pointerId: 1 })
+    expect(ratio()).toBe(0.45)
+    fireEvent.doubleClick(divider)
+
     act(() => useTabsStore.getState().setSplitRatio(0.1))
     expect(paneEl('left').style.flexBasis).toBe('28%')
     expect(ratio()).toBe(0.1)
@@ -595,6 +611,96 @@ describe('SplitView — panes', () => {
     expect(screen.getAllByRole('menu')).toHaveLength(1)
     expect(screen.getByRole('menu').getAttribute('aria-label')).toBe('a.jpg')
     expect(paneEl('right').contains(screen.getByRole('menu'))).toBe(true)
+  })
+
+  it('moves the menu to a second right-clicked item in the same pane and leaves focus with the pane that opened the new one', async () => {
+    // covers: Test-1069
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg'), ftp('b.jpg')] } })
+    const { L, R } = await renderSplit(remoteLoc(DIR), remoteLoc(DIR))
+    // 같은 패널: 메뉴가 열린 채 다른 항목을 우클릭하면 그 항목의 메뉴 하나
+    fireEvent.contextMenu(paneOption('left', 'a.jpg'), { clientX: 50, clientY: 50 })
+    fireEvent.contextMenu(paneOption('left', 'b.jpg'), { clientX: 60, clientY: 80 })
+    await flush()
+    expect(screen.getAllByRole('menu')).toHaveLength(1)
+    expect(screen.getByRole('menu').getAttribute('aria-label')).toBe('b.jpg')
+
+    // 다른 패널: 왼쪽 메뉴는 닫히지만 왼쪽 목록으로 포커스를 되돌려 왼쪽을 다시 활성으로 만들지 않는다.
+    fireEvent.pointerDown(paneOption('right', 'a.jpg'), { button: 2 })
+    fireEvent.contextMenu(paneOption('right', 'a.jpg'), { clientX: 700, clientY: 100 })
+    await flush()
+    expect(screen.getAllByRole('menu')).toHaveLength(1)
+    expect(paneEl('right').contains(screen.getByRole('menu'))).toBe(true)
+    expect(useTabsStore.getState().activeId).toBe(R)
+    expect(document.activeElement).not.toBe(listOf(L))
+
+    // 같은 패널의 빈 곳을 다시 우클릭해도 메뉴 하나가 그 자리로 옮겨 간다.
+    fireEvent.contextMenu(listOf(R), { clientX: 700, clientY: 400 })
+    fireEvent.contextMenu(listOf(R), { clientX: 710, clientY: 420 })
+    await flush()
+    expect(screen.getAllByRole('menu')).toHaveLength(1)
+    expect(screen.getByRole('menu').getAttribute('aria-label')).toBe('photos')
+  })
+
+  it('asks again for a folder preview whose request a swap cancelled while it was loading', async () => {
+    // covers: Test-1064
+    h = setupExplorer({ remote: { [DIR]: [ftp('sub', { dir: true })] } })
+    // 실제 IntersectionObserver처럼 다음 프레임쯤(16ms) 콜백한다.
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        private live = true
+        constructor(private cb: IntersectionObserverCallback) {}
+        observe = (el: Element): void => {
+          setTimeout(() => {
+            if (this.live)
+              this.cb(
+                [{ isIntersecting: true, target: el } as unknown as IntersectionObserverEntry],
+                this as unknown as IntersectionObserver
+              )
+          }, 16)
+        }
+        disconnect = (): void => {
+          this.live = false
+        }
+      }
+    )
+    // main처럼 대기 요청은 그 뷰어의 gallery:cancelAll에서 'Cancelled'로 거절된다.
+    const waiting: Array<{ viewer: string; settle: (r: unknown) => void }> = []
+    let answer = false
+    const found = {
+      success: true,
+      data: { name: 'x.jpg', size: 10, modifiedAt: MODIFIED_AT, itemCount: 1 }
+    }
+    h.handlers['gallery:remoteFolderPreview'] = (_conn, req) =>
+      new Promise((resolve) => {
+        if (answer) resolve(found)
+        else waiting.push({ viewer: (req as { viewerId: string }).viewerId, settle: resolve })
+      })
+    h.handlers['gallery:cancelAll'] = (_conn, viewer) => {
+      for (let i = waiting.length - 1; i >= 0; i--)
+        if (waiting[i].viewer === viewer)
+          waiting.splice(i, 1)[0].settle({ success: false, error: 'Cancelled' })
+      return { success: true, data: undefined }
+    }
+    const S = server()
+    const subEntry = (): unknown =>
+      useGalleryStore.getState().remoteFolderPreviews[`${S}|${DIR}/sub`]
+    const frames = async (ms: number): Promise<void> => {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, ms))
+      })
+    }
+
+    await renderSplit(remoteLoc(DIR), remoteLoc(DIR))
+    await frames(40)
+    expect(waiting.length).toBeGreaterThan(0)
+    expect(subEntry()).toEqual({ status: 'pending' })
+
+    answer = true
+    act(() => useTabsStore.getState().swapPanes())
+    await frames(40)
+    await flush()
+    expect(subEntry()).toMatchObject({ status: 'resolved' })
   })
 
   it('draws one drag ghost for the split view', async () => {

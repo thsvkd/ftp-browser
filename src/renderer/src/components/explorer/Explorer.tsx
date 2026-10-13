@@ -147,6 +147,15 @@ function useSplitWidth(ref: React.RefObject<HTMLElement | null>, shown: boolean)
 type Entering = Record<string, 'grow' | 'in'>
 
 /**
+ * 패널의 렌더 순서: 탭을 만든 순서(`tab<N>`의 N). 문자열로 견주면 tab10이 tab9보다 앞선다. 좌우 바꾸기
+ * 뒤에는 이 순서(곧 Tab 키·낭독 순서)가 화면 순서와 다를 수 있다(P10의 대가, split-view §14).
+ */
+const bySeq = (a: string, b: string): number => {
+  const seq = (id: string): number => Number(/\d+$/.exec(id)?.[0] ?? NaN)
+  return seq(a) - seq(b) || (a < b ? -1 : 1)
+}
+
+/**
  * 탐색 영역: 보이는 패널(`visiblePanes`)마다 `TabExplorer` 하나. 분할이 보이면 두 패널 사이에 구분선을
  * 둔다(split-view §3.4). 렌더 순서는 탭 id로 고정하고 좌우는 `style.order`로만 정해, 좌우 바꾸기·분할
  * 진입에도 패널을 다시 마운트하지 않는다(P10, 함정 5). 탭이 바뀌어 다시 마운트되면(탭 id가 key) 메뉴·이름
@@ -187,7 +196,7 @@ export function Explorer(): React.JSX.Element | null {
   return (
     <div ref={rootRef} data-split-root className="relative flex min-h-0 min-w-0 flex-1">
       {[...panes]
-        .sort((a, b) => (a.tab.id < b.tab.id ? -1 : 1))
+        .sort((a, b) => bySeq(a.tab.id, b.tab.id))
         .map(({ pane, tab }) => (
           <PaneIdContext.Provider key={tab.id} value={pane}>
             <TabExplorer
@@ -402,12 +411,12 @@ function TabExplorer({
   }, [loc.path, tab.id])
 
   // 다른 것이 포커스를 갖고 있지 않으면 목록이 받는다(탭 전환 뒤, 함정 13). 두 패널이 함께 마운트되면
-  // 활성 패널만 받는다(P7): 아니면 나중 패널이 포커스로 활성을 빼앗는다.
+  // 활성 패널만 받는다(P7): 아니면 나중 패널이 포커스로 활성을 빼앗는다. 이미 마운트된 패널이 활성이
+  // 되어도 본다: 포커스가 있던 활성 반쪽을 닫으면 그 목록과 함께 포커스가 사라진다(Ctrl+W·반쪽 닫기).
   useEffect(() => {
     if (active && document.activeElement === document.body)
       scrollRef.current?.focus({ preventScroll: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 마운트 때만 본다
-  }, [])
+  }, [active])
 
   // ---------- 로딩 표시: 150ms 뒤 2px 막대, 1초 뒤 "Listing…" ----------
   const busy =
@@ -809,8 +818,9 @@ function TabExplorer({
     onContext: (e, it) => {
       if (shouldDeferToNativeContextMenu(e, window.api?.debugToolsEnabled ?? false)) return
       e.preventDefault()
-      // 전파는 막지 않는다: 목록의 빈 곳 메뉴는 항목 위를 거르고, 문서까지 가야 다른 패널에 열린 메뉴가
-      // 바깥 우클릭으로 닫힌다(메뉴는 한 번에 하나, split-view §4 18행).
+      // 전파를 막는다: 문서까지 가면 이미 열린 이 패널의 메뉴가 그것을 바깥 우클릭으로 보고 새로 연
+      // 메뉴를 닫는다. 다른 패널·탭줄의 메뉴는 새 메뉴가 열릴 때 닫힌다(ItemMenu, split-view §4 18행).
+      e.stopPropagation()
       const inSelection = selSet.has(it.path)
       if (!inSelection) selectOnly(it.path)
       setMenu({ x: e.clientX, y: e.clientY, target: inSelection ? selected : [it] })
@@ -913,6 +923,8 @@ function TabExplorer({
           if ((e.target as Element).closest('[data-path]')) return
           if (shouldDeferToNativeContextMenu(e, window.api?.debugToolsEnabled ?? false)) return
           e.preventDefault()
+          // 항목 메뉴와 같은 까닭으로 전파를 막는다(빈 곳을 다시 우클릭하면 메뉴가 그 자리로 옮겨 간다).
+          e.stopPropagation()
           if (interactive) setMenu({ x: e.clientX, y: e.clientY, target: [] })
         }}
         onDragOver={paneDrop.handlers.onDragOver}
@@ -1046,9 +1058,10 @@ function TabExplorer({
                 : locLabel(loc)
           }
           items={menu.target.length ? itemMenu(menu.target) : backgroundMenu()}
-          onClose={() => {
+          onClose={(reason) => {
             setMenu(null)
-            refocus()
+            // 다른 메뉴가 열려 닫혔으면 포커스는 그 메뉴 것이다. 되돌리면 이 패널이 다시 활성이 된다(P7).
+            if (reason !== 'replaced') refocus()
           }}
         />
       )}

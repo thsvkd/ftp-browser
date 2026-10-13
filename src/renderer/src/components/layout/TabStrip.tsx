@@ -75,6 +75,8 @@ function TabPill({
         }}
         onContextMenu={(e) => {
           e.preventDefault()
+          // 문서까지 가면 이미 열린 탭 메뉴가 바깥 우클릭으로 보고 새로 연 메뉴를 닫는다(ItemMenu).
+          e.stopPropagation()
           handlers.onMenu(tab.id, e.clientX, e.clientY)
         }}
         onAuxClick={(e) => e.button === 1 && closable && closeTab(tab.id)}
@@ -175,6 +177,25 @@ export function TabStrip(): React.JSX.Element {
     items: MenuItem[]
   } | null>(null)
   const drag = useTabDrag(stripRef)
+  // 메뉴를 열 때 포커스가 있던 곳. 메뉴가 닫히며 포커스를 잃으면 그리로 돌아간다(키보드로 연 탭 메뉴, P6).
+  const opener = useRef<HTMLElement | null>(null)
+  const remember = (): void => {
+    const el = document.activeElement
+    // 열린 메뉴 안에서 다른 메뉴로 옮겨 가면 처음 연 곳을 그대로 둔다.
+    if (el?.closest('[role="menu"]')) return
+    opener.current = el instanceof HTMLElement && el !== document.body ? el : null
+  }
+  const closeMenu = (reason?: 'replaced'): void => {
+    setMenu(null)
+    const now = document.activeElement
+    // 다른 메뉴가 열렸거나, 사용자가 이미 다른 곳에 포커스를 두었으면 건드리지 않는다.
+    if (reason === 'replaced' || (now && now !== document.body && !now.closest('[role="menu"]')))
+      return
+    const back = opener.current?.isConnected
+      ? opener.current
+      : listRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+    back?.focus()
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -199,6 +220,7 @@ export function TabStrip(): React.JSX.Element {
   }
 
   const openMenu = async (x: number, y: number): Promise<void> => {
+    remember()
     const { openTab } = useTabsStore.getState()
     const home = (await loadPlaces())?.home
     const locs: Loc[] = [
@@ -236,6 +258,7 @@ export function TabStrip(): React.JSX.Element {
     const s = useTabsStore.getState()
     const tab = s.tabs.find((v) => v.id === id)
     if (!tab) return
+    remember()
     const half = !!s.split && (id === s.split.leftId || id === s.split.rightId)
     setMenu({
       x,
@@ -354,13 +377,7 @@ export function TabStrip(): React.JSX.Element {
         <Plus className="h-4 w-4" aria-hidden />
       </button>
       {menu && (
-        <ItemMenu
-          x={menu.x}
-          y={menu.y}
-          label={menu.label}
-          items={menu.items}
-          onClose={() => setMenu(null)}
-        />
+        <ItemMenu x={menu.x} y={menu.y} label={menu.label} items={menu.items} onClose={closeMenu} />
       )}
       <TabDragLayer />
     </div>

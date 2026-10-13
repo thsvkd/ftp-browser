@@ -382,6 +382,27 @@ describe('TabStrip — split pair pill and tab menu', () => {
     expect(only.disabled).toBe(true)
   })
 
+  it('moves the tab menu to a second right-clicked tab and gives focus back to the tab when it closes', async () => {
+    // covers: Test-1072
+    setupNamed('A', 'B')
+    await renderShell()
+    fireEvent.contextMenu(tab('A'))
+    fireEvent.contextMenu(tab('B'))
+    await flush()
+    expect(screen.getAllByRole('menu')).toHaveLength(1)
+    expect(screen.getByRole('menu').getAttribute('aria-label')).toBe('B')
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+
+    // 키보드로 연 메뉴를 Esc로 닫으면 연 탭으로 돌아간다(탭 목록에서 자리를 잃지 않는다).
+    tab('B').focus()
+    fireEvent.keyDown(tab('B'), { key: 'F10', shiftKey: true })
+    await flush()
+    expect(screen.getByRole('menu').contains(document.activeElement)).toBe(true)
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(document.activeElement).toBe(tab('B'))
+  })
+
   it('offers only Unsplit and Swap sides on a half of the pair', async () => {
     // covers: Test-1073
     const ids = setupNamed('A', 'C', 'D')
@@ -432,6 +453,18 @@ describe('TabStrip — split pair pill and tab menu', () => {
     expect(order(ids)).toEqual(['A', 'E'])
     expect(useTabsStore.getState().split).toBeNull()
     expect(activeName(ids)).toBe('A')
+  })
+  it('moves focus to the other half when the focused active half closes', async () => {
+    // covers: Test-1074
+    const ids = setupNamed('A', 'C', 'D')
+    useTabsStore.setState({ split: { leftId: ids.C, rightId: ids.D, ratio: 0.5 }, activeId: ids.D })
+    await renderShell()
+    act(() => document.getElementById(`explorer-list-${ids.D}`)?.focus())
+    expect(document.activeElement?.id).toBe(`explorer-list-${ids.D}`)
+    fireEvent.keyDown(window, { key: 'w', ctrlKey: true })
+    await flush()
+    expect(activeName(ids)).toBe('C')
+    expect(document.activeElement).toBe(document.getElementById(`explorer-list-${ids.C}`))
   })
 })
 
@@ -552,6 +585,9 @@ describe('TabStrip — tab drag', () => {
     expect(zoneEl()).toBeNull()
     expect(ghost()).toBeNull()
     up(900, 65)
+    // 손을 떼면 캡처한 탭 버튼에 click이 온다. 취소한 드래그도 활성 탭을 바꾸지 않는다.
+    fireEvent.click(tab('B'))
+    expect(activeName(ids)).toBe('A')
     unchanged()
 
     // 탭줄로 올라오면 순서 변경만
@@ -577,6 +613,8 @@ describe('TabStrip — tab drag', () => {
     expect(zoneEl()).toBeNull()
     expect(ghost()).toBeNull()
     up(900, 65)
+    fireEvent.click(tab('B'))
+    expect(activeName(ids)).toBe('A')
     unchanged()
 
     // 창 밖
@@ -590,6 +628,55 @@ describe('TabStrip — tab drag', () => {
     expect(zoneEl()).toBeNull()
     up(-5, 65)
     unchanged()
+
+    // 탭줄 위로 창 밖(순서 변경 모드): 표시선이 사라지고 놓아도 순서 그대로
+    startDrag(tab('B'), 145)
+    move(10, 20)
+    expect(indicator()).not.toBeNull()
+    move(10, -5)
+    expect(indicator()).toBeNull()
+    up(10, -5)
+    unchanged()
+
+    // 키보드 click은 막지 않는다(취소 뒤의 click 무시는 그 한 번뿐).
+    wait(1)
+    fireEvent.click(tab('B'))
+    expect(activeName(ids)).toBe('B')
+  })
+
+  it('keeps the painted zone across a left-right switch so it slides, and fades it while unarmed', async () => {
+    // covers: Test-1077
+    setupNamed('A', 'B')
+    await renderShell()
+    vi.useFakeTimers()
+    const painted = (): HTMLElement | null =>
+      document.querySelector<HTMLElement>('.split-overlay-zone')
+    startDrag(tab('B'), 145)
+    move(900, 65)
+    wait(60)
+    const zone = painted()
+    expect(zone?.dataset.zone).toBe('right')
+    expect(zone?.style.opacity).toBe('1')
+    expect(zone?.style.left).toBe('500px')
+    expect(zone?.style.transition).toContain('left')
+
+    // 존이 바뀌면 무장이 풀린다: 같은 요소가 제자리에서 흐려진다.
+    move(100, 65)
+    expect(painted()).toBe(zone)
+    expect(zone?.dataset.zone).toBeUndefined()
+    expect(zone?.style.opacity).toBe('0')
+    expect(zone?.style.left).toBe('500px')
+
+    // 다시 무장되면 같은 요소가 왼쪽으로 옮겨 간다(위치 transition이 움직인다).
+    wait(60)
+    expect(painted()).toBe(zone)
+    expect(zone?.dataset.zone).toBe('left')
+    expect(zone?.style.left).toBe('0px')
+    expect(zone?.style.opacity).toBe('1')
+    expect(screen.getByText('Split left · B')).toBeTruthy()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(painted()).toBeNull()
   })
 
   it('never shows the overlay with a single tab', async () => {

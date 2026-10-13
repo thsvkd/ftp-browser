@@ -98,9 +98,51 @@ export function useTabDrag(stripRef: React.RefObject<HTMLElement | null>): {
 } {
   const suppress = useRef(false)
   const stop = useRef<(() => void) | null>(null)
-  useEffect(() => () => stop.current?.(), [])
+  // 취소한 드래그 뒤의 click 무시를 푸는 일회성 리스너(`suppressAfterCancel`)
+  const unarm = useRef<(() => void) | null>(null)
+  useEffect(
+    () => () => {
+      stop.current?.()
+      unarm.current?.()
+    },
+    []
+  )
+
+  /** 다음 click 하나를 무시한다. click은 pointerup과 같은 태스크에 오므로 다음 태스크에 푼다(함정 10). */
+  const suppressNextClick = (): void => {
+    suppress.current = true
+    setTimeout(() => {
+      suppress.current = false
+    }, 0)
+  }
+
+  /**
+   * Esc·blur로 취소해도 버튼은 아직 눌려 있고 탭 버튼이 포인터를 캡처하고 있어, 손을 떼면 그 버튼에
+   * click이 온다. 그 click도 활성 탭을 바꾸지 않게(§5 "변경 없음") 다음 pointerup까지 무시를 켜 둔다.
+   * 그 전에 키를 누르면 바로 푼다(키보드 click은 막지 않는다).
+   */
+  const suppressAfterCancel = (): void => {
+    unarm.current?.()
+    suppress.current = true
+    const release = (): void => {
+      unarm.current?.()
+      suppressNextClick()
+    }
+    const onKey = (): void => {
+      unarm.current?.()
+      suppress.current = false
+    }
+    window.addEventListener('pointerup', release, true)
+    window.addEventListener('keydown', onKey, true)
+    unarm.current = () => {
+      window.removeEventListener('pointerup', release, true)
+      window.removeEventListener('keydown', onKey, true)
+      unarm.current = null
+    }
+  }
 
   const onPointerDown = (e: React.PointerEvent<HTMLElement>, id: string): void => {
+    unarm.current?.()
     suppress.current = false
     // 주 버튼만. macOS의 Ctrl+클릭은 우클릭 대용이다.
     if (e.button !== 0 || (e.ctrlKey && isMac(currentPlatform()))) return
@@ -125,9 +167,15 @@ export function useTabDrag(stripRef: React.RefObject<HTMLElement | null>): {
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', end)
       window.removeEventListener('keydown', onKey, true)
-      window.removeEventListener('blur', end)
+      window.removeEventListener('blur', cancel)
       stop.current = null
       if (dragging) set(IDLE)
+    }
+    // Esc·blur: 즉시 idle. 드래그 중이었으면 손을 뗄 때 오는 click도 무시한다.
+    const cancel = (): void => {
+      const wasDragging = dragging
+      end()
+      if (wasDragging) suppressAfterCancel()
     }
 
     const reorderAt = (x: number): TabDragState['insert'] => {
@@ -154,15 +202,17 @@ export function useTabDrag(stripRef: React.RefObject<HTMLElement | null>): {
         )
       }
       mode = dragModeFor(mode, y, stripBottom)
+      // 창 밖에서 놓으면 아무 일도 없다(F9): 순서 변경은 표시선을 지우고, 분할은 존을 잡지 않는다.
+      const outside = x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight
       if (mode === 'reorder') {
         disarm()
         zone = null
-        set({ id, x, y, mode, zone, armed: false, insert: reorderAt(x), rect: null })
+        const insert = outside ? null : reorderAt(x)
+        set({ id, x, y, mode, zone, armed: false, insert, rect: null })
         return
       }
       const root = document.querySelector('[data-split-root]')
       const rect = root ? toRect(root.getBoundingClientRect()) : null
-      const outside = x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight
       // 탭이 하나면 분할할 수 없다(F3): 존을 잡지 않아 오버레이가 뜨지 않는다.
       const next =
         rect && !outside && useTabsStore.getState().tabs.length >= 2
@@ -197,12 +247,9 @@ export function useTabDrag(stripRef: React.RefObject<HTMLElement | null>): {
       const wasDragging = dragging
       end()
       if (!wasDragging) return
-      // 같은 버튼에 오는 click은 활성 탭을 바꾸지 않는다(함정 10). click은 pointerup과 같은 태스크에
-      // 오므로, 오지 않았으면(다른 곳에서 놓음) 다음 태스크에 풀어 키보드 click을 막지 않는다.
-      suppress.current = true
-      setTimeout(() => {
-        suppress.current = false
-      }, 0)
+      // 같은 버튼에 오는 click은 활성 탭을 바꾸지 않는다(함정 10). 오지 않았으면(다른 곳에서 놓음)
+      // 다음 태스크에 풀어 키보드 click을 막지 않는다.
+      suppressNextClick()
       if (s.mode === 'reorder') {
         if (s.insert) useTabsStore.getState().moveTab(id, units[s.insert.index]?.id ?? null)
       } else if (s.armed && (s.zone === 'left' || s.zone === 'right')) {
@@ -214,14 +261,14 @@ export function useTabDrag(stripRef: React.RefObject<HTMLElement | null>): {
       if (!dragging || ev.key !== 'Escape') return
       ev.preventDefault()
       ev.stopPropagation()
-      end()
+      cancel()
     }
 
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', end)
     window.addEventListener('keydown', onKey, true)
-    window.addEventListener('blur', end)
+    window.addEventListener('blur', cancel)
     stop.current = end
   }
 
