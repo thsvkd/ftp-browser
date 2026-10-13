@@ -4,6 +4,7 @@ import { StatusBar } from './StatusBar'
 import { Sidebar } from './Sidebar'
 import { TabStrip } from './TabStrip'
 import { RightRail } from './RightRail'
+import { SidePane } from './SidePane'
 import { Explorer } from '@renderer/components/explorer/Explorer'
 import { useDnd } from '@renderer/components/explorer/dnd'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
@@ -11,10 +12,14 @@ import { SettingsDialog } from '@renderer/components/settings/SettingsDialog'
 import { useThumbnailListener } from '@renderer/hooks/useThumbnailListener'
 import { useLocalThumbnailListener } from '@renderer/hooks/useLocalThumbnailListener'
 import { useUpdateListener } from '@renderer/hooks/useUpdateListener'
+import { useElementWidth } from '@renderer/hooks/useElementWidth'
 import { useAgentSync } from '@renderer/hooks/useAgentSync'
 import { dropShelf, reloadActiveTab } from '@renderer/lib/sendItems'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
+import { useLayoutStore } from '@renderer/stores/useLayoutStore'
+import { currentPlatform } from '@renderer/lib/platform'
+import { matchPaneShortcut } from '@renderer/lib/sidebarLayout'
 import type { IpcResult } from '@shared/types/ipc'
 
 /** F6 순서. 지역마다 앞의 것부터 처음 맞는 요소에 포커스를 준다(랩 V2). */
@@ -37,6 +42,8 @@ export function AppShell(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const openSettings = useCallback(() => setSettingsOpen(true), [])
   const rootRef = useRef<HTMLDivElement>(null)
+  const rowRef = useRef<HTMLDivElement>(null)
+  const rowWidth = useElementWidth(rowRef)
 
   useThumbnailListener()
   useLocalThumbnailListener()
@@ -62,7 +69,7 @@ export function AppShell(): React.JSX.Element {
       if (!root) return
       const els = REGIONS.map((qs) =>
         qs.map((q) => root.querySelector<HTMLElement>(q)).find(Boolean)
-      ).filter((el): el is HTMLElement => !!el)
+      ).filter((el): el is HTMLElement => !!el && !el.closest('[inert]')) // 접힌 패널은 건너뛴다(.focus()가 조용히 실패한다)
       const cur = els.findIndex((el) =>
         el.closest('[data-region]')?.contains(document.activeElement)
       )
@@ -76,8 +83,21 @@ export function AppShell(): React.JSX.Element {
       const tab = s.tabs.find((x) => x.id === s.activeId)
       // 이름 바꾸기·경로·주소 칸 같은 입력에서는 지역 이동만 한다.
       const typing = isTyping(e.target)
+      // 사이드 패널 토글은 입력 칸에서도 된다. 키는 code로 본다(macOS ⌥B의 key는 ∫).
+      const pane = matchPaneShortcut(
+        {
+          code: e.code,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          altKey: e.altKey,
+          shiftKey: e.shiftKey,
+          altGraph: e.getModifierState('AltGraph')
+        },
+        currentPlatform()
+      )
       let run: (() => void) | null = null
       if (e.key === 'F6') run = () => cycleRegion(e.shiftKey ? -1 : 1)
+      else if (pane) run = () => useLayoutStore.getState().toggle(pane)
       else if (typing) return
       else if (ctrl && e.key === 'Enter') run = () => tab && void dropShelf(tab.loc)
       else if (e.key === 'F5' || (ctrl && key === 'r')) run = reloadActiveTab
@@ -114,13 +134,17 @@ export function AppShell(): React.JSX.Element {
       }
     >
       <Toolbar onSettingsClick={openSettings} />
-      <div className="flex min-h-0 flex-1">
-        <Sidebar />
+      <div ref={rowRef} className="flex min-h-0 flex-1">
+        <SidePane side="left" id="sidebar-pane" containerWidth={rowWidth}>
+          <Sidebar />
+        </SidePane>
         <main data-region="content" className="relative flex min-w-0 flex-1 flex-col">
           <TabStrip />
           <Explorer />
         </main>
-        <RightRail />
+        <SidePane side="right" id="rail-pane" containerWidth={rowWidth}>
+          <RightRail />
+        </SidePane>
       </div>
       <StatusBar />
       <ConflictSheet />

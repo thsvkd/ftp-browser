@@ -284,7 +284,7 @@ export function Sidebar(): React.JSX.Element {
     <nav
       aria-label={t('sidebar.label')}
       data-region="sidebar"
-      className="scroll flex w-[220px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-[var(--bd)] bg-[var(--sb)] px-3 py-3"
+      className="scroll flex w-full shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-[var(--bd)] bg-[var(--sb)] px-3 py-3"
     >
       <Heading>{t('sidebar.thisPc')}</Heading>
       {places &&
