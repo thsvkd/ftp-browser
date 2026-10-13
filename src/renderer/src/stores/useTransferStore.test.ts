@@ -250,7 +250,7 @@ describe('useTransferStore relay partial cleanup toast', () => {
     apply(relay('a.jpg', 'r1', { status: 'failed', error: 'x', partialRemoved: true }))
     apply(relay('b.jpg', 'r1', { status: 'cancelled', partialRemoved: true }))
     expect(vi.mocked(toast).mock.calls).toEqual([
-      ['Removed the incomplete copy of a.jpg on b.example:2121']
+      ['Removed the incomplete copy of a.jpg on you@b.example:2121']
     ])
 
     // 지웠다는 표시가 없는 실패·취소에는 토스트가 없다

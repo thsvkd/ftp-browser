@@ -140,4 +140,31 @@ describe('StatusBar', () => {
     expect(bar.textContent).toContain(en['status.disconnected'])
     expect(bar.textContent).not.toContain('servers connected')
   })
+
+  it("names the active tab's connection by its key so two users on one host differ", () => {
+    // covers: Test-1143
+    h = setupExplorer({ connected: false })
+    const RA = 'ra@127.0.0.1:2121'
+    const RB2 = 'rb2@127.0.0.1:2121'
+    setConnection(RA, 'connected')
+    setConnection(RB2, 'connected')
+    const tabA = useTabsStore.getState().openTab({ side: 'remote', path: '/', server: RA })
+    useTabsStore.getState().openTab({ side: 'remote', path: '/', server: RB2 })
+    render(<StatusBar />)
+    const bar = screen.getByRole('contentinfo')
+    expect(bar.textContent).toContain('rb2@127.0.0.1:2121')
+    expect(bar.textContent).not.toContain('ra@')
+
+    act(() => useTabsStore.getState().activate(tabA))
+    expect(bar.textContent).toContain('ra@127.0.0.1:2121')
+
+    act(() => {
+      setConnection('anonymous@example.org:21', 'connected')
+      useTabsStore
+        .getState()
+        .openTab({ side: 'remote', path: '/', server: 'anonymous@example.org:21' })
+    })
+    expect(bar.textContent).toContain('example.org:21')
+    expect(bar.textContent).not.toContain('anonymous@')
+  })
 })

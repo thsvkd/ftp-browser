@@ -12,6 +12,15 @@ export function connKey(host: string, port: number, user: string): ConnKey {
   return `${user || 'anonymous'}@${host}:${port}`
 }
 
+/**
+ * 화면·안내의 연결 이름(same-host-accounts SH2). 키 그대로이고, 사용자가 정확히 `'anonymous'`면
+ * `host:port`만 보인다. 키가 아니면 그대로 돌려준다. 키의 순수 함수라 다른 연결과 무관하게 같다.
+ */
+export function connLabel(key: ConnKey): string {
+  const parsed = parseConnKey(key)
+  return parsed?.user === 'anonymous' ? `${parsed.host}:${parsed.port}` : key
+}
+
 /** 마지막 `@`로 사용자를, 마지막 `:`로 포트를 나눈다. `@`가 없거나 포트가 1~65535 정수가 아니면 null. */
 export function parseConnKey(key: string): { user: string; host: string; port: number } | null {
   const at = key.lastIndexOf('@')

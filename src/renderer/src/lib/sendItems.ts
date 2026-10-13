@@ -24,7 +24,7 @@ import { moveRemoteFiles } from './remoteDrop'
 import { planSameSide, type SameSideItem, type SameSideOp } from './sameSidePlan'
 import { connStatus, connectedKeys, savedServerOf } from './connections'
 import { planSend, type SendPlan } from './sendPlan'
-import { parseConnKey } from '@shared/connKey'
+import { connLabel, parseConnKey } from '@shared/connKey'
 import type { IpcResult } from '@shared/types/ipc'
 import type { FtpServer } from '@shared/types/ftp'
 import type { LocalFileEntry, LocalPlaces } from '@shared/types/local'
@@ -41,10 +41,10 @@ export function reloadActiveTab(): void {
   void useListingStore.getState().load(loc)
 }
 
-/** 출처 이름: 내 PC 또는 서버의 `host:port`. */
+/** 출처 이름: 내 PC 또는 서버의 연결 이름표(`connLabel`, same-host-accounts SH3). */
 export function sourceLabel(loc: Pick<Loc, 'side' | 'server'>): string {
   if (loc.side === 'local') return t('sidebar.thisPc')
-  return loc.server ? loc.server.slice(loc.server.lastIndexOf('@') + 1) : t('explorer.remote')
+  return loc.server ? connLabel(loc.server) : t('explorer.remote')
 }
 
 /** 위치의 짧은 이름: 마지막 폴더 이름. 루트면 드라이브 이름이나 "{출처} 루트". */

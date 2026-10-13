@@ -120,6 +120,34 @@ describe('Sidebar — this PC and recent', () => {
     fireEvent.click(place('r2'))
     expect(activeTab().loc.path).toBe('C:\\work\\r2')
   })
+
+  it('tells same-named recent folders of two users on one host apart by their source line', async () => {
+    // covers: Test-1145
+    const RA = 'ra@127.0.0.1:2121'
+    const RB2 = 'rb2@127.0.0.1:2121'
+    useTabsStore.getState().openTab(localLoc(HOME))
+    useTabsStore.setState({
+      recent: [
+        { side: 'remote', path: '/inbox', server: RA },
+        { side: 'remote', path: '/inbox', server: RB2 },
+        localLoc('C:\\work\\inbox')
+      ]
+    })
+    render(<Sidebar />)
+    await flush()
+
+    const rowA = place(`inbox · ${RA}`)
+    const rowB = place(`inbox · ${RB2}`)
+    const local = place('inbox')
+    expect(rowA.getAttribute('title')).toBe(`${RA} · /inbox`)
+    expect(rowB.getAttribute('title')).toBe(`${RB2} · /inbox`)
+    expect(within(rowA).getByText(RA)).toBeTruthy()
+    expect(within(rowB).getByText(RB2)).toBeTruthy()
+    expect(local.textContent).toBe('inbox')
+
+    fireEvent.click(rowB)
+    expect(activeTab().loc).toEqual({ side: 'remote', path: '/inbox', server: RB2 })
+  })
 })
 
 describe('Sidebar — servers', () => {
@@ -237,13 +265,17 @@ describe('Sidebar — several connections', () => {
 
     // 저장 안 된 두 연결이 맨 위에 둘 다
     const rows = serverRows()
-    expect(rows[0]).toMatch(/^x\.example/)
-    expect(rows[1]).toMatch(/^w\.example/)
+    expect(rows[0]).toMatch(/^x@x\.example/)
+    expect(rows[1]).toMatch(/^w@w\.example/)
     expect(rows[2]).toMatch(/^Office/)
 
     // A 행의 해제 버튼은 A만 끊는다
-    expect(within(nav()).queryByRole('button', { name: 'Disconnect Archive' })).toBeNull()
-    fireEvent.click(within(nav()).getByRole('button', { name: 'Disconnect Office' }))
+    expect(
+      within(nav()).queryByRole('button', { name: 'Disconnect arc@archive.lan:21' })
+    ).toBeNull()
+    fireEvent.click(
+      within(nav()).getByRole('button', { name: 'Disconnect kim@ftp.office.lan:2121' })
+    )
     await flush()
     expect(invokeCalls(h.invoke, 'ftp:disconnect')).toEqual([[OFFICE_KEY]])
     expect(invokeCalls(h.invoke, 'ftp:connect')).toEqual([])
@@ -258,12 +290,55 @@ describe('Sidebar — several connections', () => {
     render(<Sidebar />)
     await flush()
     const rows = serverRows()
-    expect(rows[0]).toMatch(/^x\.example/)
-    expect(rows[1]).toMatch(/^y\.example/)
+    expect(rows[0]).toMatch(/^x@x\.example/)
+    expect(rows[1]).toMatch(/^y@y\.example/)
     expect(rows[2]).toMatch(/^Office/)
-    expect(serverRows().some((r) => r.startsWith('z.example'))).toBe(false)
+    expect(serverRows().some((r) => r.startsWith('z@z.example'))).toBe(false)
 
     act(() => setConnection('z@z.example:21', 'connecting'))
-    expect(serverRows().some((r) => r.startsWith('z.example'))).toBe(true)
+    expect(serverRows().some((r) => r.startsWith('z@z.example'))).toBe(true)
+  })
+
+  it('names a saved and an unsaved user on one host apart in the row, its title and its disconnect button', async () => {
+    // covers: Test-1144
+    const RA = 'ra@127.0.0.1:2121'
+    const RB2 = 'rb2@127.0.0.1:2121'
+    const LAB: FtpServer = {
+      id: 7,
+      name: '',
+      host: '127.0.0.1',
+      port: 2121,
+      username: 'ra',
+      hasPassword: true,
+      secure: false
+    }
+    useServerStore.setState({ servers: [LAB] })
+    setConnection(RA, 'connected')
+    setConnection(RB2, 'connected')
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
+
+    /** 상태 점이 있는 행 버튼마다 [이름, 둘째 줄, title] */
+    const rows = (): string[][] =>
+      within(nav())
+        .getAllByRole('button')
+        .filter((b) => b.querySelector('[data-status]'))
+        .map((b) => [
+          ...Array.from(b.querySelectorAll('.block')).map((el) => el.textContent ?? ''),
+          b.getAttribute('title') ?? ''
+        ])
+    expect(rows()).toEqual([
+      ['rb2@127.0.0.1', RB2, RB2],
+      ['127.0.0.1', RA, RA]
+    ])
+
+    expect(within(nav()).getByRole('button', { name: `Disconnect ${RA}` })).toBeTruthy()
+    fireEvent.click(within(nav()).getByRole('button', { name: `Disconnect ${RB2}` }))
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:disconnect')).toEqual([[RB2]])
+
+    act(() => setConnection('anonymous@h.lan:21', 'connected'))
+    expect(rows()[0][0]).toBe('h.lan')
   })
 })
