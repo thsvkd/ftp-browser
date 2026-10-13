@@ -13,7 +13,7 @@
   **"미결(권장안 적용)"** 표시는 결정 기록이 정하지 않아 권장안을 적용한 것이다. 사람이 뒤집으면 해당 항목만 바꾼다.
 - 기존 스펙: `docs/handoff/explorer-shelf.md`. 이 문서는 그 §2의 "사진만" 칩 결정과 §12 Test-772·798·828의 `photosOnly` 부분만 대체한다(§6).
 - 같이 쓰이는 병렬 스펙(이 문서는 아래 파일의 번호·결정을 건드리지 않는다): `explorer-menu-and-focus.md`(Test-846~869), `shelf-os-drop.md`(870~889),
-  `collapsible-sidebars.md`(890~919), `multi-connection.md`(960~1039), `split-view.md`(1040~1099).
+  `collapsible-sidebars.md`(890~919), `multi-connection.md`(960~1039), `split-view.md`(1040~1085, 1127, 1128).
 
 ---
 

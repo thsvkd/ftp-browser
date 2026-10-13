@@ -11,7 +11,7 @@
 
 테스트 번호: **Test-890 ~ Test-917**(예약 범위 890~919 중 918·919는 쓰지 않는다).
 같은 시기에 쓰는 다른 스펙: `explorer-menu-and-focus.md`(846~869), `shelf-os-drop.md`(870~889), `file-category-filter.md`(920~959),
-`multi-connection.md`(960~1039), `split-view.md`(1040~1099). 같은 파일을 만지는 곳은 §9의 표에 모았다.
+`multi-connection.md`(960~1039), `split-view.md`(1040~1085, 1127, 1128). 같은 파일을 만지는 곳은 §9의 표에 모았다.
 
 ---
 

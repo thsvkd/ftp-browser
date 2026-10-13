@@ -9,7 +9,7 @@ R1 결정은 `.omc/plans/explorer-v2-decisions.md`의 F절 마지막 항목과 G
 
 이웃 스펙(같은 날 병렬로 작성, 범위가 겹치지 않는다):
 
-- `docs/handoff/split-view.md`(Test-1040~1099) — 탭 드래그 분할 뷰. **이 문서의 §2 MC8 `viewerId` 계약과 MC11 탭별 게이트를 그대로 쓴다.** 분할 뷰 자체(패널·구분선·오버레이·활성 패널)는 이 문서의 범위가 아니다.
+- `docs/handoff/split-view.md`(Test-1040~1085, 1127, 1128) — 탭 드래그 분할 뷰. **이 문서의 §2 MC8 `viewerId` 계약과 MC11 탭별 게이트를 그대로 쓴다.** 분할 뷰 자체(패널·구분선·오버레이·활성 패널)는 이 문서의 범위가 아니다.
 - `docs/handoff/explorer-menu-and-focus.md`(Test-846~869), `docs/handoff/shelf-os-drop.md`(Test-870~889), `docs/handoff/collapsible-sidebars.md`(Test-890~919), `docs/handoff/file-category-filter.md`(Test-920~959) — 이 문서와 같은 파일(`Sidebar.tsx`·`Explorer.tsx`·`dnd.ts`)을 고칠 수 있다. 충돌은 §13의 병합 규칙을 따른다.
 
 ---
