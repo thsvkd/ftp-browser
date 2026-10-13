@@ -370,6 +370,93 @@ describe('PathBar — one line with a ⋯ menu', () => {
     expect(document.activeElement).toBe(find())
     expect(nav()).toBeTruthy()
   })
+
+  it('keeps focus in the find field when opening it moves it from the tools to the crumb slot', async () => {
+    // covers: Test-1180
+    // R3 실측 도구 폭(§12 (a)). 돋보기 36은 막대 400에 들어가지만 열린 칸 150은 들어가지 않는다(Test-1164).
+    const widths: Record<string, number> = {
+      back: 32,
+      up: 32,
+      more: 32,
+      forward: 32,
+      reload: 28,
+      filter: 38,
+      sort: 49,
+      view: 68,
+      newFolder: 32,
+      info: 32
+    }
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+      configurable: true,
+      get(this: HTMLElement): number {
+        if (!this.closest('[data-path-measure]')) return 1200
+        const id = this.dataset.measure ?? ''
+        if (id === 'search') return this.classList.contains('w-[150px]') ? 150 : 36
+        return widths[id] ?? 0
+      }
+    })
+    await renderAt(400)
+    const find = (): HTMLElement | null =>
+      screen.queryByRole('textbox', { name: en['filter.find'] })
+    const nav = (): HTMLElement | null =>
+      screen.queryByRole('navigation', { name: en['path.label'] })
+    const tools = (): HTMLElement | null => document.querySelector('[data-path-tools]')
+    const magnifier = (): HTMLElement => screen.getByRole('button', { name: en['filter.find'] })
+    expect(tools()?.contains(magnifier())).toBe(true)
+    expect(find()).toBeNull()
+
+    fireEvent.keyDown(listbox(), { key: 'f', ctrlKey: true })
+    expect(find()).toBeTruthy()
+    expect(document.activeElement).toBe(find())
+    expect(tools()?.contains(find())).toBe(false)
+    expect(nav()).toBeNull()
+
+    fireEvent.keyDown(find() as HTMLElement, { key: 'Escape' })
+    expect(find()).toBeNull()
+    expect(nav()).toBeTruthy()
+
+    fireEvent.click(magnifier())
+    expect(find()).toBeTruthy()
+    expect(document.activeElement).toBe(find())
+    expect(tools()?.contains(find())).toBe(false)
+    expect(nav()).toBeNull()
+  })
+
+  it('does not reopen the filter popover by itself when the filter folds or unfolds', async () => {
+    // covers: Test-1181
+    const dialog = (): HTMLElement | null =>
+      screen.queryByRole('dialog', { name: en['filter.menuLabel'] })
+    // 포인터 없이 막대 폭만 바꾼다(키보드로 사이드바·분할 전환, OS 창 크기). 정렬 키를 바꿔 다시 재게 한다.
+    const resizeTo = (width: number): void => {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+        configurable: true,
+        value: width
+      })
+      const { sort } = activeTab()
+      act(() =>
+        useTabsStore.getState().patchTab(activeTab().id, {
+          sort: { ...sort, key: sort.key === 'name' ? 'size' : 'name' }
+        })
+      )
+    }
+    await renderAt(300)
+    pickMore(en['filter.button'])
+    expect(dialog()).toBeTruthy()
+    resizeTo(1200)
+    expect(screen.queryByRole('button', { name: en['path.moreTools'] })).toBeNull()
+    expect(dialog()).toBeNull()
+    resizeTo(300)
+    expect(dialog()).toBeNull()
+
+    // 거꾸로: 트리거로 열고 접혔다가 다시 펴져도 저절로 열리지 않는다.
+    resizeTo(1200)
+    fireEvent.click(screen.getByRole('button', { name: en['filter.button'] }))
+    expect(dialog()).toBeTruthy()
+    resizeTo(300)
+    expect(dialog()).toBeNull()
+    resizeTo(1200)
+    expect(dialog()).toBeNull()
+  })
 })
 
 describe('PathBar — menus opened from the keyboard', () => {

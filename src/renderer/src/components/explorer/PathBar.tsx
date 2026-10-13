@@ -312,7 +312,8 @@ export function PathBar({
   const [moreEl, setMoreEl] = useState<HTMLButtonElement | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const [compact, setCompact] = useState(false)
-  const [fit, setFit] = useState<PathBarFit | null>(null)
+  // `forSearch`: 이 결과를 잰 찾기 모양(열린 칸이면 참). 지금 `showSearch`와 같아야 칸 자리가 확정이다.
+  const [fit, setFit] = useState<(PathBarFit & { forSearch: boolean }) | null>(null)
   // 접힌 필터의 팝오버(⋯ 아래)
   const [filterOpen, setFilterOpen] = useState(false)
   const [menu, setMenu] = useState<{
@@ -353,8 +354,8 @@ export function PathBar({
       if (!bar || !row) return
       const width = (id: string): number =>
         row.querySelector<HTMLElement>(`[data-measure="${id}"]`)?.offsetWidth ?? 0
-      setFit(
-        fitPathTools(
+      setFit({
+        ...fitPathTools(
           {
             bar: bar.clientWidth,
             back: width('back'),
@@ -366,8 +367,9 @@ export function PathBar({
             >
           },
           showSearch
-        )
-      )
+        ),
+        forSearch: showSearch
+      })
     }
   })
   useLayoutEffect(() => {
@@ -390,12 +392,14 @@ export function PathBar({
   }, [compact, filterCount, showSearch, sort.key, sort.dir, locale])
 
   // 찾기가 열리면 칸에 포커스를 준다. 칸은 다시 잰 뒤에야 그려질 수 있어 그려질 때까지 기다린다(X7).
+  // 열린 칸으로 다시 재기 전의 칸은 다음 그리기에서 조각 자리로 옮겨 가며 새로 그려질 수 있으므로(X6),
+  // 지금 모양으로 잰 결과가 나온 뒤에만 포커스한다.
   const focusSearch = useRef(false)
   useLayoutEffect(() => {
     focusSearch.current = searchOpen
   }, [searchOpen])
   useLayoutEffect(() => {
-    if (focusSearch.current && searchRef.current) {
+    if (focusSearch.current && searchRef.current && fit?.forSearch === showSearch) {
       focusSearch.current = false
       searchRef.current.focus()
     }
@@ -406,6 +410,8 @@ export function PathBar({
   const overflow = fit?.overflow ?? []
   const searchInSlot = !!fit?.searchInSlot && showSearch
   const filterFolded = !shown('filter')
+  // 접힌 필터의 열림은 접혀 있는 동안만 뜻이 있다. 펴지면 잊어야 다시 접힐 때 저절로 열리지 않는다.
+  if (!filterFolded && filterOpen) setFilterOpen(false)
   const moreOpen = menu?.label === t('path.moreTools')
 
   const sortItems: MenuItem[] = [

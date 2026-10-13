@@ -319,6 +319,8 @@ export function FileFilterMenu({
 }): React.JSX.Element {
   const t = useT()
   const [ownOpen, setOwnOpen] = useState(false)
+  // 접히면 트리거의 열림을 잊는다. 그러지 않으면 다시 펴질 때 저절로 열린다.
+  if (folded && ownOpen) setOwnOpen(false)
   const open = folded ? folded.open : ownOpen
   const setOpen = folded ? folded.onOpenChange : setOwnOpen
   const [placement, setPlacement] = useState<MenuPlacement | null>(null)
