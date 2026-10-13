@@ -9,6 +9,7 @@ import { pipeline } from 'stream/promises'
 import { FTPError, type Client } from 'basic-ftp'
 import { LOGIN_HOLD_MS, MAX_LOGIN_FAILURES, TransferQueue, jobError } from './TransferQueue'
 import { planSegments, LAN_RTT_MS } from './segmentedDownload'
+import { RelayError } from './RelayLane'
 import {
   LIMIT,
   MAX_PROBE_COOLDOWN_MS,
@@ -3540,6 +3541,10 @@ describe('TransferQueue', () => {
       const other = (await queue.borrow())!
       expect(other.done(new Error('boom'))).toBe(false)
       expect(pool.discard).toHaveBeenCalledWith(other.client)
+      // 서버 간 전송의 다른 쪽이 받는 RelayError는 문구가 같아도 이 서버의 한도 응답이 아니다
+      const peer = (await queue.borrow())!
+      expect(peer.done(new RelayError('dest', e4))).toBe(false)
+      expect(pool.discard).toHaveBeenCalledWith(peer.client)
       const ok = (await queue.borrow())!
       expect(ok.done()).toBe(false)
       expect(pool.release).toHaveBeenCalledWith(ok.client)

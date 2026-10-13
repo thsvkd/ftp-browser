@@ -147,7 +147,10 @@ const WRAPPED_LIMIT_REPLY_RE = /Last error response was 'FTPError: 42[15] /
 export function isLimitReply(err: unknown): boolean {
   if (!(err instanceof Error)) return false
   const { code } = err as { code?: unknown }
-  return code === 425 || code === 421 || WRAPPED_LIMIT_REPLY_RE.test(err.message)
+  if (code === 425 || code === 421) return true
+  // 감싼 응답은 basic-ftp가 만든 평범한 Error다. 그 문구를 옮겨 담은 하위 클래스(서버 간 전송의 다른 쪽이 받는
+  // RelayError)는 그 서버의 응답이 아니다
+  return Object.getPrototypeOf(err) === Error.prototype && WRAPPED_LIMIT_REPLY_RE.test(err.message)
 }
 
 /**
