@@ -12,7 +12,7 @@ import {
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
-import { optId } from '@renderer/lib/explorerLayout'
+import { ROW, optId } from '@renderer/lib/explorerLayout'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
 import { gridLayout } from '@renderer/lib/gridGeometry'
 import { useConfirmStore } from '@renderer/stores/useConfirmStore'
@@ -203,7 +203,7 @@ describe('Explorer — lightbox', () => {
 })
 
 describe('Explorer — shelf and type-ahead', () => {
-  it('puts the selection (or the focused item) on the shelf with Shift+S, and plain s types ahead', async () => {
+  it('puts the selection on the shelf with Shift+S (nothing without one), and plain s types ahead', async () => {
     // covers: Test-794
     await remoteFiles(['apple.jpg', 'tree.jpg', '나무.jpg'])
     const shelf = (): string[] =>
@@ -216,12 +216,11 @@ describe('Explorer — shelf and type-ahead', () => {
     key('S', { shiftKey: true })
     expect(shelf()).toEqual(['apple.jpg', 'tree.jpg'])
 
-    // 선택이 없으면 포커스 항목을 담는다.
+    // 선택이 없으면 아무것도 담지 않는다(선택 = 포커스).
     key('Escape')
     expect(selectedNames()).toEqual([])
-    act(() => useTabsStore.getState().patchTab(activeTab().id, { focus: pathOf('나무.jpg') }))
     key('S', { shiftKey: true })
-    expect(shelf()).toEqual(['apple.jpg', 'tree.jpg', '나무.jpg'])
+    expect(shelf()).toEqual(['apple.jpg', 'tree.jpg'])
 
     act(() => useShelfStore.getState().clear())
     key('Home')
@@ -859,5 +858,331 @@ describe('Explorer — local rename and delete (migrated)', () => {
     expect(toastError).toHaveBeenCalledWith('Failed to delete', {
       description: 'channel not allowed'
     })
+  })
+})
+
+// ---------- 선택 = 포커스(explorer-menu-and-focus F1~F10) ----------
+
+const activeId = (): string | null => listbox().getAttribute('aria-activedescendant')
+const selectionOf = (): { sel: string[]; anchor: string | null; focus: string | null } => {
+  const { sel, anchor, focus } = activeTab()
+  return { sel, anchor, focus }
+}
+const CLEARED = { sel: [], anchor: null, focus: null }
+const noneSelected = (): boolean =>
+  screen.getAllByRole('option').every((o) => o.getAttribute('aria-selected') === 'false')
+/** 항목 밖(안쪽 컨테이너)의 왼쪽 mousedown. 마퀴의 window 리스너도 mouseup으로 걷는다. */
+const pressEmpty = (init: MouseEventInit = {}): void => {
+  fireEvent.mouseDown(option('a.txt').parentElement as HTMLElement, init)
+  fireEvent.mouseUp(window)
+}
+const FIVE = ['a.txt', 'b.txt', 'c.txt', 'd.txt', 'e.txt']
+const p = (name: string): string => `${DIR}/${name}`
+
+describe('Explorer — selection is the focus', () => {
+  it('releases the focus with the selection even when the delete fails', async () => {
+    // covers: Test-856
+    h = setupExplorer({
+      local: { [LDIR]: [local(LDIR, 'a.txt'), local(LDIR, 'd', { dir: true })] }
+    })
+    await renderExplorer(localLoc(LDIR))
+    const failThenCheck = async (): Promise<void> => {
+      fireEvent.click(option('d'))
+      expect(activeId()).toBe(optId(pathOf('d')))
+      key('Delete')
+      await flush()
+      expect(toastError).toHaveBeenCalledWith('Failed to delete', expect.anything())
+      expect(selectionOf()).toEqual(CLEARED)
+      expect(option('d')).toBeTruthy()
+      expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+      expect(noneSelected()).toBe(true)
+      key('Enter')
+      await flush()
+      expect(activeTab().loc.path).toBe(LDIR)
+      key(' ')
+      expect(screen.queryByRole('dialog')).toBeNull()
+      key('F2')
+      expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    }
+    h.handlers['local:deleteBatch'] = () => ({ success: false, error: 'permission denied' })
+    await failThenCheck()
+    toastError.mockClear()
+    h.handlers['local:deleteBatch'] = () => Promise.reject(new Error('channel not allowed'))
+    await failThenCheck()
+  })
+
+  it.each(['grid', 'list'] as const)(
+    'clears the selection, focus and anchor on a plain click on empty space (%s)',
+    async (view) => {
+      // covers: Test-857
+      await remoteFiles(FIVE, {
+        view,
+        sel: [p('b.txt'), p('c.txt')],
+        anchor: p('b.txt'),
+        focus: p('c.txt')
+      })
+      expect(activeId()).toBe(optId(p('c.txt')))
+      fireEvent.mouseDown(option('e.txt').parentElement as HTMLElement)
+      fireEvent.mouseUp(window)
+      expect(selectionOf()).toEqual(CLEARED)
+      expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+      expect(noneSelected()).toBe(true)
+    }
+  )
+
+  it('focuses the last marquee item, keeps the selection on modified empty presses and clears on a plain one', async () => {
+    // covers: Test-858
+    await remoteFiles(FIVE, { view: 'list' })
+    const box = option('a.txt').parentElement as HTMLElement
+    fireEvent.mouseDown(box, { clientX: 40, clientY: FIVE.length * ROW + 10 })
+    fireEvent.mouseMove(window, { clientX: 60, clientY: ROW + 10 })
+    expect(selectedNames()).toEqual(['b.txt', 'c.txt', 'd.txt', 'e.txt'])
+    expect(activeTab().focus).toBe(activeTab().sel.at(-1))
+    expect(activeId()).toBe(optId(activeTab().sel.at(-1) as string))
+    fireEvent.mouseUp(window)
+
+    const before = selectionOf()
+    for (const mod of [{ ctrlKey: true }, { shiftKey: true }]) {
+      pressEmpty(mod)
+      expect(selectionOf()).toEqual(before)
+    }
+    pressEmpty()
+    expect(selectionOf()).toEqual(CLEARED)
+  })
+
+  it('moves the selection with Ctrl or Cmd plus an arrow and adds a range with Ctrl+Shift', async () => {
+    // covers: Test-859
+    const names = Array.from({ length: 14 }, (_, i) => `f${String(i).padStart(2, '0')}.txt`)
+    await remoteFiles(names)
+    key('ArrowRight')
+    expect(selectedNames()).toEqual(['f00.txt'])
+    key('ArrowRight', { ctrlKey: true })
+    expect(selectedNames()).toEqual(['f01.txt'])
+    expect(activeId()).toBe(optId(p('f01.txt')))
+    key('ArrowLeft', { metaKey: true })
+    expect(selectedNames()).toEqual(['f00.txt'])
+    expect(activeId()).toBe(optId(p('f00.txt')))
+    key('ArrowRight', { metaKey: true })
+    expect(selectedNames()).toEqual(['f01.txt'])
+    key('ArrowRight', { ctrlKey: true, shiftKey: true })
+    expect(selectedNames()).toEqual(['f01.txt', 'f02.txt'])
+  })
+
+  it('clears selection, focus and anchor on Esc before it clears the find query', async () => {
+    // covers: Test-860
+    await remoteFiles(['f0.txt', 'f1.txt', 'f2.txt'])
+    fireEvent.click(option('f0.txt'))
+    fireEvent.click(option('f1.txt'), { ctrlKey: true })
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'f' }))
+    key('Escape')
+    expect(selectionOf()).toEqual(CLEARED)
+    expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+    expect(activeTab().query).toBe('f')
+    key('Escape')
+    expect(activeTab().query).toBe('')
+    expect(fireEvent.keyDown(listbox(), { key: 'Escape' })).toBe(true)
+  })
+
+  it('does not fall back to the first item when nothing is selected', async () => {
+    // covers: Test-861
+    h = setupExplorer({
+      remote: { [DIR]: [ftp('sub', { dir: true }), ftp('a.jpg')], [`${DIR}/sub`]: [] }
+    })
+    await renderExplorer(remoteLoc(DIR))
+    useSettingsStore.setState({ confirmBeforeDelete: true })
+    listbox().focus()
+    expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+    for (const o of screen.getAllByRole('option')) {
+      expect(o.getAttribute('aria-selected')).toBe('false')
+      for (const el of [o, ...o.querySelectorAll('*')])
+        expect(el.getAttribute('class') ?? '').not.toMatch(
+          /(^|\s)(ring-|outline|bg-\[var\(--acw\)\])/
+        )
+    }
+    key('Enter')
+    await flush()
+    expect(activeTab().loc.path).toBe(DIR)
+    key(' ')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    key('F2')
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    key('Delete')
+    await flush()
+    expect(useConfirmStore.getState().request).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toHaveLength(0)
+    key('S', { shiftKey: true })
+    expect(useShelfStore.getState().items).toEqual([])
+    key('ContextMenu')
+    expect(menu()).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: en['menu.open'] })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: en['menu.rename'] })).toBeNull()
+    expect(
+      screen.getByRole('menuitem', { name: new RegExp(en['explorer.newFolder']) })
+    ).toBeTruthy()
+  })
+
+  it('points aria-activedescendant at the selected item that keys act on', async () => {
+    // covers: Test-862
+    await remoteFiles(FIVE, { view: 'list' })
+    // ① 클릭
+    fireEvent.click(option('b.txt'))
+    expect(activeId()).toBe(optId(p('b.txt')))
+    expect(document.getElementById(activeId() as string)?.getAttribute('aria-selected')).toBe(
+      'true'
+    )
+    // ② Shift 범위의 끝 항목(focus)
+    key('ArrowDown', { shiftKey: true })
+    expect(activeId()).toBe(optId(p('c.txt')))
+    // ③ Ctrl+A는 focus를 그대로 둔다. focus가 없었다면 속성이 없다.
+    key('a', { ctrlKey: true })
+    expect(activeId()).toBe(optId(p('c.txt')))
+    key('Escape')
+    key('a', { ctrlKey: true })
+    expect(selectedNames()).toEqual(FIVE)
+    expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+    // ④ 찾기로 숨으면 속성이 없다(items[0]로 대체하지 않는다).
+    fireEvent.click(option('b.txt'))
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'a' }))
+    expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+
+    // ⑥ 숨은 focus + 모두 선택(Ctrl+A, 빈 곳 메뉴의 "모두 선택")
+    const hiddenThenSelectAll = async (selectAll: () => void): Promise<void> => {
+      act(() => useTabsStore.getState().patchTab(activeTab().id, { query: '' }))
+      fireEvent.click(option('b.txt'))
+      expect(activeTab().focus).toBe(p('b.txt'))
+      act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'p' }))
+      selectAll()
+      const visible = screen.getAllByRole('option')
+      expect(activeTab().sel).toEqual(visible.map((o) => o.getAttribute('data-path')))
+      expect(activeTab().focus).toBeNull()
+      expect(listbox().hasAttribute('aria-activedescendant')).toBe(false)
+      expect(visible.every((o) => o.getAttribute('aria-selected') === 'true')).toBe(true)
+      key('Enter')
+      await flush()
+      expect(screen.queryByRole('dialog')).toBeNull()
+    }
+    cleanup()
+    h.restore()
+    await remoteFiles(['pa.jpg', 'b.txt', 'pc.jpg'], { view: 'list' })
+    await hiddenThenSelectAll(() => key('a', { ctrlKey: true }))
+    await hiddenThenSelectAll(() => {
+      key('ContextMenu')
+      fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(en['menu.selectAll']) }))
+    })
+
+    // ⑤ 라이트박스에서 넘긴 항목(Test-793 흐름)
+    cleanup()
+    h.restore()
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg'), ftp('b.jpg')] } })
+    await renderExplorer(remoteLoc(DIR))
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: true,
+      data: 'data:image/png;base64,AA=='
+    })
+    key('Home')
+    key(' ')
+    await flush()
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'ArrowRight' })
+    await flush()
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    expect(activeId()).toBe(optId(p('b.jpg')))
+    expect(document.getElementById(activeId() as string)?.getAttribute('aria-selected')).toBe(
+      'true'
+    )
+  })
+
+  it.each(['grid', 'list'] as const)(
+    'draws only idle, hover and focus item states (%s)',
+    async (view) => {
+      // covers: Test-863
+      const four = ['a.txt', 'b.txt', 'c.txt', 'd.txt']
+      await remoteFiles(four, {
+        view,
+        sel: [p('b.txt'), p('c.txt')],
+        anchor: p('b.txt'),
+        focus: p('c.txt')
+      })
+      listbox().focus()
+      const cls = (n: string): string => option(n).className
+      for (const n of ['a.txt', 'd.txt']) {
+        expect(cls(n)).not.toContain('bg-[var(--acw)]')
+        expect(cls(n)).toContain('hover:bg-[var(--hv)]')
+      }
+      for (const n of ['b.txt', 'c.txt']) {
+        expect(cls(n)).toContain('bg-[var(--acw)]')
+        expect(cls(n)).not.toContain('hover:bg-')
+      }
+      expect(cls('b.txt')).toBe(cls('c.txt'))
+      const before = four.map(cls)
+      fireEvent.blur(listbox())
+      screen.getByRole('textbox', { name: en['filter.find'] }).focus()
+      expect(four.map(cls)).toEqual(before)
+      for (const o of screen.getAllByRole('option')) {
+        expect(o.outerHTML).not.toContain('--selin')
+        expect(o.outerHTML).not.toContain('ring-focus')
+        expect(o.className).not.toMatch(/(^|\s)-?outline-/)
+      }
+      if (view === 'grid')
+        for (const n of ['b.txt', 'c.txt']) {
+          const box = option(n).firstElementChild as HTMLElement
+          expect(box.classList.contains('ring-2')).toBe(true)
+          expect(box.classList.contains('ring-[var(--ac)]')).toBe(true)
+        }
+    }
+  )
+
+  it('toggles the focused item with Ctrl+Space and moves the focus to what remains', async () => {
+    // covers: Test-865
+    await remoteFiles(['a.txt', 'b.txt', 'c.txt', 'd.txt'])
+    fireEvent.click(option('b.txt'))
+    key(' ', { ctrlKey: true })
+    expect(activeTab().sel).toEqual([])
+    expect(activeTab().focus).toBeNull()
+    fireEvent.click(option('b.txt'))
+    fireEvent.click(option('c.txt'), { ctrlKey: true })
+    expect(activeTab().focus).toBe(p('c.txt'))
+    key(' ', { ctrlKey: true })
+    expect(selectedNames()).toEqual(['b.txt'])
+    expect(activeTab().focus).toBe(p('b.txt'))
+    expect(activeId()).toBe(optId(p('b.txt')))
+    key('Escape')
+    key(' ', { ctrlKey: true })
+    expect(selectionOf()).toEqual(CLEARED)
+  })
+
+  it('applies the same rule to the tile check circle', async () => {
+    // covers: Test-866
+    await remoteFiles(['a.txt', 'b.txt', 'c.txt'])
+    fireEvent.click(option('a.txt'))
+    const check = option('b.txt').querySelector('button') as HTMLElement
+    fireEvent.click(check)
+    expect(selectedNames()).toEqual(['a.txt', 'b.txt'])
+    expect(activeTab().focus).toBe(p('b.txt'))
+    fireEvent.click(check)
+    expect(selectedNames()).toEqual(['a.txt'])
+    expect(activeTab().focus).toBe(p('a.txt'))
+  })
+
+  it('starts keyboard moves afresh after the selection is cleared', async () => {
+    // covers: Test-867
+    await remoteFiles(FIVE)
+    const twoThenClear = (): void => {
+      fireEvent.click(option('c.txt'))
+      fireEvent.click(option('d.txt'), { ctrlKey: true })
+      pressEmpty()
+      expect(selectionOf()).toEqual(CLEARED)
+    }
+    twoThenClear()
+    key('ArrowDown')
+    expect(selectedNames()).toEqual(['a.txt'])
+    twoThenClear()
+    key('End')
+    expect(selectedNames()).toEqual(['e.txt'])
+    twoThenClear()
+    key('ArrowDown', { shiftKey: true })
+    expect(selectedNames()).toEqual(['a.txt'])
+    twoThenClear()
+    fireEvent.click(option('d.txt'), { shiftKey: true })
+    expect(selectedNames()).toEqual(['d.txt'])
   })
 })

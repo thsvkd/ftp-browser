@@ -5,7 +5,7 @@
 /*
  * Shelf 토큰(랩 V2). 컴포넌트는 `bg-[var(--sf)]`처럼 쓴다. 테마는 OS를 따른다(H3).
  * --bg 창 바탕 · --sf 면 · --sb 사이드바 · --bd/--bd2 테두리 · --tx 글자 · --mu 흐린 글자 · --hv 올림
- * --selin 포커스 없는 선택 · --sh/--shw/--shx/--shink 선반 · --dg/--dgw 위험 · --ok 성공
+ * --sh/--shw/--shx/--shink 선반 · --dg/--dgw 위험 · --ok 성공
  * --sk/--sk2 스켈레톤 · --tile 타일 바탕 · --local 내 PC 배지 · --ac/--acw/--acx 강조
  */
 :root {
@@ -17,7 +17,6 @@
   --tx: #13201e;
   --mu: #5e6b69;
   --hv: rgba(19, 32, 30, 0.05);
-  --selin: #e2e7e5;
   --sh: #e9a23b;
   --shw: #fdf1dc;
   --shx: #7a4a00;
@@ -47,7 +46,6 @@
     --tx: #e4ecea;
     --mu: #8fa19e;
     --hv: rgba(228, 236, 234, 0.05);
-    --selin: #232c2b;
     --sh: #f2b95a;
     --shw: #33270f;
     --shx: #f2b95a;
@@ -119,11 +117,6 @@
 }
 .tnum {
   font-variant-numeric: tabular-nums;
-}
-.ring-focus {
-  box-shadow:
-    0 0 0 2px var(--sf),
-    0 0 0 4px var(--ac);
 }
 .scroll {
   scrollbar-width: thin;
@@ -255,8 +248,5 @@
   [aria-selected='true'] {
     outline: 2px solid Highlight;
     outline-offset: -2px;
-  }
-  .ring-focus {
-    outline: 2px solid CanvasText;
   }
 }

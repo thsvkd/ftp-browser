@@ -7,11 +7,8 @@ import { endDrag, useDropTarget, type DropState } from './dnd'
 
 export interface ItemProps {
   entry: ExplorerEntry
+  /** 선택됨 = 포커스 상태(항목의 시각 상태는 idle·hover·focus 셋) */
   selected: boolean
-  /** 포커스 커서가 이 항목에 있다 */
-  cursor: boolean
-  /** 목록이 포커스를 가졌다(아니면 선택은 회색, 기준선 #7) */
-  listFocused: boolean
   shelved: boolean
   renaming: boolean
   onSelect: (e: MouseEvent, entry: ExplorerEntry) => void

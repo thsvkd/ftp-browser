@@ -34,9 +34,12 @@ import { flyTo, sourcesFor } from '@renderer/lib/flyTo'
 import { gridLayout } from '@renderer/lib/gridGeometry'
 import { currentPlatform } from '@renderer/lib/platform'
 import {
+  clearSelection,
   clickSelect,
   moveFocus,
   navIndex,
+  selectAll,
+  selectMany,
   toggleSelect,
   type SelectionState
 } from '@renderer/lib/selectionModel'
@@ -172,7 +175,8 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
   const selSet = useMemo(() => new Set(tab.sel), [tab.sel])
   const selected = useMemo(() => items.filter((e) => selSet.has(e.path)), [items, selSet])
   const shelved = useMemo(() => new Set(shelfKeys.split('\n')), [shelfKeys])
-  const cursor = tab.focus && indexOf.has(tab.focus) ? tab.focus : (items[0]?.path ?? null)
+  // 선택 안의 작업 대상 항목(선택 = 포커스). 숨겨졌으면 없다. 첫 항목으로 대체하지 않는다.
+  const focusPath = tab.focus && indexOf.has(tab.focus) ? tab.focus : null
 
   // ---------- 치수 ----------
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -283,7 +287,6 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
   const [lightbox, setLightbox] = useState<number | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [editingPath, setEditingPath] = useState(false)
-  const [listFocused, setListFocused] = useState(false)
   const refocus = (): void => scrollRef.current?.focus({ preventScroll: true })
 
   // ---------- 선택 ----------
@@ -294,8 +297,8 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     patch(moveFocus(selection, paths, i, mods))
     ensureVisible(i)
   }
-  const targetOf = (cur: ExplorerEntry | null): ExplorerEntry[] =>
-    selected.length ? selected : cur ? [cur] : []
+  // 선택이 없으면 focus도 없다(I2): 대상은 선택뿐이다.
+  const targetOf = (): ExplorerEntry[] => selected
 
   // ---------- 동작 ----------
   const locOf = (e: ExplorerEntry): Loc => ({
@@ -336,7 +339,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
       toast.error(t('toast.deleteFailed'), { description: errorText(err) })
     } finally {
       unshelve(entries)
-      patch({ sel: [], anchor: null })
+      patch(clearSelection())
       reload()
       refocus()
     }
@@ -499,7 +502,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
       label: t('menu.selectAll'),
       icon: Check,
       shortcut: 'Ctrl+A',
-      onSelect: () => patch({ sel: paths })
+      onSelect: () => patch(selectAll(selection, paths))
     },
     'sep',
     {
@@ -519,7 +522,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     const el = cur && document.querySelector(`[data-path="${CSS.escape(cur.path)}"]`)
     const r = (el ?? scrollRef.current)?.getBoundingClientRect()
     if (!r) return
-    setMenu({ x: r.left + 24, y: r.top + Math.min(r.height, 40), target: targetOf(cur) })
+    setMenu({ x: r.left + 24, y: r.top + Math.min(r.height, 40), target: targetOf() })
   }
 
   // ---------- 키보드 ----------
@@ -583,7 +586,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
         return
       case 'Delete':
         handled()
-        if (interactive) void askDelete(targetOf(cur))
+        if (interactive) void askDelete(targetOf())
         return
       case 'F5':
         handled()
@@ -592,7 +595,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
       case 'Escape':
         if (tab.sel.length) {
           handled()
-          patch({ sel: [], anchor: null })
+          patch(clearSelection())
         } else if (tab.query) {
           handled()
           patch({ query: '' })
@@ -611,7 +614,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     if (ctrl) {
       const zoom = (d: number) => (): void => useSettingsStore.getState().adjustTileSize(d)
       const run: Record<string, (() => void) | undefined> = {
-        a: () => patch({ sel: paths }),
+        a: () => patch(selectAll(selection, paths)),
         r: reload,
         l: () => setEditingPath(true),
         f: () => {
@@ -635,7 +638,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     // Shift+S만 선반 담기다(D29). 그 밖의 글자는 입력해서 고르기(한글 초성 포함). Space·\는 넣지 않는다.
     if (e.shiftKey && e.key === 'S') {
       handled()
-      shelve(targetOf(cur))
+      shelve(targetOf())
       return
     }
     if (e.key === '\\') return
@@ -648,8 +651,6 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
   const itemProps = (entry: ExplorerEntry): ItemProps => ({
     entry,
     selected: selSet.has(entry.path),
-    cursor: cursor === entry.path,
-    listFocused,
     shelved: shelved.has(locKey(entry)),
     renaming: renaming === entry.path,
     onSelect: (e, it) => patch(clickSelect(selection, paths, it.path, e, currentPlatform())),
@@ -716,13 +717,11 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
               role: 'listbox',
               'aria-multiselectable': true,
               'aria-label': t('explorer.items', { location: locLabel(loc) }),
-              'aria-activedescendant': cursor ? optId(cursor) : undefined
+              'aria-activedescendant': focusPath ? optId(focusPath) : undefined
             }
           : { 'aria-label': t('explorer.items', { location: locLabel(loc) }) })}
         aria-busy={busy}
         onKeyDown={onKeyDown}
-        onFocus={() => setListFocused(true)}
-        onBlur={(e) => !e.currentTarget.contains(e.relatedTarget) && setListFocused(false)}
         onScroll={(e) => {
           lastTop.current = e.currentTarget.scrollTop
         }}
@@ -759,7 +758,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
                 layout={layout}
                 remote={remote && gate === 'live'}
                 itemProps={itemProps}
-                setSelection={(sel) => patch({ sel, focus: sel.at(-1) ?? tab.focus })}
+                setSelection={(sel) => patch(selectMany(selection, sel))}
                 getSelection={() =>
                   new Set(useTabsStore.getState().tabs.find((x) => x.id === tab.id)?.sel)
                 }
@@ -769,7 +768,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
                 items={items}
                 scrollRef={scrollRef}
                 itemProps={itemProps}
-                setSelection={(sel) => patch({ sel, focus: sel.at(-1) ?? tab.focus })}
+                setSelection={(sel) => patch(selectMany(selection, sel))}
                 getSelection={() =>
                   new Set(useTabsStore.getState().tabs.find((x) => x.id === tab.id)?.sel)
                 }

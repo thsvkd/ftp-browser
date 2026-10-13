@@ -19,12 +19,7 @@ export function Row(p: ItemProps & { top: number }): React.JSX.Element {
       className={cn(
         'absolute inset-x-2 grid cursor-default select-none items-center gap-3 rounded-lg px-2.5',
         LIST_COLS,
-        p.selected
-          ? p.listFocused
-            ? 'bg-[var(--acw)]'
-            : 'bg-[var(--selin)]'
-          : 'hover:bg-[var(--hv)]',
-        p.cursor && p.listFocused && 'outline outline-2 -outline-offset-2 outline-[var(--ac)]',
+        p.selected ? 'bg-[var(--acw)]' : 'hover:bg-[var(--hv)]',
         dropOver &&
           (drop.valid ? 'bg-[var(--acw)] ring-2 ring-[var(--ac)]' : 'ring-2 ring-[var(--dg)]')
       )}

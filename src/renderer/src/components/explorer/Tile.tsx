@@ -22,19 +22,14 @@ export function Tile(
       title={entry.name}
       className={cn(
         'group absolute flex cursor-default select-none flex-col rounded-[12px] p-1 transition-colors',
-        p.selected
-          ? p.listFocused
-            ? 'bg-[var(--acw)]'
-            : 'bg-[var(--selin)]'
-          : 'hover:bg-[var(--hv)]',
-        p.cursor && p.listFocused && 'ring-focus'
+        p.selected ? 'bg-[var(--acw)]' : 'hover:bg-[var(--hv)]'
       )}
       style={{ left: p.x, top: p.y, width: p.width, height: p.imageHeight + LABEL_H }}
     >
       <div
         className={cn(
           'relative overflow-hidden rounded-[10px] bg-[var(--tile)]',
-          p.selected && p.listFocused && 'ring-2 ring-[var(--ac)]',
+          p.selected && 'ring-2 ring-[var(--ac)]',
           dropOver && (drop.valid ? 'ring-[3px] ring-[var(--ac)]' : 'ring-2 ring-[var(--dg)]')
         )}
         style={{ height: p.imageHeight - 8 }}
@@ -59,8 +54,7 @@ export function Tile(
             'absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 transition-opacity',
             p.selected
               ? 'border-[var(--ac)] bg-[var(--ac)] text-[var(--acx)] opacity-100'
-              : 'border-white/90 bg-black/25 text-transparent opacity-0 hover:bg-black/40 group-hover:opacity-100',
-            p.cursor && p.listFocused && 'opacity-100'
+              : 'border-white/90 bg-black/25 text-transparent opacity-0 hover:bg-black/40 group-hover:opacity-100'
           )}
         >
           <Check className="h-3.5 w-3.5" strokeWidth={3} />
