@@ -144,6 +144,37 @@ describe('useTabsStore navigation', () => {
     expect(tabs().find((t) => t.id === b)!.sel).toEqual(['/y'])
   })
 
+  it('keeps the type filter per tab: empty on a new tab, not inherited, and kept across navigation', () => {
+    // covers: Test-937
+    const a = active().id
+    expect(active().filter).toEqual({ categories: [], extensions: [], noExtension: false })
+    expect(active()).not.toHaveProperty('photosOnly')
+
+    const filter = { categories: ['image'], extensions: ['log'], noExtension: true }
+    const s = useTabsStore.getState()
+    const b = s.openTab(remote('/'), false)
+    s.patchTab(a, { filter })
+    expect(tabs().find((t) => t.id === b)!.filter).toEqual({
+      categories: [],
+      extensions: [],
+      noExtension: false
+    })
+    const c = s.openTab(remote('/c'))
+    expect(tabs().find((t) => t.id === c)!.filter.categories).toEqual([])
+
+    s.activate(a)
+    s.patchTab(a, { query: 'x' })
+    s.navigate({ side: 'local', path: 'C:\\a' })
+    expect(active().query).toBe('')
+    expect(active().filter).toBe(filter)
+    s.goBack()
+    expect(active().filter).toBe(filter)
+    s.goForward()
+    expect(active().filter).toBe(filter)
+    s.goUp()
+    expect(active().filter).toBe(filter)
+  })
+
   it('adoptRemote reuses the active or first remote tab, else opens one, and activates it', () => {
     // covers: Test-785
     const s = useTabsStore.getState()

@@ -4,7 +4,7 @@ import {
   ArrowUp,
   FolderOpen,
   FolderPlus,
-  ImageIcon,
+  ListFilter,
   Loader,
   PackageCheck,
   Plug,
@@ -231,19 +231,35 @@ export function StaleBanner({ onReconnect }: { onReconnect: () => void }): React
   )
 }
 
-/** 비어 보이는 폴더(기준선 #18): 찾기 일치 없음 / 사진 필터로 숨음 / 정말 빈 폴더를 구별한다. */
+/** 비어 보이는 폴더(기준선 #18): 종류 필터로 숨음 / 찾기 일치 없음 / 정말 빈 폴더를 구별한다. */
 export function EmptyPanel(p: {
   query: string
   queryCount: number
-  photosCount: number
+  /** 찾기를 통과했지만 파일 종류 필터로 빠진 수 */
+  filterCount: number
+  /** 필터 요약(`이미지, RAW`) */
+  filterText: string
   shelfCount: number
   canWrite: boolean
   onClearQuery: () => void
-  onShowAll: () => void
+  onClearFilter: () => void
   onNewFolder: () => void
   onDropShelf: () => void
 }): React.JSX.Element {
   const t = useT()
+  // 필터를 풀면 항목이 나오는 쪽을 먼저 말한다(E21).
+  if (p.filterCount)
+    return (
+      <Panel
+        icon={ListFilter}
+        title={t('filter.emptyFor', { what: p.filterText })}
+        actions={
+          <button onClick={p.onClearFilter} className={btn('secondary')}>
+            {t('filter.clearType')}
+          </button>
+        }
+      />
+    )
   if (p.query && p.queryCount)
     return (
       <Panel
@@ -252,18 +268,6 @@ export function EmptyPanel(p: {
         actions={
           <button onClick={p.onClearQuery} className={btn('secondary')}>
             <X className="h-4 w-4" aria-hidden /> {t('filter.clear')}
-          </button>
-        }
-      />
-    )
-  if (p.photosCount)
-    return (
-      <Panel
-        icon={ImageIcon}
-        title={t('explorer.hiddenByPhotos', { count: p.photosCount })}
-        actions={
-          <button onClick={p.onShowAll} className={btn('secondary')}>
-            {t('explorer.showAll')}
           </button>
         }
       />

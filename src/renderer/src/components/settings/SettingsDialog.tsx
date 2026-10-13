@@ -7,6 +7,7 @@ import { TILE_MAX, TILE_MIN, TILE_STEP } from '@renderer/lib/explorerLayout'
 import { formatBytes } from '@renderer/lib/utils'
 import { installUpdate } from '@renderer/lib/installUpdate'
 import { LOCALES, useLocale, useT, type LanguageSetting } from '@renderer/i18n'
+import { FileCategorySettings } from './FileCategorySettings'
 import type { IpcResult } from '@shared/types/ipc'
 import type { UpdateState } from '@shared/types/update'
 import type { McpState } from '@shared/types/mcp'
@@ -266,6 +267,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
               />
             </label>
           </section>
+
+          <FileCategorySettings />
 
           {/* Cache */}
           <section>

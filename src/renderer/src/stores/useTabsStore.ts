@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { DEFAULT_SORT, type SortSpec } from '@renderer/lib/entryList'
 import { joinPath, parentPath, sameLoc, type Loc } from '@renderer/lib/explorerEntry'
+import { EMPTY_FILTER, type TabFilter } from '@renderer/lib/fileCategories'
 import { useSettingsStore } from './useSettingsStore'
 
 /** 탭 하나: 어느 쪽의 어느 폴더와, 그 탭만의 기록·선택·보기. 선택·포커스는 경로 기준이다. */
@@ -17,7 +18,8 @@ export interface Tab {
   view: 'grid' | 'list'
   sort: SortSpec
   query: string
-  photosOnly: boolean
+  /** 파일 종류 필터(카테고리·확장자). 폴더를 옮겨도 유지된다. 통째로 교체하고 제자리 수정하지 않는다. */
+  filter: TabFilter
 }
 
 const MAX_BACK = 50
@@ -67,7 +69,7 @@ function newTab(loc: Loc, view: Tab['view']): Tab {
     view,
     sort: { ...DEFAULT_SORT },
     query: '',
-    photosOnly: false
+    filter: EMPTY_FILTER
   }
 }
 

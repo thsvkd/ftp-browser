@@ -8,7 +8,6 @@ import {
   ChevronRight,
   FolderOpen,
   FolderPlus,
-  ImageIcon,
   Info,
   LayoutGrid,
   List,
@@ -19,7 +18,7 @@ import {
 import { toast } from 'sonner'
 import { useT, type MessageKey } from '@renderer/i18n'
 import type { SortKey } from '@renderer/lib/entryList'
-import { locKey, parentPath, type Loc } from '@renderer/lib/explorerEntry'
+import { locKey, parentPath, type ExplorerEntry, type Loc } from '@renderer/lib/explorerEntry'
 import { fitCrumbs, pathCrumbs, type Crumb } from '@renderer/lib/pathCrumbs'
 import { SPRING_MS } from '@renderer/lib/explorerLayout'
 import { sourceLabel } from '@renderer/lib/sendItems'
@@ -29,6 +28,7 @@ import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
 import { SourceBadge } from '@renderer/components/common/SourceBadge'
 import { useDropTarget } from './dnd'
+import { FileFilterMenu } from './FileFilterMenu'
 import { ItemMenu, type MenuItem } from './ItemMenu'
 
 const SORT_LABEL: Record<SortKey, MessageKey> = {
@@ -246,19 +246,22 @@ export interface PathBarProps {
   tab: Tab
   editing: boolean
   onEditingChange: (editing: boolean) => void
-  /** 사진만 칩으로 빠진 수 */
-  photosHidden: number
+  /** 현재 폴더의 목록(숨김 파일 설정 반영, 찾기·필터 전). 필터 드롭다운의 개수 기준이다. */
+  entries: readonly ExplorerEntry[]
+  /** 찾기를 통과했지만 파일 종류 필터로 빠진 수 */
+  filterHidden: number
   canWrite: boolean
   onNewFolder: () => void
   onReload: () => void
 }
 
-/** 경로 막대: ‹ › ↑, 접히는 조각(빈 곳·Ctrl+L로 입력), 찾기, 사진만, 정렬, 보기, 새 폴더, 세부 정보. */
+/** 경로 막대: ‹ › ↑, 접히는 조각(빈 곳·Ctrl+L로 입력), 찾기, 파일 종류 필터, 정렬, 보기, 새 폴더, 세부 정보. */
 export function PathBar({
   tab,
   editing,
   onEditingChange,
-  photosHidden,
+  entries,
+  filterHidden,
   canWrite,
   onNewFolder,
   onReload
@@ -430,27 +433,7 @@ export function PathBar({
         </button>
       )}
 
-      <button
-        aria-pressed={tab.photosOnly}
-        onClick={() => patch({ photosOnly: !tab.photosOnly })}
-        title={t('filter.photosOnly')}
-        aria-label={t('filter.photosOnly')}
-        className={cn(
-          'flex h-9 shrink-0 items-center gap-1.5 rounded-full border text-[12.5px] font-semibold',
-          compact ? 'px-2.5' : 'px-3',
-          tab.photosOnly
-            ? 'border-transparent bg-[var(--acw)] text-[var(--ac)]'
-            : 'border-[var(--bd)] text-[var(--mu)] hover:bg-[var(--hv)]'
-        )}
-      >
-        <ImageIcon className="h-4 w-4" aria-hidden />
-        {!compact && <span aria-hidden>{t('category.image')}</span>}
-        {tab.photosOnly && photosHidden > 0 && (
-          <span aria-hidden className="mono rounded-full bg-[var(--sf)] px-1.5 text-[10.5px]">
-            −{photosHidden}
-          </span>
-        )}
-      </button>
+      <FileFilterMenu tab={tab} entries={entries} hiddenCount={filterHidden} compact={compact} />
 
       <button
         className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-semibold text-[var(--mu)] hover:bg-[var(--hv)] hover:text-[var(--tx)]"

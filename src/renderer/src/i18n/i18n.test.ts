@@ -72,3 +72,73 @@ describe('locale catalogs', () => {
     })
   }
 })
+
+const FILE_FILTER_KEYS = [
+  'filter.button',
+  'filter.buttonTooltip',
+  'filter.activeTooltip',
+  'filter.menuLabel',
+  'filter.advanced',
+  'filter.advancedHeading',
+  'filter.noExtension',
+  'filter.extensionInput',
+  'filter.extensionInvalid',
+  'filter.removeExtension',
+  'filter.emptyFor',
+  'filter.clearType',
+  'settings.categories',
+  'settings.categoriesHint',
+  'settings.categoryAdd',
+  'settings.categoryNewName',
+  'settings.categoryName',
+  'settings.categoryDelete',
+  'settings.categoryDeleteTitle',
+  'settings.categoryHide',
+  'settings.categoryShow',
+  'settings.categoryHidden',
+  'settings.categoryRestore',
+  'settings.categoryRestoreAll',
+  'settings.categoryRestoreAllTitle',
+  'settings.categoryRestoreAllMessage',
+  'settings.categoryExtensionAdd',
+  'settings.categoryExtensionExists',
+  'settings.categoryExtensionDuplicate'
+] as const
+
+describe('file category filter messages', () => {
+  it('has every new key in every locale and keeps its placeholders', () => {
+    // covers: Test-953
+    const expected: Record<string, string[]> = {
+      'filter.emptyFor': ['what'],
+      'filter.activeTooltip': ['n', 'what'],
+      'settings.categoryDeleteTitle': ['name'],
+      'filter.removeExtension': ['ext'],
+      'settings.categoryExtensionExists': ['ext'],
+      'settings.categoryExtensionDuplicate': ['ext', 'name']
+    }
+    for (const { code } of LOCALES) {
+      const m = MESSAGES[code] as Record<string, string | undefined>
+      for (const key of FILE_FILTER_KEYS) {
+        const text = m[key]
+        expect(text, `${code} ${key}`).toBeTypeOf('string')
+        expect(text!.trim(), `${code} ${key}`).not.toBe('')
+        if (expected[key]) expect(placeholders(text!), `${code} ${key}`).toEqual(expected[key])
+      }
+      // The type-filter button must not share its name with the find box's clear button (E31).
+      expect(m['filter.clearType'], code).not.toBe(m['filter.clear'])
+    }
+  })
+
+  it('no longer carries the photos-only chip messages in any locale', () => {
+    // covers: Test-953
+    const gone = [
+      'filter.photosOnly',
+      'explorer.hiddenByPhotos',
+      ...['one', 'other', 'few', 'many'].map((c) => `explorer.hiddenByPhotos_${c}`)
+    ]
+    for (const { code } of LOCALES) {
+      const m = MESSAGES[code] as Record<string, string | undefined>
+      for (const key of gone) expect(m[key], `${code} ${key}`).toBeUndefined()
+    }
+  })
+})
