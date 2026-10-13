@@ -338,3 +338,170 @@ describe('useTransferStore download completion', () => {
     ])
   })
 })
+
+describe('useTransferStore transfer panel', () => {
+  const invoke = vi.fn()
+  const to: Loc = { side: 'remote', path: '/photos' }
+  const panel = (): ReturnType<typeof useTransferStore.getState>['panel'] =>
+    useTransferStore.getState().panel
+
+  /** 답을 붙잡아 둔 보내기. 돌려준 함수로 배치 id(없으면 실패)를 답한다. */
+  function startSend(label: string): (batchId?: string) => Promise<void> {
+    let reply!: (result: unknown) => void
+    invoke.mockImplementationOnce(() => new Promise((resolve) => (reply = resolve)))
+    const sent = useTransferStore
+      .getState()
+      .send(
+        'me@nas.local:21',
+        { direction: 'upload', sources: [`/in/${label}`], destDir: '/photos' },
+        { label, to }
+      )
+    return async (batchId) => {
+      reply(
+        batchId
+          ? {
+              success: true,
+              data: { batchId, ids: ['x'], skipped: [], conflicts: [], totalBytes: 0 }
+            }
+          : { success: false, error: 'boom' }
+      )
+      await sent
+    }
+  }
+  const sendKeys = (): string[] =>
+    useTransferStore.getState().pendingSends.map((p) => `send:${p.id}`)
+  const update = (...jobs: TransferJob[]): void =>
+    useTransferStore.getState().applyUpdate({ upserts: jobs, removedIds: [] })
+
+  beforeEach(() => {
+    invoke.mockReset()
+    vi.stubGlobal('window', { api: { invoke } })
+    useSettingsStore.setState({ language: 'en' })
+    useTransferStore.setState({
+      jobs: [],
+      batchMeta: {},
+      pendingSends: [],
+      conflictQueue: [],
+      panel: { open: false, collapsed: false, rows: [] },
+      panelMuted: [],
+      panelHeld: [],
+      panelSending: 0
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('links two sends with the same label to their own batches, whatever order they finish in', async () => {
+    // covers: Test-1121
+    const first = startSend('photos')
+    const second = startSend('photos')
+    const [k1, k2] = sendKeys()
+    expect(panel()).toEqual({ open: true, collapsed: false, rows: [k1, k2] })
+
+    await second('b2')
+    expect(panel().rows).toEqual([k1, 'b2'])
+    await first('b1')
+    expect(panel().rows).toEqual(['b1', 'b2'])
+
+    update(job('a', { batchId: 'b1', status: 'active' }), job('b', { batchId: 'b2' }))
+    expect(panel()).toEqual({ open: true, collapsed: false, rows: ['b1', 'b2'] })
+  })
+
+  it('keeps the panel closed when a send closed while preparing goes live, then forgets it', async () => {
+    // covers: Test-1122
+    const reply = startSend('photos')
+    useTransferStore.getState().closePanel()
+    await reply('b1')
+    expect(useTransferStore.getState().panelMuted).toEqual(['b1'])
+
+    update(job('a', { batchId: 'b1', status: 'active' }))
+    expect(panel()).toEqual({ open: false, collapsed: false, rows: [] })
+    expect(useTransferStore.getState().panelMuted).toEqual([])
+
+    // 틈(배치 id는 왔지만 첫 작업 전)에 닫아도 같다.
+    const gap = startSend('again')
+    await gap('b2')
+    useTransferStore.getState().closePanel()
+    update(job('c', { batchId: 'b2', status: 'active' }))
+    expect(panel().open).toBe(false)
+  })
+
+  it('reopens expanded with only the new send after the panel was collapsed and closed', async () => {
+    // covers: Test-1123
+    const reply = startSend('photos')
+    await reply('b1')
+    update(job('a', { batchId: 'b1', status: 'active' }))
+    useTransferStore.getState().togglePanelCollapsed()
+    expect(panel().collapsed).toBe(true)
+    useTransferStore.getState().closePanel()
+    update(job('a', { batchId: 'b1', status: 'active', transferredBytes: 50 }))
+    expect(panel().open).toBe(false)
+
+    startSend('next')
+    expect(panel()).toEqual({ open: true, collapsed: false, rows: sendKeys() })
+
+    // 실패·재시도로 다시 살아난 배치는 열린 패널에 이어 붙는다(접힘 유지).
+    useTransferStore.getState().togglePanelCollapsed()
+    update(job('a', { batchId: 'b1', status: 'failed', error: 'x' }))
+    update(job('a', { batchId: 'b1', status: 'pending' }))
+    expect(panel()).toEqual({ open: true, collapsed: true, rows: [...sendKeys(), 'b1'] })
+  })
+
+  it('drops the row of a send that ends without a batch and of cleared batches', async () => {
+    // covers: Test-1124
+    const failed = startSend('photos')
+    await failed()
+    expect(panel()).toEqual({ open: true, collapsed: false, rows: [] })
+
+    update(job('a', { batchId: 'b1', status: 'active' }), job('b', { batchId: 'b2' }))
+    expect(panel().rows).toEqual(['b1', 'b2'])
+
+    // 완료 지우기: 지운 배치의 행이 사라진다. 아직 작업이 없는 배치의 행은 남는다.
+    const open = startSend('open')
+    await open('b3')
+    expect(panel().rows).toEqual(['b1', 'b2', 'b3'])
+    useTransferStore.getState().applyUpdate({ upserts: [], removedIds: ['a'] })
+    expect(panel().rows).toEqual(['b2', 'b3'])
+  })
+
+  it('keeps one row when the batch update beats the send reply, and stays closed if closed', async () => {
+    // covers: Test-1125
+    const reply = startSend('photos')
+    const [k1] = sendKeys()
+    update(job('a', { batchId: 'b1', status: 'active' }))
+    expect(panel().rows).toEqual([k1])
+    await reply('b1')
+    expect(panel()).toEqual({ open: true, collapsed: false, rows: ['b1'] })
+
+    // 준비 중에 닫았으면 갱신이 답보다 먼저 와도 다시 열지 않는다.
+    const closed = startSend('again')
+    useTransferStore.getState().closePanel()
+    update(job('b', { batchId: 'b2', status: 'active' }))
+    expect(panel().open).toBe(false)
+    await closed('b2')
+    expect(panel()).toEqual({ open: false, collapsed: false, rows: [] })
+    expect(useTransferStore.getState().panelMuted).toEqual([])
+
+    // 답을 기다리는 동안 살아난 다른 배치(MCP)는 답이 온 뒤 붙는다.
+    const third = startSend('third')
+    update(job('m', { batchId: 'm1', status: 'active' }))
+    expect(panel().rows).toEqual(sendKeys())
+    await third('b3')
+    expect(panel()).toEqual({ open: true, collapsed: false, rows: ['b3', 'm1'] })
+  })
+
+  it('forgets a muted batch once its jobs show up, so a retry after a fast failure reopens', async () => {
+    // covers: Test-1126
+    const reply = startSend('photos')
+    useTransferStore.getState().closePanel()
+    await reply('b1')
+    update(job('a', { batchId: 'b1', status: 'failed', error: 'denied' }))
+    expect(panel().open).toBe(false)
+    expect(useTransferStore.getState().panelMuted).toEqual([])
+
+    update(job('a', { batchId: 'b1', status: 'pending' }))
+    expect(panel()).toEqual({ open: true, collapsed: false, rows: ['b1'] })
+  })
+})

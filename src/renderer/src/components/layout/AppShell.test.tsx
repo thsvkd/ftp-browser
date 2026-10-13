@@ -585,3 +585,21 @@ describe('AppShell — collapsing a side pane in the split view', () => {
     expect(document.activeElement).toBe(document.getElementById(`explorer-list-${L}`))
   })
 })
+
+describe('AppShell — transfer panel', () => {
+  it('mounts the transfer panel outside every focus region', async () => {
+    // covers: Test-1115
+    render(<AppShell />)
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
+    expect(screen.queryByRole('region', { name: 'Transfers' })).toBeNull()
+
+    act(() =>
+      useTransferStore.setState({
+        pendingSends: [{ id: 'send1', label: 'photos' }],
+        panel: { open: true, collapsed: false, rows: ['send:send1'] }
+      })
+    )
+    const panel = screen.getByRole('region', { name: 'Transfers' })
+    expect(panel.closest('[data-region]')).toBeNull()
+  })
+})

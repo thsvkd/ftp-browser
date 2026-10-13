@@ -46,6 +46,8 @@ export function ActivityPill(): React.JSX.Element {
   const running = useMemo(() => runningJobs(jobs), [jobs])
   const failed = jobs.filter((j) => j.status === 'failed').length
   const opsRunning = useOperationStore((s) => s.jobs.some((j) => j.status === 'active'))
+  // main이 보내기를 계획하는 동안(폴더 훑기·원격 LIST)은 아직 작업이 없다. 유휴로 보이지 않게 바쁨으로 둔다
+  const preparing = useTransferStore((s) => s.pendingSends[0]?.label)
   const [open, setOpen] = useState(false)
   const [button, setButton] = useState<HTMLButtonElement | null>(null)
   const close = useCallback(() => setOpen(false), [])
@@ -73,6 +75,8 @@ export function ActivityPill(): React.JSX.Element {
   }, [])
 
   const active = running.length > 0
+  const preparingLabel =
+    !active && preparing !== undefined ? t('activity.preparing', { label: preparing }) : null
   const progress = batchProgress(running)
   // 모두 서버 간 복사면 그 아이콘(팝오버 행과 같다), 모두 업로드면 올리기, 그 밖은 받기(MC32)
   const every = (direction: TransferJob['direction']): boolean =>
@@ -97,11 +101,13 @@ export function ActivityPill(): React.JSX.Element {
                 total: progress.total
               })
             : t('activity.title'),
+          // 보이는 글자로 시작한다(WCAG 2.5.3): "Activity, Preparing folder…"
+          preparingLabel,
           failed > 0 ? `${t('job.failed')}: ${failed}` : null
         ]
           .filter(Boolean)
           .join(', ')}
-        title={active ? t('activity.title') : t('activity.idle')}
+        title={active ? t('activity.title') : (preparingLabel ?? t('activity.idle'))}
         className={cn(
           'relative flex h-9 items-center gap-2 rounded-full border pl-1 pr-3 text-[12.5px] font-semibold transition-colors',
           open
@@ -111,7 +117,7 @@ export function ActivityPill(): React.JSX.Element {
       >
         <span className="relative flex h-7 w-7 items-center justify-center">
           <Ring percent={progress.percent} active={active} />
-          {opsRunning && !active ? (
+          {(opsRunning || preparingLabel) && !active ? (
             <Loader className="spin h-3.5 w-3.5 text-[var(--ac)]" aria-hidden />
           ) : (
             <Icon

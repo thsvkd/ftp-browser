@@ -14,7 +14,7 @@ import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
 import { ROW, optId } from '@renderer/lib/explorerLayout'
-import { fromFtpEntry } from '@renderer/lib/explorerEntry'
+import { fromFtpEntry, fromLocalEntry } from '@renderer/lib/explorerEntry'
 import { EMPTY_FILTER } from '@renderer/lib/fileCategories'
 import { gridLayout } from '@renderer/lib/gridGeometry'
 import { useTabEntries } from '@renderer/hooks/useTabEntries'
@@ -27,9 +27,11 @@ import { useServerStore } from '@renderer/stores/useServerStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useActiveTab, useTabsStore } from '@renderer/stores/useTabsStore'
+import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import { connKey, MAIN_VIEWER } from '@shared/connKey'
 import type { FtpServer } from '@shared/types/ftp'
+import type { TransferJob } from '@shared/types/transfer'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
 import { useDnd } from './dnd'
 import {
@@ -552,7 +554,8 @@ describe('Explorer — drag and drop', () => {
     const sheet = await screen.findByRole('alertdialog')
     expect(invokeCalls(h.invoke, 'local:copyFiles')).toEqual([])
 
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Overwrite' }))
+    fireEvent.click(within(sheet).getByRole('radio', { name: 'Overwrite' }))
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Confirm' }))
     await flush()
     expect(invokeCalls(h.invoke, 'local:copyFiles')).toEqual([[['C:\\in\\x.jpg'], LDIR, ['x.jpg']]])
 
@@ -562,8 +565,135 @@ describe('Explorer — drag and drop', () => {
       dataTransfer: dt({ types: ['Files'], files: [new File([], 'x.jpg')] })
     })
     const folder = await screen.findByRole('alertdialog')
-    expect(within(folder).queryByRole('button', { name: 'Overwrite' })).toBeNull()
-    expect(within(folder).getByRole('button', { name: 'Skip' })).toBeTruthy()
+    expect(within(folder).queryByRole('radio', { name: 'Overwrite' })).toBeNull()
+    expect(within(folder).getByRole('radio', { name: 'Skip' })).toBeTruthy()
+  })
+})
+
+describe('Explorer — drag-and-drop upload progress in the destination tab', () => {
+  const dt = (files: File[] = []): Record<string, unknown> => ({
+    setData: vi.fn(),
+    setDragImage: vi.fn(),
+    effectAllowed: '',
+    dropEffect: '',
+    types: files.length ? ['Files'] : [],
+    files
+  })
+  const sent = (): void => {
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['j1'], skipped: [], conflicts: [], totalBytes: 100 }
+    })
+  }
+  const uploading = (remotePath: string): TransferJob => ({
+    id: 'j1',
+    batchId: 'b1',
+    server: server(),
+    direction: 'upload',
+    localPath: `C:\\in\\${remotePath.split('/').pop()}`,
+    remotePath,
+    fileName: remotePath.split('/').pop() ?? '',
+    totalBytes: 100,
+    transferredBytes: 40,
+    status: 'active'
+  })
+  const ringOn = (name: string): string | null | undefined =>
+    option(name).querySelector('[data-transfer-ring]')?.getAttribute('data-transfer-ring')
+
+  it('rings the folder tile a Finder folder is uploaded into', async () => {
+    // covers: Test-1096
+    h = setupExplorer({ remote: { [DIR]: [ftp('folder', { dir: true })] } })
+    sent()
+    await renderExplorer(remoteLoc(DIR))
+    h.api.getPathForFile.mockReturnValue('C:\\in\\folder')
+    const file = new File([], 'folder')
+    fireEvent.dragOver(listbox(), { dataTransfer: dt([file]) })
+    fireEvent.drop(listbox(), { dataTransfer: dt([file]) })
+    await flush()
+    expect(invokeCalls(h.invoke, 'transfer:send')).toEqual([
+      [server(), { direction: 'upload', sources: ['C:\\in\\folder'], destDir: DIR }]
+    ])
+
+    act(() =>
+      useTransferStore
+        .getState()
+        .applyUpdate({ upserts: [uploading(`${DIR}/folder/big.bin`)], removedIds: [] })
+    )
+    expect(ringOn('folder')).toBe('active')
+
+    // 새 폴더: 큐의 MKD가 알린 mkdir(ftp:remoteChanged → 목록 무효화)으로 타일이 생기고, 그 타일에 고리가 붙는다
+    act(() => useTransferStore.setState({ jobs: [] }))
+    h.api.getPathForFile.mockReturnValue('C:\\in\\fresh')
+    fireEvent.drop(listbox(), { dataTransfer: dt([new File([], 'fresh')]) })
+    await flush()
+    h.remote[DIR] = [ftp('folder', { dir: true }), ftp('fresh', { dir: true })]
+    act(() => useListingStore.getState().invalidate('remote', server(), DIR))
+    await flush()
+    act(() =>
+      useTransferStore
+        .getState()
+        .applyUpdate({ upserts: [uploading(`${DIR}/fresh/big.bin`)], removedIds: [] })
+    )
+    expect(ringOn('fresh')).toBe('active')
+  })
+
+  it('rings the remote folder tile local items were dragged onto', async () => {
+    // covers: Test-1097
+    h = setupExplorer({ remote: { [DIR]: [ftp('sub', { dir: true })], [`${DIR}/sub`]: [] } })
+    sent()
+    await renderExplorer(remoteLoc(DIR))
+    act(() =>
+      useDnd.setState({
+        items: [fromLocalEntry(local(LDIR, 'x.jpg'))],
+        over: null,
+        thumbs: []
+      })
+    )
+    fireEvent.dragOver(option('sub'), { dataTransfer: dt() })
+    fireEvent.drop(option('sub'), { dataTransfer: dt() })
+    await flush()
+    expect(invokeCalls(h.invoke, 'transfer:send')).toEqual([
+      [server(), { direction: 'upload', sources: [`${LDIR}\\x.jpg`], destDir: `${DIR}/sub` }]
+    ])
+
+    act(() =>
+      useTransferStore
+        .getState()
+        .applyUpdate({ upserts: [uploading(`${DIR}/sub/x.jpg`)], removedIds: [] })
+    )
+    expect(ringOn('sub')).toBe('active')
+  })
+
+  it('does not fly a card to the activity pill when a cross-side drop starts a transfer', async () => {
+    // covers: Test-1119
+    const animate = vi.fn(() => ({ onfinish: null }) as unknown as Animation)
+    Element.prototype.animate = animate
+    const pill = document.createElement('button')
+    pill.setAttribute('data-activity-target', '')
+    document.body.appendChild(pill)
+    try {
+      h = setupExplorer({ remote: { [DIR]: [ftp('sub', { dir: true })], [`${DIR}/sub`]: [] } })
+      sent()
+      await renderExplorer(remoteLoc(DIR))
+
+      // Finder에서 끌어 온 파일: 업로드
+      h.api.getPathForFile.mockReturnValue('C:\\in\\x.jpg')
+      fireEvent.drop(listbox(), { dataTransfer: dt([new File(['x'], 'x.jpg')]) })
+      await flush()
+      expect(invokeCalls(h.invoke, 'transfer:send')).toHaveLength(1)
+
+      // 로컬 탭에서 끌어 온 항목을 원격 폴더 타일에: 업로드
+      act(() =>
+        useDnd.setState({ items: [fromLocalEntry(local(LDIR, 'y.jpg'))], over: null, thumbs: [] })
+      )
+      fireEvent.drop(option('sub'), { dataTransfer: dt() })
+      await flush()
+      expect(invokeCalls(h.invoke, 'transfer:send')).toHaveLength(2)
+      expect(animate).not.toHaveBeenCalled()
+    } finally {
+      pill.remove()
+      delete (Element.prototype as Partial<Element>).animate
+    }
   })
 })
 

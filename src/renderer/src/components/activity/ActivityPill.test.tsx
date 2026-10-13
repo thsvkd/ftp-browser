@@ -95,4 +95,33 @@ describe('ActivityPill', () => {
     rerender(<ActivityPill />)
     expect(icon()?.classList.contains('lucide-arrow-up-from-line')).toBe(true)
   })
+
+  it('spins with a preparing label while a send is being planned and no job runs yet', () => {
+    // covers: Test-1098
+    useTransferStore.setState({ pendingSends: [{ id: 'send1', label: 'folder' }] })
+    const { rerender } = render(<ActivityPill />)
+    // 보이는 글자(Activity)로 시작해야 음성 입력의 "Activity 누르기"가 닿는다(WCAG 2.5.3)
+    const busy = screen.getByRole('button', { name: 'Activity, Preparing folder…' })
+    expect(busy.getAttribute('title')).toBe('Preparing folder…')
+    expect(busy.querySelector('.spin')).toBeTruthy()
+
+    useTransferStore.setState({ pendingSends: [] })
+    rerender(<ActivityPill />)
+    const idle = screen.getByRole('button', { name: 'Activity' })
+    expect(idle.getAttribute('title')).toBe('No transfers running')
+    expect(idle.querySelector('.spin')).toBeNull()
+  })
+
+  it('keeps the percent ring over the preparing spinner while jobs run', () => {
+    // covers: Test-1099
+    useTransferStore.setState({
+      pendingSends: [{ id: 'send1', label: 'folder' }],
+      jobs: [job('a.jpg', { status: 'active', transferredBytes: 40 })]
+    })
+    render(<ActivityPill />)
+    const pill = screen.getByRole('button', { name: 'Activity: 40%, 0 of 1' })
+    expect(pill.textContent).toContain('40%')
+    expect(pill.querySelector('svg circle[stroke-dasharray]')).toBeTruthy()
+    expect(pill.querySelector('.spin')).toBeNull()
+  })
 })

@@ -8,6 +8,7 @@ import { SidePane } from './SidePane'
 import { Explorer } from '@renderer/components/explorer/Explorer'
 import { useDnd } from '@renderer/components/explorer/dnd'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
+import { TransferPanel } from '@renderer/components/activity/TransferPanel'
 import { SettingsDialog } from '@renderer/components/settings/SettingsDialog'
 import { useThumbnailListener } from '@renderer/hooks/useThumbnailListener'
 import { useLocalThumbnailListener } from '@renderer/hooks/useLocalThumbnailListener'
@@ -159,6 +160,7 @@ export function AppShell(): React.JSX.Element {
         </SidePane>
       </div>
       <StatusBar />
+      <TransferPanel />
       <ConflictSheet />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
