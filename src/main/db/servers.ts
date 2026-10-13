@@ -377,7 +377,7 @@ export function getRecentPaths(db: Database.Database, key: ConnKey): RecentPath[
   const { host, port, user } = parseConnKey(key)!
   const rows = db
     .prepare(
-      'SELECT path, last_visited FROM remote_recent_paths WHERE lower(host) = lower(?) AND port = ? AND username = ? ORDER BY last_visited DESC LIMIT 20'
+      'SELECT path, last_visited FROM remote_recent_paths WHERE lower(host) = lower(?) AND port = ? AND username = ? ORDER BY last_visited DESC, id DESC LIMIT 20'
     )
     .all(host, port, user) as Array<{ path: string; last_visited: string }>
   return rows.map((r) => ({ path: r.path, lastVisited: r.last_visited }))
@@ -406,7 +406,7 @@ export function recordRecentPath(db: Database.Database, key: ConnKey, path: stri
      AND id NOT IN (
        SELECT id FROM remote_recent_paths
        WHERE lower(host) = lower(?) AND port = ? AND username = ?
-       ORDER BY last_visited DESC LIMIT 20
+       ORDER BY last_visited DESC, id DESC LIMIT 20
      )`
   ).run(host, port, user, host, port, user)
 }

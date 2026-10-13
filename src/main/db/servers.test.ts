@@ -439,6 +439,11 @@ describe('recent paths per connection', () => {
       recordRecentPath(db, RA, p)
     }
     expect(read(RA)).toEqual(many.slice(5).reverse())
+    // 시계 분해능이 거친 OS(Windows ~15ms)에서는 시각이 같을 수 있다: 그때는 나중에 넣은 행이 앞
+    db.prepare(
+      "UPDATE remote_recent_paths SET last_visited = '2026-01-01 00:00:00.000' WHERE username = 'ra'"
+    ).run()
+    expect(read(RA)).toEqual(many.slice(5).reverse())
     expect(
       db.prepare("SELECT COUNT(*) AS n FROM remote_recent_paths WHERE username = 'ra'").get()
     ).toEqual({ n: 20 })
