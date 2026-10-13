@@ -765,6 +765,66 @@ describe('TabStrip — tab drag', () => {
     expect(painted()).toBeNull()
   })
 
+  it('puts both chips at the end away from the pointer and keeps the last place while fading', async () => {
+    // covers: Test-1171
+    setupNamed('A', 'B')
+    await renderShell()
+    vi.useFakeTimers()
+    const slots = (): HTMLElement[] => [
+      ...document.querySelectorAll<HTMLElement>('[data-testid="split-overlay"] [data-chip-slot]')
+    ]
+    // 콘텐츠는 top 48, 높이 600(가운데 348). 위쪽 절반이면 칩은 아래다.
+    startDrag(tab('B'), 145)
+    move(900, 65)
+    wait(60)
+    expect(slots()).toHaveLength(2)
+    for (const el of slots()) {
+      expect(el.dataset.chipSlot).toBe('bottom')
+      expect(el.style.bottom).toBe('24px')
+    }
+    expect(slots()[0].contains(screen.getByText('Split right · B'))).toBe(true)
+    expect(slots()[1].contains(screen.getByText('Remaining: A'))).toBe(true)
+
+    // 같은 존의 아래쪽 절반: 둘 다 위로
+    move(900, 500)
+    for (const el of slots()) {
+      expect(el.dataset.chipSlot).toBe('top')
+      expect(el.style.top).toBe('24px')
+    }
+    expect(ghost()?.style.left).toBe('880px')
+    expect(ghost()?.style.top).toBe('482px')
+
+    // 가운데 존으로 옮겨 무장이 풀리면 흐려지는 칩은 마지막 자리를 지킨다(함정 7).
+    move(500, 100)
+    expect(zoneEl()).toBeNull()
+    expect(slots()).toHaveLength(2)
+    for (const el of slots()) {
+      expect(el.dataset.chipSlot).toBe('top')
+      expect(el.style.top).toBe('24px')
+    }
+    expect(ghost()?.style.left).toBe('480px')
+    expect(ghost()?.style.top).toBe('82px')
+    fireEvent.keyDown(window, { key: 'Escape' })
+  })
+
+  it('draws the remaining-tab chip opaque on the surface token with muted text', async () => {
+    // covers: Test-1172
+    setupNamed('A', 'B')
+    await renderShell()
+    vi.useFakeTimers()
+    startDrag(tab('B'), 145)
+    move(900, 65)
+    wait(60)
+    const remaining = screen.getByText('Remaining: A').parentElement as HTMLElement
+    expect(remaining.className).not.toMatch(/opacity-/)
+    expect(remaining.className).toContain('bg-[var(--sf)]')
+    expect(remaining.className).toContain('text-[var(--mu)]')
+    expect(remaining.style.opacity).toBe('')
+    const painted = screen.getByText('Split right · B').parentElement as HTMLElement
+    expect(painted.className).toContain('text-[var(--tx)]')
+    fireEvent.keyDown(window, { key: 'Escape' })
+  })
+
   it('never shows the overlay with a single tab', async () => {
     // covers: Test-1079
     setupNamed('A')

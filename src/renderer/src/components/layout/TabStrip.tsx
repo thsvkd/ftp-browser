@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { useT } from '@renderer/i18n'
 import type { Loc } from '@renderer/lib/explorerEntry'
-import { SPRING_MS } from '@renderer/lib/explorerLayout'
+import { SPRING_MS, TAB_GHOST_DX, TAB_GHOST_HALF_H } from '@renderer/lib/explorerLayout'
 import { connectedKeys } from '@renderer/lib/connections'
 import { loadPlaces, locLabel, sourceLabel } from '@renderer/lib/sendItems'
 import { cn } from '@renderer/lib/utils'
@@ -139,7 +139,7 @@ function TabDragLayer(): React.JSX.Element | null {
         data-testid="tab-drag-ghost"
         aria-hidden
         className="pointer-events-none fixed z-[70] flex h-9 max-w-[240px] items-center gap-2 rounded-full border border-[var(--bd)] bg-[var(--sf)] pl-1.5 pr-3.5 text-[13px] font-semibold text-[var(--tx)] opacity-90 shadow-[var(--shadow)]"
-        style={{ left: x - 20, top: y - 18 }}
+        style={{ left: x - TAB_GHOST_DX, top: y - TAB_GHOST_HALF_H }}
       >
         <SourceBadge side={tab.loc.side} size={24} />
         <span className="truncate">{locLabel(tab.loc)}</span>
