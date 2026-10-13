@@ -93,6 +93,7 @@ import { PaneIdContext, usePaneId } from './paneContext'
 import { PathBar } from './PathBar'
 import { PropertiesDialog } from './PropertiesDialog'
 import { SplitDivider } from './SplitDivider'
+import { SplitOverlay } from './SplitOverlay'
 import type { ItemProps } from './useItem'
 
 const isTyping = (target: EventTarget | null): boolean =>
@@ -202,6 +203,7 @@ export function Explorer(): React.JSX.Element | null {
           </PaneIdContext.Provider>
         ))}
       {shown && <SplitDivider ratio={ratio} rootRef={rootRef} order={1} />}
+      <SplitOverlay />
       <DragGhost />
     </div>
   )

@@ -355,6 +355,16 @@ main[data-region='content']:has(+ div > #rail-pane[data-collapsed='true']) {
     flex-basis: 0%;
   }
 }
+/* 탭 드래그 분할 오버레이(split-view F6·F7): 놓일 곳을 칠한다. 나타남·좌우 전환 시간은 인라인 스타일 */
+.split-overlay-wash {
+  background: color-mix(in srgb, var(--ac) 14%, transparent);
+  box-shadow: inset 0 0 0 2px var(--ac);
+}
+@keyframes split-overlay-in {
+  from {
+    opacity: 0;
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .side-pane[data-animate='true'] {
@@ -362,6 +372,10 @@ main[data-region='content']:has(+ div > #rail-pane[data-collapsed='true']) {
   }
   [data-split-root] > section[data-entering] {
     animation: none;
+  }
+  .split-overlay-zone {
+    animation: none !important;
+    transition: none !important;
   }
   *,
   *::before,
