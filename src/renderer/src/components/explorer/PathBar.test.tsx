@@ -372,7 +372,7 @@ describe('PathBar — one line with a ⋯ menu', () => {
   })
 
   it('keeps focus in the find field when opening it moves it from the tools to the crumb slot', async () => {
-    // covers: Test-1180
+    // covers: Test-1200
     // R3 실측 도구 폭(§12 (a)). 돋보기 36은 막대 400에 들어가지만 열린 칸 150은 들어가지 않는다(Test-1164).
     const widths: Record<string, number> = {
       back: 32,
@@ -423,7 +423,7 @@ describe('PathBar — one line with a ⋯ menu', () => {
   })
 
   it('does not reopen the filter popover by itself when the filter folds or unfolds', async () => {
-    // covers: Test-1181
+    // covers: Test-1201
     const dialog = (): HTMLElement | null =>
       screen.queryByRole('dialog', { name: en['filter.menuLabel'] })
     // 포인터 없이 막대 폭만 바꾼다(키보드로 사이드바·분할 전환, OS 창 크기). 정렬 키를 바꿔 다시 재게 한다.
