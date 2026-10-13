@@ -302,8 +302,16 @@ describe('slab download against a mock FTP server', () => {
     const reports: number[] = []
     const writer = new SegmentWriter(file.fd, range, (bytes) => reports.push(bytes))
 
-    await downloadInto(client, writer, '/f', 0)
-    await writer.stop()
+    // 빠른 링크는 슬랩이 PARTIAL_SLAB_MS 안에 차는 링크다. 실제 시계로 재면 바쁜 기기에서 이벤트 루프가 그보다
+    // 오래 멈췄을 때 타이머가 먼저 울려 덜 찬 슬랩을 넘기므로(그때는 그것이 맞는 동작이다) 간헐적으로 실패했다.
+    // 그래서 받는 동안 시계를 세워 타이머가 울리지 않게 한다. 타이머가 울리는 경우는 느린 링크 테스트들이 맡는다.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await downloadInto(client, writer, '/f', 0)
+      await writer.stop()
+    } finally {
+      vi.useRealTimers()
+    }
     await file.close()
 
     expect(sha256(fs.readFileSync(path.join(dir, 'fast.bin')))).toBe(sha256(data))
