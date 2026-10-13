@@ -10,13 +10,8 @@ import { toast } from 'sonner'
 import { t } from '@renderer/i18n'
 import type { ExplorerEntry, Loc } from '@renderer/lib/explorerEntry'
 import { planSend } from '@renderer/lib/sendPlan'
-import {
-  dropOsFiles,
-  planVerb,
-  sendItems,
-  shelveOsFiles,
-  useConnection
-} from '@renderer/lib/sendItems'
+import { useConnectedKeys } from '@renderer/lib/connections'
+import { dropOsFiles, planVerb, sendItems, shelveOsFiles } from '@renderer/lib/sendItems'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 
 interface DndState {
@@ -89,8 +84,8 @@ export function useDropTarget(
 ): DropState {
   const items = useDnd((s) => s.items)
   const over = useDnd((s) => s.over === key)
-  const conn = useConnection()
-  const plan = items && dest && dest !== 'shelf' ? planSend(items, dest, conn) : null
+  const connected = useConnectedKeys()
+  const plan = items && dest && dest !== 'shelf' ? planSend(items, dest, connected) : null
   const valid = !!dest && (dest === 'shelf' ? !!items : !plan?.invalid)
   const springRef = useRef(opts.spring)
   useEffect(() => {
@@ -119,8 +114,9 @@ export function useDropTarget(
     handlers: {
       onDragOver: (e) => {
         if (!dest) return
-        if (useDnd.getState().items)
-          enter(e, valid ? (plan?.transfer.length || dest === 'shelf' ? 'copy' : 'move') : 'none')
+        // 다른 쪽 전송과 다른 서버로의 복사(relay)는 복사 커서, 같은 쪽 원격은 이동
+        const copies = plan?.transfer.length || plan?.relay.length || dest === 'shelf'
+        if (useDnd.getState().items) enter(e, valid ? (copies ? 'copy' : 'move') : 'none')
         else if (hasFiles(e)) enter(e, 'copy')
       },
       onDrop: (e) => {

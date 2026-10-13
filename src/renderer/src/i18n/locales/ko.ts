@@ -89,6 +89,7 @@ export const ko = {
   'status.connecting': '연결 중…',
   'status.connected': '연결됨',
   'status.error': '연결 오류',
+  'status.connections_other': '서버 {{count}}개 연결됨',
   'status.folderCount_other': '폴더 {{count}}개',
   'status.fileCount_other': '파일 {{count}}개',
 
@@ -249,6 +250,7 @@ export const ko = {
   'sidebar.serverConnecting': '연결 중…',
   'sidebar.serverLost': '연결 끊김 · 눌러서 다시 연결',
   'sidebar.serverOffline': '연결 안 됨 · 눌러서 연결',
+  'sidebar.disconnect': '{{name}} 연결 해제',
 
   'place.desktop': '바탕 화면',
   'place.downloads': '다운로드',
@@ -305,7 +307,7 @@ export const ko = {
   'explorer.listing_other': '목록을 불러오는 중… {{count}}개',
   'explorer.noMatch': '‘{{query}}’와(과) 일치하는 항목이 없습니다',
   'explorer.showAll': '모두 보기',
-  'explorer.otherServer': '이 탭은 {{server}}의 위치입니다',
+  'explorer.serverOffline': '{{server}}에 연결되어 있지 않습니다',
   'explorer.connectTo': '{{server}}에 연결',
   'explorer.offlineHint': '연결하면 이 위치를 열 수 있습니다.',
   'explorer.staleBanner': '서버 연결이 끊어졌습니다. 마지막으로 불러온 목록을 보여 주고 있습니다.',
@@ -345,7 +347,6 @@ export const ko = {
   'send.invalidNothing': '보낼 항목이 없습니다',
   'send.invalidIntoItself': '폴더를 자기 안으로 옮길 수 없습니다',
   'send.invalidNotConnected': '서버에 연결되어 있지 않습니다',
-  'send.invalidOtherServer': '다른 서버에 연결되어 있습니다',
   'send.invalidHere': '이미 이 폴더에 있습니다',
   'send.invalidRemoteCopy': '서버 안에서의 복사는 지원하지 않습니다',
 
@@ -399,6 +400,7 @@ export const ko = {
   'activity.remaining': '{{time}} 남음',
   'activity.preparing': '{{label}} 준비 중…',
   'activity.labelMany_other': '{{name}} 외 {{count}}개',
+  'activity.relay': '서버 간 복사',
   'duration.seconds': '{{number}}초',
   'duration.minutes': '{{number}}분',
   'duration.hours': '{{number}}시간',
@@ -429,5 +431,6 @@ export const ko = {
   'toast.shelfEmpty': '선반이 비어 있습니다. 항목을 고르고 Shift+S를 누르세요.',
   'toast.sendSkipped_other': '항목 {{count}}개를 건너뛰었습니다',
   'toast.sendFailed': '전송을 시작하지 못했습니다',
+  'toast.relayPartialRemoved': '{{server}}에서 {{name}}의 불완전한 복사본을 지웠습니다',
   'toast.retryFailed': '다시 시도하지 못했습니다'
 } satisfies LocaleMessages

@@ -91,6 +91,7 @@ export const ja = {
   'status.connecting': '接続中…',
   'status.connected': '接続済み',
   'status.error': '接続エラー',
+  'status.connections_other': '{{count}} 台のサーバーに接続中',
   'status.folderCount_other': '{{count}} 個のフォルダー',
   'status.fileCount_other': '{{count}} 個のファイル',
 
@@ -252,6 +253,7 @@ export const ja = {
   'sidebar.serverConnecting': '接続中…',
   'sidebar.serverLost': '切断されました · クリックして再接続',
   'sidebar.serverOffline': '未接続 · クリックして接続',
+  'sidebar.disconnect': '{{name}} から切断',
 
   'place.desktop': 'デスクトップ',
   'place.downloads': 'ダウンロード',
@@ -308,7 +310,7 @@ export const ja = {
   'explorer.listing_other': '一覧を読み込み中… {{count}} 件',
   'explorer.noMatch': '「{{query}}」に一致する項目はありません',
   'explorer.showAll': 'すべて表示',
-  'explorer.otherServer': 'このタブは {{server}} 上の場所です',
+  'explorer.serverOffline': '{{server}} に接続されていません',
   'explorer.connectTo': '{{server}} に接続',
   'explorer.offlineHint': '接続すると、この場所を開けます。',
   'explorer.staleBanner': '接続が切断されました。最後に読み込んだ一覧を表示しています。',
@@ -349,7 +351,6 @@ export const ja = {
   'send.invalidNothing': '送る項目がありません',
   'send.invalidIntoItself': 'フォルダーを自分自身の中に入れることはできません',
   'send.invalidNotConnected': 'サーバーに接続されていません',
-  'send.invalidOtherServer': '別のサーバーに接続されています',
   'send.invalidHere': '既にこのフォルダーにあります',
   'send.invalidRemoteCopy': 'サーバー内でのコピーはサポートされていません',
 
@@ -403,6 +404,7 @@ export const ja = {
   'activity.remaining': '残り {{time}}',
   'activity.preparing': '{{label}} を準備中…',
   'activity.labelMany_other': '{{name}} ほか {{count}} 件',
+  'activity.relay': 'サーバー間コピー',
   'duration.seconds': '{{number}} 秒',
   'duration.minutes': '{{number}} 分',
   'duration.hours': '{{number}} 時間',
@@ -433,5 +435,6 @@ export const ja = {
   'toast.shelfEmpty': '棚は空です。項目を選んで Shift+S を押してください。',
   'toast.sendSkipped_other': '{{count}} 件の項目をスキップしました',
   'toast.sendFailed': '転送を開始できませんでした',
+  'toast.relayPartialRemoved': '{{server}} 上の {{name}} の不完全なコピーを削除しました',
   'toast.retryFailed': '再試行できませんでした'
 } satisfies LocaleMessages

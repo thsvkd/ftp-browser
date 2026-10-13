@@ -4,7 +4,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
 import { fromFtpEntry, fromLocalEntry, type ExplorerEntry } from '@renderer/lib/explorerEntry'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
@@ -14,6 +13,7 @@ import {
   localLoc,
   remoteLoc,
   server,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from '@renderer/components/explorer/explorerTestHarness'
@@ -23,6 +23,14 @@ import { useDnd } from '@renderer/components/explorer/dnd'
 import { installDropGuard } from '@renderer/lib/osDropGuard'
 import type { LocalFileEntry } from '@shared/types/local'
 import { Shelf } from './Shelf'
+
+/** 원격 채널의 호출 인자. 첫 인자(연결 키)가 연결된 서버인지 보고 뗀다. */
+function remoteCalls(invoke: Parameters<typeof invokeCalls>[0], channel: string): unknown[][] {
+  return invokeCalls(invoke, channel).map(([conn, ...args]) => {
+    expect(conn).toBe(server())
+    return args
+  })
+}
 
 vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }),
@@ -80,7 +88,7 @@ describe('Shelf — list and drop button', () => {
     expect(drop.hasAttribute('disabled')).toBe(false)
 
     // 막히면 사유와 함께 비활성
-    act(() => useFtpStore.setState({ connectionStatus: 'disconnected' }))
+    act(() => setConnection(server(), 'disconnected'))
     const blocked = screen.getByRole('button', { name: new RegExp(en['shelf.cantDropHere']) })
     expect(blocked.hasAttribute('disabled')).toBe(true)
     expect(blocked.textContent).toContain(en['send.invalidNotConnected'])
@@ -96,7 +104,7 @@ describe('Shelf — dropping into the active tab', () => {
     })
     useTabsStore.getState().openTab(localLoc('C:\\dl'))
   }
-  const sends = (): unknown[][] => invokeCalls(h.invoke, 'transfer:send')
+  const sends = (): unknown[][] => remoteCalls(h.invoke, 'transfer:send')
 
   it('downloads remote items into the local tab by button, Enter and Ctrl+Enter anywhere, and empties the shelf', async () => {
     // covers: Test-807
@@ -160,6 +168,82 @@ describe('Shelf — dropping into the active tab', () => {
   })
 })
 
+describe('Shelf — items from two servers', () => {
+  const B = 'you@b.example:2121'
+  const fromB = (name: string): ExplorerEntry => fromFtpEntry(ftp(name, { size: 1024 }), '/y', B)
+  const sends = (): unknown[][] => invokeCalls(h.invoke, 'transfer:send')
+  const done = {
+    success: true,
+    data: { batchId: 'b1', ids: ['t1'], skipped: [], conflicts: [], totalBytes: 1 }
+  }
+
+  it("downloads each server's items with its own connection and copies across servers as a relay", async () => {
+    // covers: Test-1025
+    h = setupExplorer({ local: { 'C:\\dl': [] }, remote: { '/in': [] } })
+    setConnection(B, 'connected')
+    h.handlers['transfer:send'] = () => done
+    useTabsStore.getState().openTab(localLoc('C:\\dl'))
+    useShelfStore.getState().add([remoteItem('a.jpg'), fromB('b.jpg'), remoteItem('c.jpg')])
+    render(
+      <>
+        <Shelf />
+        <ConflictSheet />
+      </>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /^Download 3 to dl\s*→/ }))
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    expect(sends()).toEqual([
+      [server(), { direction: 'download', sources: ['/x/a.jpg', '/x/c.jpg'], destDir: 'C:\\dl' }],
+      [B, { direction: 'download', sources: ['/y/b.jpg'], destDir: 'C:\\dl' }]
+    ])
+
+    // A의 항목을 B의 원격 탭에: 받는 쪽 연결로 서버 간 복사를 보낸다. 충돌이면 결정을 붙여 다시 보낸다
+    h.invoke.mockClear()
+    let asked = false
+    h.handlers['transfer:send'] = () => {
+      if (asked) return done
+      asked = true
+      return {
+        success: true,
+        data: {
+          ids: [],
+          skipped: [],
+          totalBytes: 1,
+          conflicts: [
+            {
+              target: '/in/a.jpg',
+              source: '/x/a.jpg',
+              name: 'a.jpg',
+              incoming: { size: 1024, modifiedAt: '2024-01-02T00:00:00.000Z' },
+              existing: { size: 10, modifiedAt: '2024-01-01T00:00:00.000Z' }
+            }
+          ]
+        }
+      }
+    }
+    act(() => {
+      useTabsStore.getState().openTab({ side: 'remote', path: '/in', server: B })
+      useShelfStore.getState().add([remoteItem('a.jpg')])
+    })
+    fireEvent.click(await screen.findByRole('button', { name: /^Copy 1 to in\s*→/ }))
+    fireEvent.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Overwrite' })
+    )
+    await waitFor(() => expect(shelfNames()).toEqual([]))
+    const relay = {
+      direction: 'relay',
+      sourceServer: server(),
+      sources: ['/x/a.jpg'],
+      destDir: '/in'
+    }
+    expect(sends()).toEqual([
+      [B, relay],
+      [B, { ...relay, decisions: { '/in/a.jpg': 'overwrite' } }]
+    ])
+  })
+})
+
 describe('Shelf — same-side conflicts', () => {
   const sheet = (): Promise<HTMLElement> => screen.findByRole('alertdialog')
   const channels = (): string[] =>
@@ -194,7 +278,7 @@ describe('Shelf — same-side conflicts', () => {
     drop()
     fireEvent.click(within(await sheet()).getByRole('button', { name: 'Overwrite' }))
     await waitFor(() => expect(shelfNames()).toEqual([]))
-    const renames = (): unknown[][] => invokeCalls(h.invoke, 'ftp:rename')
+    const renames = (): unknown[][] => remoteCalls(h.invoke, 'ftp:rename')
     const aside = renames()[0][1] as string
     expect(aside).toMatch(/^\/dst\/\.a\.jpg\.[a-z0-9]+\.old$/)
     expect(renames()).toEqual([
@@ -202,13 +286,13 @@ describe('Shelf — same-side conflicts', () => {
       ['/x/a.jpg', '/dst/a.jpg'],
       ['/x/c.jpg', '/dst/c.jpg']
     ])
-    expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toEqual([
+    expect(remoteCalls(h.invoke, 'ftp:deleteBatch')).toEqual([
       [[{ path: aside, isDirectory: false }]]
     ])
     expect(channels()).toEqual(['ftp:rename', 'ftp:rename', 'ftp:deleteBatch', 'ftp:rename'])
 
     // 옮기기가 실패하면 비켜 둔 대상을 제자리로 되돌리고 지우지 않는다
-    h.handlers['ftp:rename'] = (from) =>
+    h.handlers['ftp:rename'] = (_conn, from) =>
       from === '/x/a.jpg' ? { success: false, error: '550 denied' } : { success: true }
     act(() => {
       useShelfStore.getState().add([remoteItem('a.jpg')])
@@ -230,7 +314,7 @@ describe('Shelf — same-side conflicts', () => {
     drop()
     fireEvent.click(within(await sheet()).getByRole('button', { name: 'Keep both (rename)' }))
     await waitFor(() => expect(shelfNames()).toEqual([]))
-    expect(invokeCalls(h.invoke, 'ftp:rename').at(-1)).toEqual(['/x/a.jpg', '/dst/a (2).jpg'])
+    expect(remoteCalls(h.invoke, 'ftp:rename').at(-1)).toEqual(['/x/a.jpg', '/dst/a (2).jpg'])
     expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toHaveLength(1)
   })
 
@@ -393,7 +477,7 @@ describe('Shelf — OS drops', () => {
     // 원격 탭: 폴더와 파일 경로를 업로드로 보내고, 성공하면 선반이 빈다
     fireEvent.click(screen.getByRole('button', { name: /^Upload 2 to dst\s*→/ }))
     await waitFor(() => expect(shelfNames()).toEqual([]))
-    expect(invokeCalls(h.invoke, 'transfer:send')).toEqual([
+    expect(remoteCalls(h.invoke, 'transfer:send')).toEqual([
       [
         {
           direction: 'upload',

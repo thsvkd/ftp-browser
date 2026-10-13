@@ -149,6 +149,7 @@ describe('GUI accessibility — regression guard', () => {
       jobs: [
         {
           id: 't-1',
+          server: 'me@nas.local:21',
           direction: 'upload',
           fileName: 'big.bin',
           localPath: 'C:\\work\\big.bin',

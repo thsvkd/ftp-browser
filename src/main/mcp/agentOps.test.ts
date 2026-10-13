@@ -89,7 +89,7 @@ describe('saved servers and connect', () => {
     const id = addServer(h.db, { name: 'NAS', host: 'nas.local', user: 'me', password: 'pw' })
     addRecentPath('nas.local', 21, '/old', '2026-01-01 00:00:00.000')
     addRecentPath('NAS.local', 21, '/photos', '2026-01-02 00:00:00.000')
-    h.remote.addDir('/photos')
+    h.remote.addDir('/photos').setOffline()
 
     const first = dataOf(await call(client, 'connect', { server: 'nas' }))
 
@@ -98,6 +98,7 @@ describe('saved servers and connect', () => {
       expect.objectContaining({ id, host: 'nas.local', port: 21, user: 'me', password: 'pw' })
     )
     expect(h.sessions).toHaveBeenCalledWith({
+      server: 'me@nas.local:21',
       status: 'connected',
       serverId: id,
       host: 'nas.local',
@@ -112,22 +113,81 @@ describe('saved servers and connect', () => {
     expect(h.sessions).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/' }))
 
     expect(dataOf(await call(client, 'disconnect'))).toEqual({ disconnected: true })
-    expect(h.sessions).toHaveBeenLastCalledWith({ status: 'disconnected' })
+    expect(h.sessions).toHaveBeenLastCalledWith({
+      server: 'me@nas.local:21',
+      status: 'disconnected'
+    })
   })
 
-  it('refuses connect with BUSY while a transfer or a file operation is running', async () => {
-    // covers: Test-403
-    const id = addServer(h.db)
+  it('adds a connection without touching the others, and opens a folder on one already connected', async () => {
+    // covers: Test-1005
+    const B = 'kim@ftp.office.lan:2121'
+    const office = addServer(h.db, {
+      name: 'Office',
+      host: 'ftp.office.lan',
+      port: 2121,
+      user: 'kim'
+    })
+    const nas = addServer(h.db, { name: 'NAS', host: 'nas.local', user: 'me' })
     const job = h.queue.add({ status: 'active' })
+    h.operations.create('delete', { itemCount: 1, server: 'me@nas.local:21' }, 'files', 1)
 
-    expect(textOf(await call(client, 'connect', { server: id }))).toMatch(/^BUSY: .*wait_for_jobs/)
-    h.queue.finish(job.id, 'completed')
-    const op = h.operations.create('delete', { itemCount: 1 }, 'files', 1)
-    expect(textOf(await call(client, 'connect', { server: id }))).toMatch(/^BUSY: /)
+    const added = await call(client, 'connect', { server: 'Office' })
+
+    expect(dataOf(added)).toMatchObject({ server: { id: office }, path: '/' })
+    expect(h.connections.connectedKeys()).toEqual(['me@nas.local:21', B])
+    expect(h.remote.disconnect).not.toHaveBeenCalled()
+    expect(h.queue.getAll()).toEqual([job])
+    expect(h.sessions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ server: B, status: 'connected', serverId: office })
+    )
+
+    // 이미 연결된 서버: 다시 로그인하지 않고 그 폴더를 연다
+    h.remote.addDir('/photos')
+    h.remote.list.mockClear()
+    const again = await call(client, 'connect', { server: nas, path: '/photos' })
+
+    expect(dataOf(again)).toMatchObject({ server: { id: nas }, path: '/photos' })
     expect(h.remote.connect).not.toHaveBeenCalled()
+    expect(h.remote.list).toHaveBeenCalledWith('/photos')
+    expect(h.sessions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ server: 'me@nas.local:21', status: 'connected', path: '/photos' })
+    )
+  })
 
+  it('disconnects only the chosen server, refusing with BUSY while that server has work', async () => {
+    // covers: Test-1006
+    const A = 'me@nas.local:21'
+    const B = 'kim@ftp.office.lan:2121'
+    const b = h.connections.add(B)
+    const busy = async (): Promise<string> =>
+      textOf(await call(client, 'disconnect', { server: B }))
+
+    const transfer = h.connections.queues.get(B)!.add({ status: 'pending' })
+    expect(await busy()).toMatch(/^BUSY: /)
+    h.connections.queues.get(B)!.finish(transfer.id, 'completed')
+
+    // B가 보내는 쪽인 서버 간 작업(받는 쪽 A의 큐에 있어도)
+    const relay = h.queue.add({ status: 'active', sourceServer: B })
+    expect(await busy()).toMatch(/^BUSY: /)
+    h.queue.finish(relay.id, 'cancelled')
+
+    const op = h.operations.create('delete', { itemCount: 1, server: B }, 'files', 1)
+    expect(await busy()).toMatch(/^BUSY: /)
     h.operations.complete(op.id)
-    expect(dataOf(await call(client, 'connect', { server: id })).path).toBe('/')
+    expect(b.disconnect).not.toHaveBeenCalled()
+
+    // A의 작업만 있으면 B를 끊는다
+    h.queue.add({ status: 'active' })
+    h.operations.create('delete', { itemCount: 1, server: A }, 'files', 1)
+    h.deps.target.last = B
+    expect(dataOf(await call(client, 'disconnect', { server: B }))).toEqual({ disconnected: true })
+
+    expect(b.disconnect).toHaveBeenCalledTimes(1)
+    expect(h.remote.disconnect).not.toHaveBeenCalled()
+    expect(h.connections.connectedKeys()).toEqual([A])
+    expect(h.deps.target.last).toBeUndefined()
+    expect(h.sessions).toHaveBeenLastCalledWith({ server: B, status: 'disconnected' })
   })
 
   it('refuses disconnect with BUSY while transfers or file operations run, then disconnects', async () => {
@@ -152,6 +212,7 @@ describe('saved servers and connect', () => {
         )
         .run(fakeCipherOf('agent-Secret-718')).lastInsertRowid
     )
+    h.remote.setOffline()
     const stored = (): unknown =>
       h.db.prepare('SELECT password_enc, password_cipher FROM servers WHERE id = ?').get(id)
     const before = stored()
@@ -188,10 +249,11 @@ describe('saved servers and connect', () => {
     ]
 
     for (const server of ['NAS', 'nas.local:2121', rows[0].id, 'Alt']) {
+      for (const remote of h.connections.remotes.values()) remote.setOffline()
       expect((await call(client, 'connect', { server })).isError).toBeFalsy()
     }
 
-    const sent = h.remote.connect.mock.calls.map(([payload]) => payload as FtpConnectPayload)
+    const sent = h.connections.connect.mock.calls.map(([payload]) => payload as FtpConnectPayload)
     for (const payload of sent) {
       const row = h.db
         .prepare('SELECT id, host, port, username FROM servers WHERE id = ?')
@@ -266,7 +328,7 @@ describe('remote changes', () => {
 
     expect(created).toHaveBeenCalledWith(
       'delete',
-      { itemCount: 2, itemName: undefined },
+      { itemCount: 2, itemName: undefined, server: 'me@nas.local:21' },
       'files',
       2
     )

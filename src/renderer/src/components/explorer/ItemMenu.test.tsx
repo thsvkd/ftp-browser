@@ -16,6 +16,7 @@ import {
   remoteLoc,
   renderExplorer,
   server,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from './explorerTestHarness'
@@ -147,12 +148,49 @@ describe('ItemMenu — contents', () => {
     expect(labels.length).toBeLessThanOrEqual(9)
     const other = within(sub).getByRole('menuitem', { name: /other:21 › x/ })
     expect(other).toHaveProperty('disabled', true)
-    expect(other.getAttribute('title')).toBe(en['send.invalidOtherServer'])
+    expect(other.getAttribute('title')).toBe(en['send.invalidNotConnected'])
 
     fireEvent.click(within(sub).getByRole('menuitem', { name: /Downloads/ }))
     await act(async () => undefined)
     expect(invokeCalls(h.invoke, 'transfer:send')).toEqual([
-      [{ direction: 'download', sources: [`${DIR}/a.jpg`], destDir: 'C:\\Users\\me\\Downloads' }]
+      [
+        server(),
+        { direction: 'download', sources: [`${DIR}/a.jpg`], destDir: 'C:\\Users\\me\\Downloads' }
+      ]
+    ])
+  })
+
+  it("offers another connected server's tab as a copy target and a disconnected server's tab disabled", async () => {
+    // covers: Test-1026
+    const B = 'you@b.example:2121'
+    const C = 'kim@c.example:21'
+    await photos()
+    act(() => {
+      setConnection(B, 'connected')
+      setConnection(C, 'disconnected')
+      const tabs = useTabsStore.getState()
+      tabs.openTab({ side: 'remote', path: '/in', server: B }, false)
+      tabs.openTab({ side: 'remote', path: '/out', server: C }, false)
+    })
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['1'], skipped: [], conflicts: [], totalBytes: 1024 }
+    })
+    fireEvent.contextMenu(option('a.jpg'))
+    fireEvent.click(item(en['menu.sendTo']))
+    const sub = menus()[1]
+
+    const offline = within(sub).getByRole('menuitem', { name: /c\.example:21 › out/ })
+    expect(offline).toHaveProperty('disabled', true)
+    expect(offline.getAttribute('title')).toBe(en['send.invalidNotConnected'])
+    const other = within(sub).getByRole('menuitem', { name: /b\.example:2121 › in/ })
+    expect(other).toHaveProperty('disabled', false)
+
+    // 고르면 받는 쪽 연결로 서버 간 복사를 보낸다
+    fireEvent.click(other)
+    await act(async () => undefined)
+    expect(invokeCalls(h.invoke, 'transfer:send')).toEqual([
+      [B, { direction: 'relay', sourceServer: server(), sources: [`${DIR}/a.jpg`], destDir: '/in' }]
     ])
   })
 

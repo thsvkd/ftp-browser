@@ -13,6 +13,7 @@ function job(id: string, overrides: Partial<TransferJob> = {}): TransferJob {
   return {
     id,
     batchId: 'b',
+    server: 'me@nas.local:21',
     direction: 'download',
     localPath: `C:\\dl\\${id}`,
     remotePath: `/photos/${id}`,
@@ -66,5 +67,32 @@ describe('ActivityPill', () => {
     expect(container.querySelector('[data-tone="danger"]')?.textContent).toBe('1')
     // 화면 낭독기도 실패를 듣는다
     screen.getByRole('button', { name: 'Activity, Failed: 1' })
+  })
+
+  it('shows the server-to-server icon only when every running job is a relay', () => {
+    // covers: Test-1038
+    const relay = (id: string): TransferJob =>
+      job(id, {
+        direction: 'relay',
+        server: 'you@b.example:2121',
+        sourceServer: 'me@nas.local:21',
+        sourcePath: `/photos/${id}`,
+        localPath: '',
+        status: 'active'
+      })
+    const icon = (): Element | null => screen.getByRole('button').querySelector('.lucide')
+    useTransferStore.setState({ jobs: [relay('a'), relay('b')] })
+    const { rerender } = render(<ActivityPill />)
+    expect(icon()?.classList.contains('lucide-arrow-left-right')).toBe(true)
+
+    useTransferStore.setState({ jobs: [relay('a'), job('c', { status: 'active' })] })
+    rerender(<ActivityPill />)
+    expect(icon()?.classList.contains('lucide-arrow-down-to-line')).toBe(true)
+
+    useTransferStore.setState({
+      jobs: [job('d', { direction: 'upload', status: 'active' })]
+    })
+    rerender(<ActivityPill />)
+    expect(icon()?.classList.contains('lucide-arrow-up-from-line')).toBe(true)
   })
 })

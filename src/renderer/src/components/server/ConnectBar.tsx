@@ -4,6 +4,8 @@ import { cn } from '@renderer/lib/utils'
 import { useT } from '@renderer/i18n'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
+import { useActiveTab } from '@renderer/stores/useTabsStore'
+import { savedServerOf } from '@renderer/lib/connections'
 import {
   emptyDraft,
   serverAddress,
@@ -25,12 +27,22 @@ const BARE = 'h-full rounded-none border-0 focus:border-transparent focus:ring-0
 const SAVED_PASSWORD_DOTS = '••••••••'
 
 /**
- * Toolbar connect UI. Disconnected: saved-servers button, address, password, FTPS lock,
- * server manager and Connect. Connected: the current server, which switches servers.
+ * Toolbar connect UI. When the active tab's server is connected (MC16) it shows that server, which
+ * opens the saved-servers list to add or switch to another. Otherwise: saved-servers button,
+ * address, password, FTPS lock, server manager and Connect.
  */
 export function ConnectBar(): React.JSX.Element {
-  const isConnected = useFtpStore((s) => s.connectionStatus === 'connected')
-  const connectedHost = useFtpStore((s) => s.host)
+  const tab = useActiveTab()
+  const activeServer = tab?.loc.side === 'remote' ? tab.loc.server : undefined
+  const active = useFtpStore((s) =>
+    activeServer && s.connections[activeServer]?.status === 'connected'
+      ? s.connections[activeServer]
+      : undefined
+  )
+  const isConnected = active !== undefined
+  const activeSaved = useServerStore((s) =>
+    activeServer ? savedServerOf(s.servers, activeServer) : undefined
+  )
   const draft = useServerStore((s) => s.draft)
   const address = useServerStore((s) => s.address)
   const connecting = useServerStore((s) => s.connecting)
@@ -79,12 +91,12 @@ export function ConnectBar(): React.JSX.Element {
 
   // 연결 중 클릭은 스토어가 무시한다(select·connect가 아무것도 바꾸지 않음).
   const pick = (server: FtpServer, andConnect: boolean): void => {
-    // 이미 연결된 서버를 다시 고르면 끊었다 잇지 않고 닫기만 한다.
-    if (isConnected && server.id === draft.id) {
+    // 이미 연결된 서버(활성 탭의 서버)를 다시 고르면 다시 잇지 않고 닫기만 한다.
+    if (isConnected && server.id === (activeSaved?.id ?? draft.id)) {
       closePopover()
       return
     }
-    // 연결된 상태에서 고르면 그 서버로 전환한다.
+    // 연결된 상태에서 고르면 그 서버를 더해 그 서버의 탭으로 간다.
     if (andConnect || isConnected) {
       setPopover(false)
       void connect(toDraft(server))
@@ -113,6 +125,18 @@ export function ConnectBar(): React.JSX.Element {
       }}
     />
   )
+  // 연결 시도의 상태(진행 문구·실패)는 두 모드에 같이 보인다: 연결된 탭에서 다른 서버를 더하다
+  // 실패해도 알 수 있어야 한다(multi-connection B1 뒤로는 연결된 표시줄이 그대로 남는다).
+  const connectingEl = connecting && !manager && (
+    <span className="truncate text-xs text-[var(--mu)]">
+      {t('connect.connectingTo', { name: serverLabel(draft) })}
+    </span>
+  )
+  const errorEl = error && !popover && !manager && (
+    <div className="absolute left-0 top-[calc(100%+8px)] z-40 w-[440px] max-w-[calc(100vw-24px)]">
+      <ErrorNote message={error} onClose={clearError} className="shadow-lg" />
+    </div>
+  )
   const managerEl = manager && (
     <ServerManagerDialog
       initial={manager}
@@ -139,9 +163,18 @@ export function ConnectBar(): React.JSX.Element {
   )
 
   function connectedBar(): React.JSX.Element {
-    const label = serverLabel(draft) || connectedHost
+    // 활성 탭의 연결: 저장된 서버면 그 별칭·주소, 아니면 연결의 주소
+    const shown: ServerDraft = activeSaved
+      ? toDraft(activeSaved)
+      : {
+          ...emptyDraft(),
+          host: active?.host ?? '',
+          port: String(active?.port ?? 21),
+          username: active?.user ?? ''
+        }
+    const label = serverLabel(shown)
     return (
-      <div ref={barRef} className="relative flex min-w-0 items-center">
+      <div ref={barRef} className="relative flex min-w-0 items-center gap-2">
         <button
           ref={triggerRef}
           onClick={() => setPopover((p) => !p)}
@@ -155,12 +188,19 @@ export function ConnectBar(): React.JSX.Element {
         >
           <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--ok)]" />
           <span className="truncate text-[13px] font-medium text-[var(--tx)]">{label}</span>
-          {draft.host && (
-            <span className="truncate text-xs text-[var(--mu)]">{serverAddress(draft)}</span>
+          {shown.host && (
+            <span className="truncate text-xs text-[var(--mu)]">{serverAddress(shown)}</span>
           )}
           <ChevronDown size={14} className="shrink-0 text-[var(--mu)]" />
         </button>
+        {connecting && (
+          <button className={btn('secondary', 'md', 'min-w-[76px]')} onClick={cancel}>
+            {t('common.cancel')}
+          </button>
+        )}
+        {connectingEl}
         {popoverEl}
+        {errorEl}
       </div>
     )
   }
@@ -285,18 +325,10 @@ export function ConnectBar(): React.JSX.Element {
             {t('connect.connect')}
           </button>
         )}
-        {connecting && !manager && (
-          <span className="truncate text-xs text-[var(--mu)]">
-            {t('connect.connectingTo', { name: serverLabel(draft) })}
-          </span>
-        )}
+        {connectingEl}
 
         {popoverEl}
-        {error && !popover && !manager && (
-          <div className="absolute left-0 top-[calc(100%+8px)] z-40 w-[440px] max-w-[calc(100vw-24px)]">
-            <ErrorNote message={error} onClose={clearError} className="shadow-lg" />
-          </div>
-        )}
+        {errorEl}
       </div>
     )
   }

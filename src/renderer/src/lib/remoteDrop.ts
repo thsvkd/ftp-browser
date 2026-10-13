@@ -1,8 +1,6 @@
 import { toast } from 'sonner'
 import { t } from '@renderer/i18n'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
-import { connectedServer } from './sendItems'
 import type { IpcResult } from '@shared/types/ipc'
 
 /** Shape stored in the dataTransfer when dragging files out of the remote panel. */
@@ -44,9 +42,9 @@ export function planRemoteMoves(items: RemoteFileDragItem[], targetPath: string)
   return moves
 }
 
-/** One RNFR/RNTO. Resolves the failure reason, or null on success. */
-async function rename(from: string, to: string): Promise<string | null> {
-  const result = await window.api.invoke<IpcResult<void>>('ftp:rename', from, to)
+/** One RNFR/RNTO on `server`. Resolves the failure reason, or null on success. */
+async function rename(server: string, from: string, to: string): Promise<string | null> {
+  const result = await window.api.invoke<IpcResult<void>>('ftp:rename', server, from, to)
   return result.success ? null : result.error
 }
 
@@ -55,31 +53,32 @@ async function rename(from: string, to: string): Promise<string | null> {
  * some servers and fails on others (K4), so park the target under a hidden name, move, then
  * delete the parked file. If the move fails, the target goes back.
  */
-async function replaceRemote(move: RemoteMove): Promise<string | null> {
+async function replaceRemote(server: string, move: RemoteMove): Promise<string | null> {
   const name = move.newPath.slice(move.newPath.lastIndexOf('/') + 1)
   const aside = joinRemotePath(
     remoteDirname(move.newPath),
     `.${name}.${Math.random().toString(36).slice(2, 10)}.old`
   )
-  const parked = await rename(move.newPath, aside)
+  const parked = await rename(server, move.newPath, aside)
   if (parked) return parked
-  const moved = await rename(move.oldPath, move.newPath)
+  const moved = await rename(server, move.oldPath, move.newPath)
   if (moved) {
-    const back = await rename(aside, move.newPath)
+    const back = await rename(server, aside, move.newPath)
     return back ? `${moved} (${aside}: ${back})` : moved
   }
-  const result = await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', [
+  const result = await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', server, [
     { path: aside, isDirectory: false }
   ])
   return result.success ? null : result.error
 }
 
 /**
- * Move dragged remote files into `targetPath` via FTP rename (RNFR/RNTO). Targets listed in
- * `replace` already exist and are replaced. Resolves true when every planned move succeeded
- * (failures are toasted).
+ * Move dragged remote files into `targetPath` on `server` via FTP rename (RNFR/RNTO). Targets
+ * listed in `replace` already exist and are replaced. Resolves true when every planned move
+ * succeeded (failures are toasted).
  */
 export async function moveRemoteFiles(
+  server: string,
   items: RemoteFileDragItem[],
   targetPath: string,
   replace: ReadonlySet<string> = new Set()
@@ -91,8 +90,8 @@ export async function moveRemoteFiles(
   const errors: string[] = []
   for (const move of moves) {
     const error = replace.has(move.newPath)
-      ? await replaceRemote(move)
-      : await rename(move.oldPath, move.newPath)
+      ? await replaceRemote(server, move)
+      : await rename(server, move.oldPath, move.newPath)
     if (error === null) moved++
     else errors.push(`${move.newPath}: ${error}`)
   }
@@ -103,7 +102,6 @@ export async function moveRemoteFiles(
   }
   if (moved > 0) {
     // 옮긴 쪽과 받은 쪽 폴더의 목록을 다시 읽는다(읽은 적이 있는 것만).
-    const server = connectedServer(useFtpStore.getState()) ?? undefined
     const dirs = new Set([targetPath, ...moves.map((m) => remoteDirname(m.oldPath))])
     for (const dir of dirs) useListingStore.getState().invalidate('remote', server, dir)
   }

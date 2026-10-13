@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { en } from '@renderer/i18n/locales/en'
+import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { useLayoutStore } from '@renderer/stores/useLayoutStore'
@@ -10,6 +11,7 @@ import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { emptyDraft } from '@renderer/lib/serverAddress'
 import {
   activeTab,
+  flush,
   ftp,
   local,
   option,
@@ -85,6 +87,49 @@ describe('AppShell — start and connect', () => {
     await waitFor(() =>
       expect(activeTab().loc).toEqual({ side: 'remote', path: '/', server: 'me@nas.local:21' })
     )
+  })
+})
+
+describe('AppShell — connection status', () => {
+  it('subscribes to ftp:connectionStatus once for the app, with or without tabs', async () => {
+    // covers: Test-1033
+    const B = 'bob@b.example.com:2121'
+    const A = 'alice@a.example.com:21'
+    h.handlers['local:getHome'] = () => ({ success: false, error: 'no home' })
+    const handlers: Array<(...args: unknown[]) => void> = []
+    const unsubscribe = vi.fn()
+    h.api.on.mockImplementation((channel: string, handler: (...args: unknown[]) => void) => {
+      if (channel !== 'ftp:connectionStatus') return () => undefined
+      handlers.push(handler)
+      return unsubscribe
+    })
+    const view = render(<AppShell />)
+    await flush()
+    expect(useTabsStore.getState().tabs).toHaveLength(0)
+    expect(handlers).toHaveLength(1)
+
+    act(() =>
+      handlers[0]({
+        server: B,
+        status: 'connected',
+        host: 'b.example.com',
+        port: 2121,
+        user: 'bob'
+      })
+    )
+    expect(useFtpStore.getState().connections[B].status).toBe('connected')
+
+    act(() => {
+      useTabsStore.getState().openTab({ side: 'remote', path: '/', server: A })
+      useTabsStore.getState().openTab({ side: 'remote', path: '/', server: B })
+    })
+    await flush()
+    act(() => useTabsStore.getState().cycleTab(1))
+    await flush()
+    expect(handlers).toHaveLength(1)
+
+    view.unmount()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -3,10 +3,9 @@ import { Writable } from 'stream'
 import path from 'path'
 import Database from 'better-sqlite3'
 import { Client } from 'basic-ftp'
-import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
+import { sessionIpcError, type ConnectionRegistry } from '../ftp/ConnectionRegistry'
 import { PreviewCacheManager } from '../preview/PreviewCacheManager'
 import { generateCacheKey } from '../utils/cacheKey'
-import { ipcError } from '../utils/errorClassifier'
 import { MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
 import type { IpcResult } from '@shared/types/ipc'
 
@@ -39,16 +38,15 @@ interface PreviewRequest {
   modifiedAt: string
 }
 
-export function registerPreviewHandlers(
-  db: Database.Database,
-  ftpManager: FtpConnectionManager
-): void {
+export function registerPreviewHandlers(db: Database.Database, registry: ConnectionRegistry): void {
   const cacheManager = new PreviewCacheManager(db)
 
   ipcMain.handle(
     'ftp:downloadPreview',
-    async (_event, req: PreviewRequest): Promise<IpcResult<string>> => {
+    async (_event, conn: unknown, req: PreviewRequest): Promise<IpcResult<string>> => {
       try {
+        const session = registry.require(conn)
+        const ftpManager = session.manager
         if (req.fileSize > MAX_IMAGE_SIZE_BYTES) {
           return { success: false, error: 'File too large for preview' }
         }
@@ -57,13 +55,7 @@ export function registerPreviewHandlers(
         const mime = MIME_MAP[ext] || 'image/jpeg'
 
         // 캐시 키 생성
-        const cacheKey = generateCacheKey(
-          ftpManager.getHost(),
-          ftpManager.getPort(),
-          req.remotePath,
-          req.fileSize,
-          req.modifiedAt
-        )
+        const cacheKey = generateCacheKey(session.key, req.remotePath, req.fileSize, req.modifiedAt)
 
         // 캐시 조회
         const cached = cacheManager.lookup(cacheKey)
@@ -101,7 +93,7 @@ export function registerPreviewHandlers(
         const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`
         return { success: true, data: dataUrl }
       } catch (err) {
-        return ipcError(err)
+        return sessionIpcError(err)
       }
     }
   )

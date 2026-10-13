@@ -1,6 +1,6 @@
 import { Client } from 'basic-ftp'
 import { Writable } from 'stream'
-import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
+import type { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import { ThumbnailGenerator } from './ThumbnailGenerator'
 import { CacheManager } from './CacheManager'
 import { generateCacheKey } from '../utils/cacheKey'
@@ -26,6 +26,12 @@ export interface ThumbnailResult {
   fromCache: boolean
 }
 
+/** 썸네일을 받는 연결(세션의 매니저) */
+export type ThumbnailSource = Pick<
+  FtpConnectionManager,
+  'getHost' | 'getPort' | 'getConnKey' | 'createSecondaryClient' | 'runOnMainClient'
+>
+
 type ReadyCallback = (result: ThumbnailResult) => void
 type ErrorCallback = (cacheKey: string, error: string) => void
 
@@ -34,8 +40,11 @@ export class ThumbnailQueue {
   private activeCount = 0
   /** 진행 중인 키 → 시작한 세대. cancelAll 뒤의 옛 세대 작업은 같은 키의 새 요청을 막지 않는다 */
   private processing = new Map<string, number>()
-  /** 직전 requestBatch의 키. 다음 배치는 이 중 빠진 미시작 항목을 버린다 */
-  private batchKeys = new Set<string>()
+  /**
+   * 뷰어(패널)별 직전 requestBatch의 키 → priority. 같은 뷰어의 다음 배치는 이 중 빠진 미시작 항목을
+   * 버리되, 다른 뷰어가 아직 원하는 항목은 남긴다(multi-connection §4.3). 빈 배치는 항목을 두지 않는다.
+   */
+  private batches = new Map<string, Map<string, number>>()
 
   // FTP 클라이언트 풀
   private clientPool: Client[] = []
@@ -45,7 +54,7 @@ export class ThumbnailQueue {
   private generation = 0
 
   constructor(
-    private ftpManager: FtpConnectionManager,
+    private ftpManager: ThumbnailSource,
     private generator: ThumbnailGenerator,
     private cacheManager: CacheManager,
     private onReady: ReadyCallback,
@@ -59,8 +68,7 @@ export class ThumbnailQueue {
 
   private cacheKeyOf(req: ThumbnailRequest): string {
     return generateCacheKey(
-      this.ftpManager.getHost(),
-      this.ftpManager.getPort(),
+      this.ftpManager.getConnKey(),
       req.remotePath,
       req.fileSize,
       req.modifiedAt
@@ -98,23 +106,38 @@ export class ThumbnailQueue {
   }
 
   /**
-   * 그리드 뷰포트 배치. 직전 배치를 교체한다: 직전 배치로 들어와 아직 시작하지 않은 항목 중
-   * 이번 배치에 없는 것은 버리고, 남는 항목은 이번 priority로 재정렬한 뒤 새 항목을 넣는다.
-   * 진행 중인 다운로드와 단건 request()로만 들어온 항목은 건드리지 않는다.
+   * 그리드 뷰포트 배치. 그 뷰어의 직전 배치를 교체한다: 직전 배치로 들어와 아직 시작하지 않은 항목 중
+   * 이번 배치에 없고 다른 뷰어도 원하지 않는 것은 버리고, 남는 항목은 원하는 뷰어들 중 가장 작은
+   * priority로 재정렬한 뒤 새 항목을 넣는다. 진행 중인 다운로드와 단건 request()로만 들어온 항목은
+   * 건드리지 않는다.
    */
-  requestBatch(requests: ThumbnailRequest[]): string[] {
+  requestBatch(viewerId: string, requests: ThumbnailRequest[]): string[] {
     const keys = requests.map((req) => this.cacheKeyOf(req))
-    const wanted = new Set(keys)
-    this.queue = this.queue.filter((q) => wanted.has(q.cacheKey) || !this.batchKeys.has(q.cacheKey))
-    this.batchKeys = wanted
-    this.updatePriorities(new Map(keys.map((key, i) => [key, requests[i].priority])))
+    const next = new Map(keys.map((key, i) => [key, requests[i].priority]))
+    const prev = this.batches.get(viewerId)
+    if (next.size > 0) this.batches.set(viewerId, next)
+    else this.batches.delete(viewerId)
+    if (prev) this.dropUnwanted(prev.keys())
+    this.refreshPriorities(new Set([...(prev?.keys() ?? []), ...next.keys()]))
     // request()는 빈 슬롯이 있으면 바로 시작하므로 priority 순으로 넣는다(안정 정렬: 같은 값은 입력 순서)
     const ordered = [...requests].sort((a, b) => a.priority - b.priority)
     for (const req of ordered) this.request(req)
     return keys
   }
 
-  cancelAll(): void {
+  /**
+   * 뷰어의 배치를 잊고, 그 뷰어만 원하던 대기 항목을 버린다. 다른 뷰어의 배치가 남아 있으면 그들의
+   * 대기·진행 항목과 클라이언트는 그대로 둔다. 남은 배치가 없으면(뷰어를 주지 않은 호출 포함) 전부
+   * 취소한다: 대기·단건을 비우고 클라이언트를 닫고 세대를 올린다.
+   */
+  cancelAll(viewerId?: string): void {
+    const prev = viewerId === undefined ? undefined : this.batches.get(viewerId)
+    if (viewerId !== undefined) this.batches.delete(viewerId)
+    if (viewerId !== undefined && this.batches.size > 0) {
+      if (prev) this.dropUnwanted(prev.keys())
+      return
+    }
+    this.batches.clear()
     this.queue = []
     this.generation++
     for (const client of this.clientPool) {
@@ -124,6 +147,33 @@ export class ThumbnailQueue {
     this.availableClients = []
     // 재연결/재시도 시 보조 클라이언트 사용을 다시 시도하도록 플래그 리셋
     this.secondaryFailed = false
+  }
+
+  /** `keys` 중 어느 뷰어의 현재 배치에도 없는 대기 항목을 버린다 */
+  private dropUnwanted(keys: Iterable<string>): void {
+    const candidates = new Set(keys)
+    this.queue = this.queue.filter(
+      (q) => !candidates.has(q.cacheKey) || this.wantedPriority(q.cacheKey) !== undefined
+    )
+  }
+
+  /** 뷰어들이 원하는 priority 중 가장 작은 값. 아무도 원하지 않으면 undefined */
+  private wantedPriority(key: string): number | undefined {
+    let best: number | undefined
+    for (const batch of this.batches.values()) {
+      const p = batch.get(key)
+      if (p !== undefined && (best === undefined || p < best)) best = p
+    }
+    return best
+  }
+
+  private refreshPriorities(keys: Set<string>): void {
+    const priorities = new Map<string, number>()
+    for (const key of keys) {
+      const p = this.wantedPriority(key)
+      if (p !== undefined) priorities.set(key, p)
+    }
+    this.updatePriorities(priorities)
   }
 
   updatePriorities(priorities: Map<string, number>): void {

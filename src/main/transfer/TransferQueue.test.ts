@@ -3039,4 +3039,99 @@ describe('TransferQueue', () => {
       expect(update.removedIds).toEqual([id])
     })
   })
+
+  describe('borrow', () => {
+    it('waits in line for a slot, holds it as running, and gives it back through done', async () => {
+      // covers: Test-980
+      pool.limit = 1
+      const transfers = deferTransfers(mockFileOps.download)
+      queue.enqueueBatch('download', items(1, 'a'))
+      await settle()
+      expect(queue.getAll().map((job) => job.status)).toEqual(['active'])
+
+      let lent: Awaited<ReturnType<TransferQueue['borrow']>> | undefined
+      void queue.borrow().then((lease) => (lent = lease))
+      queue.enqueueBatch('download', items(1, 'b'))
+      await settle()
+      expect(lent).toBeUndefined()
+
+      // 앞의 작업이 끝나면 빌림이 슬롯을 받는다. 빌린 동안 다음 작업은 시작하지 않는다
+      transfers.get('/remote/a0.jpg')!.resolve()
+      await settle()
+      expect(lent?.client).toBe(pool.clients[1])
+      expect(queue.getAll().map((job) => job.status)).toEqual(['completed', 'pending'])
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(queue.getAll()[1].status).toBe('pending')
+
+      // done()은 release이고 그 뒤 다음 작업이 시작된다
+      lent!.done()
+      lent!.done()
+      await settle()
+      expect(pool.release).toHaveBeenCalledWith(pool.clients[1])
+      expect(pool.discard).not.toHaveBeenCalled()
+      expect(queue.getAll()[1].status).toBe('active')
+
+      // done(err)은 그 클라이언트를 버린다
+      transfers.get('/remote/b0.jpg')!.resolve()
+      await settle()
+      const second = await queue.borrow()
+      second!.done(new Error('boom'))
+      expect(pool.discard).toHaveBeenCalledWith(second!.client)
+      expect(pool.release).not.toHaveBeenCalledWith(second!.client)
+    })
+
+    it('lends null without a secondary connection, rejects on login give-up and leaves the line on abort', async () => {
+      // covers: Test-981
+      pool.acquire.mockResolvedValueOnce(null)
+      await expect(queue.borrow()).resolves.toBeNull()
+
+      // 로그인 실패가 쌓여 큐가 대기를 모두 실패시키면 기다리던 빌림도 그 오류로 거절된다
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const loginIncorrect = new FTPError({ code: 530, message: '530 Login incorrect' })
+      pool.acquire.mockRejectedValue(loginIncorrect)
+      const refused = queue.borrow()
+      refused.catch(() => {})
+      await vi.advanceTimersByTimeAsync(LOGIN_HOLD_TOTAL)
+      await expect(refused).rejects.toBe(loginIncorrect)
+
+      // 줄에서 기다리던 빌림을 abort하면 줄에서 빠지고 슬롯을 차지하지 않는다
+      pool.acquire.mockReset()
+      pool.acquire.mockImplementation(async () => {
+        const client = createFakeClient()
+        pool.clients.push(client)
+        return client
+      })
+      pool.limit = 1
+      const transfers = deferTransfers(mockFileOps.download)
+      queue.enqueueBatch('download', items(1, 'a'))
+      await settle()
+      const waiting = new AbortController()
+      const aborted = queue.borrow(waiting.signal)
+      aborted.catch(() => {})
+      queue.enqueueBatch('download', items(1, 'b'))
+      waiting.abort()
+      await expect(aborted).rejects.toThrow()
+      transfers.get('/remote/a0.jpg')!.resolve()
+      await settle()
+      expect(queue.getAll().map((job) => job.status)).toEqual(['completed', 'active'])
+      transfers.get('/remote/b0.jpg')!.resolve()
+      await settle()
+
+      // 클라이언트를 받는 중에 abort하면 받은 클라이언트는 그대로 돌려준다
+      let login!: (client: FakeClient) => void
+      pool.acquire.mockImplementationOnce(
+        () => new Promise<FakeClient>((resolve) => (login = resolve))
+      )
+      const late = new AbortController()
+      const lateBorrow = queue.borrow(late.signal)
+      lateBorrow.catch(() => {})
+      await settle()
+      late.abort()
+      const client = createFakeClient()
+      login(client)
+      await settle()
+      await expect(lateBorrow).rejects.toThrow()
+      expect(pool.release).toHaveBeenCalledWith(client)
+    })
+  })
 })

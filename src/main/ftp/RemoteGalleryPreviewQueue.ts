@@ -3,6 +3,7 @@ import { FtpConnectionManager } from './FtpConnectionManager'
 import { RemoteFolderPreviewCache } from './RemoteFolderPreviewCache'
 import { normalizeRemotePath } from '../utils/remotePath'
 import { isImageFile } from '@shared/constants'
+import { parseConnKey } from '@shared/connKey'
 import type { RemoteFolderPreview } from '@shared/types/gallery'
 
 const PREVIEW_TIMEOUT_MS = 15_000
@@ -11,7 +12,10 @@ const MAX_CONCURRENT = 2
 interface PendingItem {
   host: string
   port: number
+  user: string
   remotePath: string
+  /** 이 폴더를 기다리는 뷰어(패널) id. 모두 취소하면 거절한다(multi-connection §4.3-5) */
+  owners: Set<string>
   resolve: (value: RemoteFolderPreview | null) => void
   reject: (err: Error) => void
 }
@@ -22,8 +26,9 @@ interface PendingItem {
  * - 매 요청마다 secondary FTP client를 새로 만들지 않고 풀에서 재사용 → 동시 연결 폭발 방지
  * - maxConcurrent로 동시 처리 제한 → 서버 connection 한도 초과 방지
  * - 메인 client에는 절대 손대지 않음 → 사용자 navigation과 충돌 방지
- * - 결과는 SQLite(`folder_previews`)에 영구 캐시. 재방문 시 LIST 재발급 없이 즉시 응답.
- * - 동일 (host,port,path) 동시 요청은 in-flight promise를 공유 → 중복 LIST 방지
+ * - 결과는 SQLite(`remote_folder_previews`)에 연결(host·port·사용자)별로 영구 캐시. 재방문 시 LIST 재발급 없이 즉시 응답.
+ * - 동일 (연결,path) 동시 요청은 in-flight promise를 공유 → 중복 LIST 방지. 항목은 기다리는 뷰어 집합을
+ *   가지며, 한 뷰어의 취소는 다른 뷰어가 기다리는 항목을 거절하지 않는다
  */
 export class RemoteGalleryPreviewQueue {
   private queue: PendingItem[] = []
@@ -32,45 +37,68 @@ export class RemoteGalleryPreviewQueue {
   private availableClients: Client[] = []
   private secondaryUnavailable = false
   private inFlight = new Map<string, Promise<RemoteFolderPreview | null>>()
+  /** inFlight와 같은 키의 항목(대기·진행 중). 소유 뷰어를 여기서 고친다 */
+  private pending = new Map<string, PendingItem>()
 
   constructor(
     private ftpManager: FtpConnectionManager,
     private cache: RemoteFolderPreviewCache
   ) {}
 
-  request(remotePath: string): Promise<RemoteFolderPreview | null> {
-    const host = this.ftpManager.getHost()
-    const port = this.ftpManager.getPort()
+  request(remotePath: string, viewerId: string): Promise<RemoteFolderPreview | null> {
+    // 세션 매니저의 키는 늘 connKey로 만든 그 세션의 키다(요청은 연결된 세션에만 온다)
+    const { host, port, user } = parseConnKey(this.ftpManager.getConnKey())!
     const path = normalizeRemotePath(remotePath)
 
     // 캐시 hit이면 LIST 재발급 없이 즉시 반환. undefined만 캐시 미스이므로 큐로 진행.
-    const cached = this.cache.lookup(host, port, path)
+    const cached = this.cache.lookup(host, port, user, path)
     if (cached !== undefined) {
       return Promise.resolve(cached)
     }
 
     // 동일 키의 진행 중 요청이 있으면 그 promise를 공유 (TOCTOU 방지, 중복 LIST 방지).
-    const flightKey = `${host}|${port}|${path}`
+    const flightKey = `${user}@${host}:${port}|${path}`
     const existing = this.inFlight.get(flightKey)
-    if (existing) return existing
+    if (existing) {
+      this.pending.get(flightKey)?.owners.add(viewerId)
+      return existing
+    }
 
     const promise = new Promise<RemoteFolderPreview | null>((resolve, reject) => {
-      this.queue.push({ host, port, remotePath: path, resolve, reject })
+      const item: PendingItem = {
+        host,
+        port,
+        user,
+        remotePath: path,
+        owners: new Set([viewerId]),
+        resolve,
+        reject
+      }
+      this.pending.set(flightKey, item)
+      this.queue.push(item)
       void this.processNext()
     }).finally(() => {
       this.inFlight.delete(flightKey)
+      this.pending.delete(flightKey)
     })
 
     this.inFlight.set(flightKey, promise)
     return promise
   }
 
-  cancelAll(): void {
-    const pending = this.queue
+  /**
+   * 뷰어를 모든 항목의 소유에서 뺀다. 소유가 빈 대기 항목은 'Cancelled'로 거절한다. 다른 뷰어가 기다리는
+   * 항목이 남아 있으면 클라이언트는 그대로 두고, 하나도 없으면 연결을 모두 닫는다.
+   */
+  cancelAll(viewerId: string): void {
+    for (const item of this.pending.values()) item.owners.delete(viewerId)
+    const waiting = this.queue
     this.queue = []
-    for (const item of pending) {
-      item.reject(new Error('Cancelled'))
+    for (const item of waiting) {
+      if (item.owners.size === 0) item.reject(new Error('Cancelled'))
+      else this.queue.push(item)
     }
+    for (const item of this.pending.values()) if (item.owners.size > 0) return
     for (const client of this.clientPool) {
       try {
         client.close()
@@ -144,8 +172,8 @@ export class RemoteGalleryPreviewQueue {
       client = null
 
       // 결과를 영구 캐시. preview가 null인 경우(이미지 없음)도 저장하여 재방문 시 LIST 생략.
-      // request 시점의 host/port를 사용(disconnect/reconnect 사이에도 안정적).
-      this.cache.store(item.host, item.port, item.remotePath, preview)
+      // request 시점의 연결을 사용(disconnect/reconnect 사이에도 안정적).
+      this.cache.store(item.host, item.port, item.user, item.remotePath, preview)
 
       item.resolve(preview)
     } catch (err) {

@@ -96,6 +96,8 @@ export const es = {
   'status.connecting': 'Conectando…',
   'status.connected': 'Conectado',
   'status.error': 'Error de conexión',
+  'status.connections_one': '{{count}} servidor conectado',
+  'status.connections_other': '{{count}} servidores conectados',
   'status.folderCount_one': '{{count}} carpeta',
   'status.folderCount_other': '{{count}} carpetas',
   'status.fileCount_one': '{{count}} archivo',
@@ -265,6 +267,7 @@ export const es = {
   'sidebar.serverConnecting': 'Conectando…',
   'sidebar.serverLost': 'Desconectado · haz clic para volver a conectar',
   'sidebar.serverOffline': 'Sin conexión · haz clic para conectar',
+  'sidebar.disconnect': 'Desconectar {{name}}',
 
   'place.desktop': 'Escritorio',
   'place.downloads': 'Descargas',
@@ -322,7 +325,7 @@ export const es = {
   'explorer.listing_other': 'Cargando lista… {{count}} entradas',
   'explorer.noMatch': 'Ningún elemento coincide con “{{query}}”',
   'explorer.showAll': 'Mostrar todo',
-  'explorer.otherServer': 'Esta pestaña es una ubicación en {{server}}',
+  'explorer.serverOffline': 'No conectado a {{server}}',
   'explorer.connectTo': 'Conectar a {{server}}',
   'explorer.offlineHint': 'Conéctate para abrir esta ubicación.',
   'explorer.staleBanner': 'Se perdió la conexión. Se muestra la última lista cargada.',
@@ -369,7 +372,6 @@ export const es = {
   'send.invalidNothing': 'No hay nada que enviar',
   'send.invalidIntoItself': 'Una carpeta no puede ir dentro de sí misma',
   'send.invalidNotConnected': 'Sin conexión con un servidor',
-  'send.invalidOtherServer': 'Conectado a otro servidor',
   'send.invalidHere': 'Ya está en esta carpeta',
   'send.invalidRemoteCopy': 'No se admite copiar dentro del servidor',
 
@@ -428,6 +430,7 @@ export const es = {
   'activity.preparing': 'Preparando {{label}}…',
   'activity.labelMany_one': '{{name}} y {{count}} más',
   'activity.labelMany_other': '{{name}} y {{count}} más',
+  'activity.relay': 'Copia entre servidores',
   'duration.seconds': '{{number}} s',
   'duration.minutes': '{{number}} min',
   'duration.hours': '{{number}} h',
@@ -464,5 +467,6 @@ export const es = {
   'toast.sendSkipped_one': 'Se omitió {{count}} elemento',
   'toast.sendSkipped_other': 'Se omitieron {{count}} elementos',
   'toast.sendFailed': 'No se pudo iniciar la transferencia',
+  'toast.relayPartialRemoved': 'Se eliminó la copia incompleta de {{name}} en {{server}}',
   'toast.retryFailed': 'No se pudo reintentar'
 } satisfies LocaleMessages

@@ -2,11 +2,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
+import { useFtpStore, type ConnInfo } from '@renderer/stores/useFtpStore'
+import { useListingStore } from '@renderer/stores/useListingStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
+import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { makeApiMock, invokeCalls, type ApiMock } from '@renderer/test/rendererTestUtils'
 import type { LocalFileEntry } from '@shared/types/local'
-import { fromLocalEntry } from './explorerEntry'
-import { shelveOsFiles } from './sendItems'
+import { fromLocalEntry, type Loc } from './explorerEntry'
+import { reloadActiveTab, shelveOsFiles } from './sendItems'
 
 vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }),
@@ -165,5 +168,60 @@ describe('shelveOsFiles', () => {
     invoke.mockResolvedValue(ok([entry('C:\\in\\a.jpg'), entry('C:\\in\\c.jpg')]))
     expect(await shelveOsFiles([file('a.jpg'), file('b.jpg'), file('c.jpg')])).toBe(0)
     expect(vi.mocked(toast).mock.calls).toEqual([[skipped(1)], [en['toast.alreadyOnShelf']]])
+  })
+})
+
+describe('reloadActiveTab', () => {
+  const A = 'alice@a.example.com:21'
+  const B = 'bob@b.example.com:2121'
+  const info = (status: ConnInfo['status'], host: string): ConnInfo => ({
+    status,
+    host,
+    port: 21,
+    user: 'u',
+    error: null
+  })
+  const openOnly = (loc: Loc): void => {
+    useTabsStore.setState({ tabs: [], activeId: '', recent: [] })
+    useTabsStore.getState().openTab(loc)
+  }
+  const reload = (): void => {
+    invoke.mockClear()
+    useListingStore.setState({ byKey: {} })
+    reloadActiveTab()
+  }
+
+  beforeEach(() => {
+    invoke.mockResolvedValue({ success: true, data: { path: '/', entries: [] } })
+  })
+
+  it("reads the active tab only when that tab's own server is connected", () => {
+    // covers: Test-1035
+    openOnly({ side: 'remote', path: '/photos', server: B })
+    useFtpStore.setState({
+      connections: { [A]: info('disconnected', 'a'), [B]: info('connected', 'b') }
+    })
+    reload()
+    expect(invokeCalls(invoke, 'ftp:list')).toEqual([[B, '/photos']])
+
+    for (const status of ['disconnected', 'connecting', 'error'] as const) {
+      useFtpStore.setState({ connections: { [A]: info('connected', 'a'), [B]: info(status, 'b') } })
+      reload()
+      expect(invokeCalls(invoke, 'ftp:list')).toEqual([])
+    }
+    useFtpStore.setState({ connections: { [A]: info('connected', 'a') } })
+    reload()
+    expect(invokeCalls(invoke, 'ftp:list')).toEqual([])
+
+    // 로컬 탭은 연결이 없어도 읽는다
+    useFtpStore.setState({ connections: {} })
+    openOnly({ side: 'local', path: 'C:\\in' })
+    reload()
+    expect(invokeCalls(invoke, 'local:list')).toEqual([['C:\\in']])
+
+    // 탭이 없으면 아무것도 부르지 않는다
+    useTabsStore.setState({ tabs: [], activeId: '', recent: [] })
+    reload()
+    expect(invoke).not.toHaveBeenCalled()
   })
 })

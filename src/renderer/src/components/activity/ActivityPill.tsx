@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDownToLine, ArrowUpFromLine, Loader } from 'lucide-react'
+import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Loader } from 'lucide-react'
 import { useT } from '@renderer/i18n'
 import { cn } from '@renderer/lib/utils'
 import { batchProgress } from '@renderer/lib/transferRate'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
-import { connectedServer } from '@renderer/lib/sendItems'
 import { useOperationStore } from '@renderer/stores/useOperationStore'
 import type { IpcResult } from '@shared/types/ipc'
 import type { OperationJob, OperationProgress } from '@shared/types/operation'
@@ -54,9 +52,7 @@ export function ActivityPill(): React.JSX.Element {
 
   useEffect(() => {
     const applyUpdate = (update: TransferUpdate): void =>
-      useTransferStore
-        .getState()
-        .applyUpdate(update, connectedServer(useFtpStore.getState()) ?? undefined)
+      useTransferStore.getState().applyUpdate(update)
     const { setJobs, updateProgress } = useOperationStore.getState()
     const unsubs = [
       window.api.on('transfer:updated', (...args: unknown[]) =>
@@ -78,8 +74,10 @@ export function ActivityPill(): React.JSX.Element {
 
   const active = running.length > 0
   const progress = batchProgress(running)
-  const Icon =
-    running.every((j) => j.direction === 'upload') && active ? ArrowUpFromLine : ArrowDownToLine
+  // 모두 서버 간 복사면 그 아이콘(팝오버 행과 같다), 모두 업로드면 올리기, 그 밖은 받기(MC32)
+  const every = (direction: TransferJob['direction']): boolean =>
+    active && running.every((j) => j.direction === direction)
+  const Icon = every('relay') ? ArrowLeftRight : every('upload') ? ArrowUpFromLine : ArrowDownToLine
 
   return (
     <>

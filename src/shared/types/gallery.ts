@@ -14,6 +14,8 @@ export interface LocalThumbnailResult {
 
 export interface RemoteFolderPreviewRequest {
   remotePath: string
+  /** 그리드를 그리는 패널의 id(1~64자). 취소는 이 뷰어의 소유만 뺀다(multi-connection §4.3) */
+  viewerId: string
 }
 
 export interface RemoteFolderPreview {

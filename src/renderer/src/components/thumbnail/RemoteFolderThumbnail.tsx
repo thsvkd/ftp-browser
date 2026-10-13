@@ -1,6 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { Folder } from 'lucide-react'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
@@ -8,6 +7,7 @@ import { FolderCountBadge } from './FolderCountBadge'
 import { useT } from '@renderer/i18n'
 import type { IpcResult } from '@shared/types/ipc'
 import type { RemoteFolderPreview } from '@shared/types/gallery'
+import { MAIN_VIEWER, type ConnKey } from '@shared/connKey'
 
 /** 미리보기가 없을 때의 폴더 글리프(이모지 대신 lucide, 기준선 #16). */
 function FolderGlyph({ size }: { size: number }): React.JSX.Element {
@@ -22,17 +22,20 @@ function FolderGlyph({ size }: { size: number }): React.JSX.Element {
 }
 
 interface RemoteFolderThumbnailProps {
+  /** 그 폴더의 연결. 미리보기 요청·스토어 키·안쪽 이미지 썸네일이 그 연결의 것이다 */
+  server: ConnKey
   folderPath: string
   size?: number
 }
 
 export function RemoteFolderThumbnail({
+  server,
   folderPath,
   size = 150
 }: RemoteFolderThumbnailProps): React.JSX.Element {
-  const host = useFtpStore((s) => s.host)
-  const port = useFtpStore((s) => s.port)
-  const previewState = useGalleryStore((s) => s.remoteFolderPreviews[folderPath])
+  // 같은 경로라도 연결마다 다른 폴더다
+  const storeKey = `${server}|${folderPath}`
+  const previewState = useGalleryStore((s) => s.remoteFolderPreviews[storeKey])
   const setPending = useGalleryStore((s) => s.setRemotePending)
   const setResolved = useGalleryStore((s) => s.setRemoteResolved)
   const setError = useGalleryStore((s) => s.setRemoteError)
@@ -43,21 +46,22 @@ export function RemoteFolderThumbnail({
   const fetchPreview = useCallback(async () => {
     if (requestedRef.current) return
     requestedRef.current = true
-    setPending(folderPath)
+    setPending(storeKey)
     try {
       const result = await window.api.invoke<IpcResult<RemoteFolderPreview | null>>(
         'gallery:remoteFolderPreview',
-        { remotePath: folderPath }
+        server,
+        { remotePath: folderPath, viewerId: MAIN_VIEWER }
       )
       if (result.success) {
-        setResolved(folderPath, result.data)
+        setResolved(storeKey, result.data)
       } else {
-        setError(folderPath, result.error)
+        setError(storeKey, result.error)
       }
     } catch (err) {
-      setError(folderPath, err instanceof Error ? err.message : String(err))
+      setError(storeKey, err instanceof Error ? err.message : String(err))
     }
-  }, [folderPath, setPending, setResolved, setError])
+  }, [server, folderPath, storeKey, setPending, setResolved, setError])
 
   useEffect(() => {
     if (previewState) return
@@ -77,7 +81,7 @@ export function RemoteFolderThumbnail({
 
   useEffect(() => {
     requestedRef.current = false
-  }, [folderPath])
+  }, [storeKey])
 
   const preview = previewState && previewState.status === 'resolved' ? previewState.preview : null
 
@@ -85,10 +89,9 @@ export function RemoteFolderThumbnail({
     <div ref={ref} className="flex h-full w-full items-center justify-center">
       {preview ? (
         <RemoteFolderPreviewImage
+          server={server}
           folderPath={folderPath}
           preview={preview}
-          host={host}
-          port={port}
           size={size}
         />
       ) : (
@@ -99,22 +102,20 @@ export function RemoteFolderThumbnail({
 }
 
 interface PreviewImageProps {
+  server: ConnKey
   folderPath: string
   preview: RemoteFolderPreview
-  host: string
-  port: number
   size: number
 }
 
 function RemoteFolderPreviewImage({
+  server,
   folderPath,
   preview,
-  host,
-  port,
   size
 }: PreviewImageProps): React.JSX.Element {
   const innerPath = folderPath === '/' ? `/${preview.name}` : `${folderPath}/${preview.name}`
-  const cacheKey = generateCacheKeyRenderer(host, port, innerPath, preview.size, preview.modifiedAt)
+  const cacheKey = generateCacheKeyRenderer(server, innerPath, preview.size, preview.modifiedAt)
   const thumbnailData = useThumbnailStore((s) => s.thumbnails[cacheKey])
   const t = useT()
   const requestedRef = useRef(false)
@@ -122,14 +123,14 @@ function RemoteFolderPreviewImage({
   useEffect(() => {
     if (thumbnailData || requestedRef.current) return
     requestedRef.current = true
-    window.api.invoke('thumbnail:request', {
+    window.api.invoke('thumbnail:request', server, {
       remotePath: innerPath,
       fileName: preview.name,
       fileSize: preview.size,
       modifiedAt: preview.modifiedAt,
       priority: 1
     })
-  }, [innerPath, preview.name, preview.size, preview.modifiedAt, thumbnailData])
+  }, [server, innerPath, preview.name, preview.size, preview.modifiedAt, thumbnailData])
 
   useEffect(() => {
     requestedRef.current = false

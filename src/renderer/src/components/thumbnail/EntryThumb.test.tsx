@@ -8,9 +8,7 @@ import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import {
-  HOST,
   MODIFIED_AT,
-  PORT,
   ftp,
   local,
   setupExplorer,
@@ -28,8 +26,10 @@ afterEach(() => {
   h.restore()
 })
 
+/** 항목의 연결. 썸네일 키·요청이 이 연결의 것이다 */
+const SERVER = 'me@nas:21'
 const remote = (name: string, opts = {}): ReturnType<typeof fromFtpEntry> =>
-  fromFtpEntry(ftp(name, opts), '/photos', 'me@nas:21')
+  fromFtpEntry(ftp(name, opts), '/photos', SERVER)
 
 describe('EntryThumb', () => {
   it('shows a shimmer while waiting, "Slow response" after 3 s, a glyph for non-images and the folder preview for folders', () => {
@@ -49,6 +49,7 @@ describe('EntryThumb', () => {
     render(<EntryThumb entry={remote('b.jpg')} request />)
     expect(invokeCalls(h.invoke, 'thumbnail:request')).toEqual([
       [
+        SERVER,
         {
           remotePath: '/photos/b.jpg',
           fileName: 'b.jpg',
@@ -70,11 +71,11 @@ describe('EntryThumb', () => {
     // 폴더는 폴더 미리보기(안의 첫 사진)를 그린다.
     const inner = { name: 'x.jpg', size: 10, modifiedAt: MODIFIED_AT, itemCount: 4 }
     useGalleryStore.setState({
-      remoteFolderPreviews: { '/photos/sub': { status: 'resolved', preview: inner } }
+      remoteFolderPreviews: { [`${SERVER}|/photos/sub`]: { status: 'resolved', preview: inner } }
     })
     useThumbnailStore.setState({
       thumbnails: {
-        [generateCacheKeyRenderer(HOST, PORT, '/photos/sub/x.jpg', 10, MODIFIED_AT)]: {
+        [generateCacheKeyRenderer(SERVER, '/photos/sub/x.jpg', 10, MODIFIED_AT)]: {
           dataUrl: 'data:image/png;base64,AA==',
           width: 1,
           height: 1

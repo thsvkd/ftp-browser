@@ -1,18 +1,25 @@
 import { Client, FileInfo } from 'basic-ftp'
 import { EventEmitter } from 'events'
 import { isImageFile } from '@shared/constants'
+import { connKey, type ConnKey } from '@shared/connKey'
 import { classifyError } from '../utils/errorClassifier'
 import {
   normalizeMaxTransfers,
   type FtpConnectPayload,
   type FtpFileEntry,
   type FtpListResult,
-  type FtpConnectionState,
   type ConnectionStatus
 } from '@shared/types/ftp'
 
 // 렌더러도 ftp:remoteChanged로 받으므로 타입은 shared에 둔다.
 export type { FtpMutationEvent } from '@shared/types/ftp'
+
+/** 매니저가 내는 `connectionStatus`. 키·포트·사용자는 모르므로 ftpHandlers가 `FtpConnectionState`로 채운다. */
+export interface ManagerStatus {
+  status: ConnectionStatus
+  host?: string
+  error?: string
+}
 
 const CLIENT_TIMEOUT_MS = 30_000
 
@@ -29,6 +36,8 @@ export class FtpConnectionManager extends EventEmitter {
   private _host = ''
   private _port = 0
   private _config: FtpConnectPayload | null = null
+  /** 마지막으로 연결을 시도한 서버의 키. 끊거나 실패해도 지우지 않아 해제·오류 이벤트도 서버를 안다. */
+  private _key: ConnKey = ''
   /** 마지막으로 알린 connectionStatus. MCP get_status가 렌더러와 같은 값을 보여 주도록 기억한다. */
   private _status: ConnectionStatus = 'disconnected'
   /**
@@ -54,6 +63,7 @@ export class FtpConnectionManager extends EventEmitter {
   ): Promise<{ success: boolean; error?: string; cancelled?: boolean }> {
     const generation = ++this.connectGeneration
     try {
+      this._key = connKey(config.host, config.port, config.user)
       this.emitStatus('connecting', config.host)
 
       // Re-create client to ensure clean state. 큐에 남아있던 task들은 새 client에서
@@ -220,6 +230,11 @@ export class FtpConnectionManager extends EventEmitter {
     return this._port
   }
 
+  /** 마지막으로 연결을 시도한 서버의 키. 한 번도 연결하지 않았으면 빈 문자열. */
+  getConnKey(): ConnKey {
+    return this._key
+  }
+
   /** 연결에 쓴 사용자 이름. 연결 전이면 빈 문자열. */
   getUser(): string {
     return this._config?.user ?? ''
@@ -257,9 +272,9 @@ export class FtpConnectionManager extends EventEmitter {
     socket.once('error', onError)
   }
 
-  private emitStatus(status: FtpConnectionState['status'], host?: string, error?: string): void {
+  private emitStatus(status: ConnectionStatus, host?: string, error?: string): void {
     this._status = status
-    const state: FtpConnectionState = { status, host, error }
+    const state: ManagerStatus = { status, host, error }
     this.emit('connectionStatus', state)
   }
 }

@@ -99,6 +99,10 @@ export const ru = {
   'status.connecting': 'Подключение…',
   'status.connected': 'Подключено',
   'status.error': 'Ошибка подключения',
+  'status.connections_one': '{{count}} сервер подключён',
+  'status.connections_few': '{{count}} сервера подключены',
+  'status.connections_many': '{{count}} серверов подключено',
+  'status.connections_other': '{{count}} сервера подключено',
   'status.folderCount_one': '{{count}} папка',
   'status.folderCount_few': '{{count}} папки',
   'status.folderCount_many': '{{count}} папок',
@@ -285,6 +289,7 @@ export const ru = {
   'sidebar.serverConnecting': 'Подключение…',
   'sidebar.serverLost': 'Отключено · нажмите, чтобы подключиться снова',
   'sidebar.serverOffline': 'Нет подключения · нажмите, чтобы подключиться',
+  'sidebar.disconnect': 'Отключиться от {{name}}',
 
   'place.desktop': 'Рабочий стол',
   'place.downloads': 'Загрузки',
@@ -344,7 +349,7 @@ export const ru = {
   'explorer.listing_other': 'Загрузка списка… {{count}} записи',
   'explorer.noMatch': 'Нет элементов, соответствующих «{{query}}»',
   'explorer.showAll': 'Показать все',
-  'explorer.otherServer': 'Эта вкладка открыта на сервере {{server}}',
+  'explorer.serverOffline': 'Нет подключения к {{server}}',
   'explorer.connectTo': 'Подключиться к серверу {{server}}',
   'explorer.offlineHint': 'Подключитесь, чтобы открыть это расположение.',
   'explorer.staleBanner': 'Подключение потеряно. Показан последний загруженный список.',
@@ -403,7 +408,6 @@ export const ru = {
   'send.invalidNothing': 'Нечего отправлять',
   'send.invalidIntoItself': 'Папку нельзя поместить в саму себя',
   'send.invalidNotConnected': 'Нет подключения к серверу',
-  'send.invalidOtherServer': 'Подключение к другому серверу',
   'send.invalidHere': 'Уже в этой папке',
   'send.invalidRemoteCopy': 'Копирование внутри сервера не поддерживается',
 
@@ -472,6 +476,7 @@ export const ru = {
   'activity.labelMany_few': '{{name}} и ещё {{count}}',
   'activity.labelMany_many': '{{name}} и ещё {{count}}',
   'activity.labelMany_other': '{{name}} и ещё {{count}}',
+  'activity.relay': 'Копирование между серверами',
   'duration.seconds': '{{number}} с',
   'duration.minutes': '{{number}} мин',
   'duration.hours': '{{number}} ч',
@@ -517,5 +522,6 @@ export const ru = {
   'toast.sendSkipped_many': 'Пропущено {{count}} элементов',
   'toast.sendSkipped_other': 'Пропущено {{count}} элемента',
   'toast.sendFailed': 'Не удалось начать передачу',
+  'toast.relayPartialRemoved': 'Неполная копия {{name}} на {{server}} удалена',
   'toast.retryFailed': 'Не удалось повторить'
 } satisfies LocaleMessages

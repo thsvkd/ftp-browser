@@ -175,36 +175,44 @@ describe('useTabsStore navigation', () => {
     expect(active().filter).toBe(filter)
   })
 
-  it('adoptRemote reuses the active or first remote tab, else opens one, and activates it', () => {
-    // covers: Test-785
+  it("adoptRemote moves only a tab of that server, else opens one, and never another server's tab", () => {
+    // covers: Test-1014
     const s = useTabsStore.getState()
     const local = active().id
+    const B = 'you@other:2121'
 
-    // No remote tab: a new one.
-    s.adoptRemote('me@h:21', '/home')
+    // No tab of B: a new one, activated.
+    s.adoptRemote(B, '/home')
     expect(tabs()).toHaveLength(2)
-    expect(active().loc).toEqual(remote('/home'))
-    const r1 = active().id
+    expect(active().loc).toEqual(remote('/home', B))
+    const b1 = active().id
 
-    // Active tab is local: the first remote tab moves to the new server.
-    const r2 = s.openTab(remote('/b'), false)
+    // The active tab is A's remote tab: it stays where it is; B's first remote tab moves.
+    const a1 = s.openTab(remote('/a'))
+    const b2 = s.openTab(remote('/b2', B), false)
+    s.adoptRemote(B, '/start')
+    expect(useTabsStore.getState().activeId).toBe(b1)
+    expect(tabs().find((t) => t.id === b1)!.loc).toEqual(remote('/start', B))
+    expect(tabs().find((t) => t.id === a1)!.loc).toEqual(remote('/a'))
+    expect(tabs().find((t) => t.id === b2)!.loc).toEqual(remote('/b2', B))
+
+    // The active tab is B's remote tab: that one.
+    s.activate(b2)
+    s.adoptRemote(B, '/again')
+    expect(useTabsStore.getState().activeId).toBe(b2)
+    expect(active().loc).toEqual(remote('/again', B))
+    expect(tabs().find((t) => t.id === b1)!.loc).toEqual(remote('/start', B))
+    expect(tabs()).toHaveLength(4)
+
+    // activate: false (an agent connect) moves B's first tab but keeps the active one.
     s.activate(local)
-    s.adoptRemote('you@other:2121', '/start')
-    expect(useTabsStore.getState().activeId).toBe(r1)
-    expect(active().loc).toEqual(remote('/start', 'you@other:2121'))
-    expect(tabs().find((t) => t.id === r2)!.loc).toEqual(remote('/b'))
-
-    // Active tab is remote: that one.
-    s.activate(r2)
-    s.adoptRemote('me@h:21', '/again')
-    expect(useTabsStore.getState().activeId).toBe(r2)
-    expect(active().loc).toEqual(remote('/again'))
-    expect(tabs()).toHaveLength(3)
-
-    // An agent connect (activate: false) moves the same tab but keeps the active one.
-    s.activate(local)
-    s.adoptRemote('agent@h:21', '/agent', { activate: false })
+    s.adoptRemote(B, '/agent', { activate: false })
     expect(useTabsStore.getState().activeId).toBe(local)
-    expect(tabs().find((t) => t.id === r1)!.loc).toEqual(remote('/agent', 'agent@h:21'))
+    expect(tabs().find((t) => t.id === b1)!.loc).toEqual(remote('/agent', B))
+    expect(tabs().find((t) => t.id === a1)!.loc).toEqual(remote('/a'))
+    // ...and a new tab for a server without one stays in the background.
+    s.adoptRemote('new@n:21', '/n', { activate: false })
+    expect(useTabsStore.getState().activeId).toBe(local)
+    expect(tabs().at(-1)!.loc).toEqual(remote('/n', 'new@n:21'))
   })
 })

@@ -53,19 +53,25 @@ import {
   locLabel,
   sendDestinations,
   sendItems,
-  sourceLabel,
-  useConnection
+  sourceLabel
 } from '@renderer/lib/sendItems'
+import {
+  payloadOf,
+  savedServerOf,
+  useConnStatus,
+  useConnectedKeys
+} from '@renderer/lib/connections'
 import { cn } from '@renderer/lib/utils'
 import { confirmDelete } from '@renderer/stores/useConfirmStore'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
+import { useServerStore } from '@renderer/stores/useServerStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useActiveTab, useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
+import { MAIN_VIEWER } from '@shared/connKey'
 import { isSafeLocalName, isSafeRemoteName, uniqueLocalNames } from '@shared/entryName'
-import type { FtpConnectionState } from '@shared/types/ftp'
 import type { IpcResult } from '@shared/types/ipc'
 import { startDrag, useDnd, useDropTarget } from './dnd'
 import { DragGhost } from './DragGhost'
@@ -74,7 +80,7 @@ import {
   ListErrorPanel,
   LostPanel,
   OfflinePanel,
-  OtherServerPanel,
+  ServerOfflinePanel,
   Skeleton,
   StaleBanner
 } from './ExplorerStates'
@@ -96,10 +102,29 @@ const NONE: ExplorerEntry[] = []
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
 /**
- * 원격 탭의 처지(D2): 지금 연결된 서버의 탭이면 목록을 읽는다(live). 다른 서버면 연결 버튼(other),
- * 연결이 끊겼으면 지난 목록(stale)이나 끊김 패널(lost), 연결이 없으면 연결 안 됨 패널(offline).
+ * 원격 탭의 처지(MC11): 그 탭의 서버(`loc.server`) 연결로 정한다. 연결됐으면 목록을 읽고(live),
+ * 연결 중이면 회전 표시 패널(connecting), 끊겼으면 지난 목록(stale)이나 끊김 패널(lost), 연결이
+ * 없으면 그 서버에 연결하는 패널(offline).
  */
-type Gate = 'live' | 'other' | 'stale' | 'lost' | 'offline'
+type Gate = 'live' | 'connecting' | 'stale' | 'lost' | 'offline'
+
+/**
+ * 자동 연결(MC12): 저장된 비밀번호가 있는 저장 서버의 원격 탭이 보이기 시작할 때(탐색 영역 마운트,
+ * 탭의 서버가 바뀔 때) 그 서버가 연결 안 됨이면 한 번 연결한다. 상태 변화에는 반응하지 않는다:
+ * 보는 중에 끊으면 다시 잇지 않는다. 끊김(error)·연결 중도 잇지 않는다. 툴바는 건드리지 않는다.
+ */
+function useAutoConnect(tab: Tab): void {
+  const server = tab.loc.side === 'remote' ? tab.loc.server : undefined
+  useEffect(() => {
+    if (!server) return
+    const status = useFtpStore.getState().connections[server]?.status ?? 'disconnected'
+    if (status !== 'disconnected') return
+    const saved = savedServerOf(useServerStore.getState().servers, server)
+    if (!saved?.hasPassword) return
+    void useFtpStore.getState().connect(payloadOf(saved), tab.loc.path, { adopt: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 계기는 탭과 서버뿐이다(함정 10)
+  }, [tab.id, server])
+}
 
 /**
  * 활성 탭의 탐색 영역. 탭이 바뀌면 다시 마운트되어(탭 id가 key) 메뉴·이름 바꾸기 같은
@@ -116,8 +141,8 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
   const key = locKey(loc)
   const remote = loc.side === 'remote'
   const listing = useListingStore((s) => s.byKey[key])
-  const status = useFtpStore((s) => s.connectionStatus)
-  const conn = useConnection()
+  const status = useConnStatus(remote ? loc.server : undefined)
+  const connected = useConnectedKeys()
   const showHidden = useSettingsStore((s) => s.showHidden)
   const tileSize = useSettingsStore((s) => s.tileSize)
   const shelfKeys = useShelfStore((s) => s.items.map((i) => locKey(i.entry)).join('\n'))
@@ -129,14 +154,15 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
   const gate: Gate = !remote
     ? 'live'
     : status === 'connected'
-      ? !loc.server || loc.server === conn.server
-        ? 'live'
-        : 'other'
-      : status === 'error'
-        ? cached
-          ? 'stale'
-          : 'lost'
-        : 'offline'
+      ? 'live'
+      : status === 'connecting'
+        ? 'connecting'
+        : status === 'error'
+          ? cached
+            ? 'stale'
+            : 'lost'
+          : 'offline'
+  useAutoConnect(tab)
 
   // 새 폴더를 읽는 동안에는 이 탭에서 마지막으로 보인 폴더의 목록을 흐리게 둔다.
   const [shownKey, setShownKey] = useState<string | null>(null)
@@ -228,21 +254,14 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
   // 원격 위치가 바뀌면 대기 중인 썸네일·폴더 미리보기를 먼저 취소한다. layout effect라 그리드의
   // 새 배치(passive effect)보다 먼저 나간다(thumbnail-viewport-priority D14, 함정 2).
   const remoteKey = remote && gate === 'live' ? key : null
+  const remoteServer = remote ? loc.server : undefined
   useLayoutEffect(() => {
-    if (!remoteKey) return
-    window.api.invoke('thumbnail:cancelAll')
-    window.api.invoke('gallery:cancelAll')
-    useGalleryStore.getState().clearRemote()
-  }, [remoteKey])
-
-  // 원격 연결 상태(main이 알린다). 옛 원격 패널에 있던 구독이다.
-  useEffect(
-    () =>
-      window.api.on('ftp:connectionStatus', (...args: unknown[]) =>
-        useFtpStore.getState().setConnectionState(args[0] as FtpConnectionState)
-      ),
-    []
-  )
+    if (!remoteKey || !remoteServer) return
+    // 이 패널(뷰어)의 대기만 취소한다. 서버가 바뀌는 이동일 수 있어 모든 연결에서(null) 뺀다(§4.3-4)
+    window.api.invoke('thumbnail:cancelAll', null, MAIN_VIEWER)
+    window.api.invoke('gallery:cancelAll', null, MAIN_VIEWER)
+    useGalleryStore.getState().clearRemote(remoteServer)
+  }, [remoteKey, remoteServer])
 
   useEffect(() => {
     void loadPlaces()
@@ -279,7 +298,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
   // ---------- 로딩 표시: 150ms 뒤 2px 막대, 1초 뒤 "Listing…" ----------
   const busy =
     (gate === 'live' && (listing?.status === 'loading' || !!listing?.refreshing)) ||
-    (remote && status === 'connecting')
+    gate === 'connecting'
   const [busyLevel, setBusyLevel] = useState(0)
   useEffect(() => {
     if (!busy) return
@@ -341,10 +360,9 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     // 확인을 기다리는 동안 다른 폴더로 옮겨도 고른 시점의 경로를 지운다.
     const targets = entries.map((e) => ({ path: e.path, isDirectory: e.type === 'directory' }))
     try {
-      const r = await window.api.invoke<IpcResult<void>>(
-        remote ? 'ftp:deleteBatch' : 'local:deleteBatch',
-        targets
-      )
+      const r = remote
+        ? await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', loc.server, targets)
+        : await window.api.invoke<IpcResult<void>>('local:deleteBatch', targets)
       if (!r.success) toast.error(t('toast.deleteFailed'), { description: r.error })
     } catch (err) {
       toast.error(t('toast.deleteFailed'), { description: errorText(err) })
@@ -371,11 +389,9 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     if (!next || next === entry.name || !validName(next)) return
     const target = joinPath(entry.side, parentPath(entry.side, entry.path) ?? loc.path, next)
     try {
-      const r = await window.api.invoke<IpcResult<void>>(
-        remote ? 'ftp:rename' : 'local:rename',
-        entry.path,
-        target
-      )
+      const r = remote
+        ? await window.api.invoke<IpcResult<void>>('ftp:rename', loc.server, entry.path, target)
+        : await window.api.invoke<IpcResult<void>>('local:rename', entry.path, target)
       if (r.success) {
         unshelve([entry])
         selectOnly(target)
@@ -397,7 +413,9 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     if (!name) return
     const path = joinPath(loc.side, loc.path, name)
     try {
-      const r = await window.api.invoke<IpcResult<void>>(remote ? 'ftp:mkdir' : 'local:mkdir', path)
+      const r = remote
+        ? await window.api.invoke<IpcResult<void>>('ftp:mkdir', loc.server, path)
+        : await window.api.invoke<IpcResult<void>>('local:mkdir', path)
       if (!r.success) {
         toast.error(t('toast.createFolderFailed'), { description: r.error })
         return
@@ -460,7 +478,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
         label: t('menu.sendTo'),
         icon: Send,
         submenu: sendDestinations(loc).map((dest) => {
-          const plan = planSend(target, dest, conn)
+          const plan = planSend(target, dest, connected)
           return {
             label: `${sourceLabel(dest)} › ${locLabel(dest)}`,
             icon: dest.side === 'remote' ? Send : FolderInput,
@@ -768,7 +786,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
                 items={items}
                 scrollRef={scrollRef}
                 layout={layout}
-                remote={remote && gate === 'live'}
+                server={remote && gate === 'live' ? loc.server : undefined}
                 itemProps={itemProps}
                 setSelection={(sel) => patch(selectMany(selection, sel))}
                 getSelection={() =>
@@ -805,10 +823,16 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
             onReconnect={reconnect}
           />
         )}
-        {gate === 'other' && loc.server && (
-          <OtherServerPanel server={loc.server} onConnect={reconnect} />
-        )}
-        {gate === 'offline' && <OfflinePanel connecting={status === 'connecting'} />}
+        {(gate === 'offline' || gate === 'connecting') &&
+          (loc.server ? (
+            <ServerOfflinePanel
+              server={loc.server}
+              connecting={gate === 'connecting'}
+              onConnect={reconnect}
+            />
+          ) : (
+            <OfflinePanel connecting={gate === 'connecting'} />
+          ))}
         {gate === 'lost' && <LostPanel onReconnect={reconnect} />}
         {(mode === 'live' || mode === 'stale') && items.length === 0 && (
           <EmptyPanel

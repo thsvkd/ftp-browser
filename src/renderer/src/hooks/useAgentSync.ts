@@ -2,11 +2,10 @@ import { useEffect } from 'react'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
-import { connectedServer } from '@renderer/lib/sendItems'
-import { useServerStore } from '@renderer/stores/useServerStore'
+import { connectingKey, useServerStore } from '@renderer/stores/useServerStore'
 import { emptyDraft, findSaved, serverAddress } from '@renderer/lib/serverAddress'
 import type { AgentSessionEvent } from '@shared/types/mcp'
-import type { FtpMutationEvent } from '@shared/types/ftp'
+import type { RemoteChangedEvent } from '@shared/types/ftp'
 
 /** 변경이 몰려 와도(폴더 업로드·삭제) 목록은 조용해진 뒤 한 번만 다시 읽는다. */
 export const AGENT_SYNC_DEBOUNCE_MS = 300
@@ -37,25 +36,29 @@ function remoteParent(path: string): string {
 }
 
 /**
- * 원격 변경 묶음을 탭과 목록에 반영한다(함정 12). 지워지거나 옮겨진 폴더(또는 그 위)를 보는 원격 탭은
- * 활성 여부와 관계없이 그 부모로 가고, 바뀐 폴더의 목록은 읽은 적이 있으면 다시 읽는다.
+ * 원격 변경 묶음을 탭과 목록에 반영한다(함정 12). 지워지거나 옮겨진 폴더(또는 그 위)를 보는 그 서버의
+ * 원격 탭은 활성 여부와 관계없이 그 부모로 가고, 바뀐 폴더의 목록은 읽은 적이 있으면 다시 읽는다.
+ * 변경마다 그 연결(`event.server`)에만 적용한다.
  */
-function syncRemote(events: FtpMutationEvent[]): void {
-  const server = connectedServer(useFtpStore.getState())
-  if (!server) return
+function syncRemote(events: RemoteChangedEvent[]): void {
   const tabs = useTabsStore.getState()
   const dirs = new Set<string>()
-  for (const { kind, remotePath, newPath } of events) {
-    dirs.add(remoteParent(remotePath))
-    if (newPath) dirs.add(remoteParent(newPath))
+  for (const { server, kind, remotePath, newPath } of events) {
+    // 끊긴 연결의 늦은 변경은 무시한다
+    if (useFtpStore.getState().connections[server]?.status !== 'connected') continue
+    dirs.add(`${server}\n${remoteParent(remotePath)}`)
+    if (newPath) dirs.add(`${server}\n${remoteParent(newPath)}`)
     if (kind !== 'delete' && kind !== 'rename') continue
     for (const { id, loc } of useTabsStore.getState().tabs) {
-      if (loc.side !== 'remote' || (loc.server && loc.server !== server)) continue
+      if (loc.side !== 'remote' || loc.server !== server) continue
       if (loc.path === remotePath || loc.path.startsWith(`${remotePath}/`))
         tabs.navigate({ ...loc, path: remoteParent(remotePath) }, { tabId: id })
     }
   }
-  for (const dir of dirs) useListingStore.getState().invalidate('remote', server, dir)
+  for (const entry of dirs) {
+    const [server, dir] = entry.split('\n')
+    useListingStore.getState().invalidate('remote', server, dir)
+  }
 }
 
 /**
@@ -65,17 +68,22 @@ function syncRemote(events: FtpMutationEvent[]): void {
 async function followSession(event: AgentSessionEvent): Promise<void> {
   const ftp = useFtpStore.getState()
   if (event.status === 'disconnected') {
-    ftp.adoptSession({ status: 'disconnected' })
+    ftp.adoptSession({ server: event.server, status: 'disconnected' })
     return
   }
   if (event.status !== 'connected') return
-  ftp.adoptSession({ status: 'connected', host: event.host, port: event.port, user: event.user })
-  const server = connectedServer(useFtpStore.getState())
-  if (server) useTabsStore.getState().adoptRemote(server, event.path ?? '/', { activate: false })
+  ftp.adoptSession({
+    server: event.server,
+    status: 'connected',
+    host: event.host,
+    port: event.port,
+    user: event.user
+  })
+  useTabsStore.getState().adoptRemote(event.server, event.path ?? '/', { activate: false })
 
   const servers = useServerStore.getState()
   await servers.loadServers()
-  // 서버 목록을 받는 사이 사용자가 연결을 시작했으면 툴바를 빼앗지 않는다.
+  // 사용자가 연결 중이면(서버 목록을 받는 사이 시작했어도) 툴바를 빼앗지 않는다.
   if (useServerStore.getState().connecting) return
   const all = useServerStore.getState().servers
   const saved =
@@ -101,16 +109,18 @@ async function followSession(event: AgentSessionEvent): Promise<void> {
  */
 export function useAgentSync(): void {
   useEffect(() => {
-    const remote = debounced<FtpMutationEvent>(syncRemote)
+    const remote = debounced<RemoteChangedEvent>(syncRemote)
 
     const unsubscribers = [
       window.api.on('ftp:remoteChanged', (...args: unknown[]) => {
-        remote.push(args[0] as FtpMutationEvent)
+        remote.push(args[0] as RemoteChangedEvent)
       }),
       window.api.on('agent:session', (...args: unknown[]) => {
-        // 사용자가 직접 연결하는 중이면 그 흐름이 툴바와 패널을 정한다.
-        if (useServerStore.getState().connecting) return
-        void followSession(args[0] as AgentSessionEvent)
+        const event = args[0] as AgentSessionEvent
+        // 사용자가 직접 연결하는 중인 그 서버는 그 흐름이 패널을 정한다(adoptSession이 그 시도를
+        // 무효로 만든다). 다른 서버의 세션은 그대로 따른다(MC29). 툴바 초안은 followSession이 지킨다.
+        if (connectingKey() === event.server) return
+        void followSession(event)
       })
     ]
     return () => {

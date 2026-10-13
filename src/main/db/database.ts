@@ -196,6 +196,35 @@ export function initDatabase(): Database.Database {
     }
   }
 
+  // 004: 사용자별 원격 폴더 미리보기(multi-connection MC9). folder_previews의 UNIQUE(host, port,
+  // folder_path)는 바꿀 수 없어 새 테이블을 쓴다. 옛 테이블과 그 행은 지우지 않는다(쓰지 않을 뿐).
+  let remoteFolderPreviewsSql: string
+  try {
+    remoteFolderPreviewsSql = fs.readFileSync(
+      path.join(__dirname, 'migrations', '004_remote_folder_previews.sql'),
+      'utf-8'
+    )
+  } catch {
+    remoteFolderPreviewsSql = `
+      CREATE TABLE IF NOT EXISTS remote_folder_previews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host TEXT NOT NULL,
+        port INTEGER NOT NULL,
+        username TEXT NOT NULL,
+        folder_path TEXT NOT NULL,
+        first_image_name TEXT,
+        first_image_size INTEGER,
+        first_image_modified_at TEXT,
+        item_count INTEGER,
+        cached_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(host, port, username, folder_path)
+      );
+      CREATE INDEX IF NOT EXISTS idx_remote_folder_previews_conn
+        ON remote_folder_previews(host, port, username);
+    `
+  }
+  db.exec(remoteFolderPreviewsSql)
+
   return db
 }
 

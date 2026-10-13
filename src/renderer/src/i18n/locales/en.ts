@@ -95,6 +95,8 @@ export const en = {
   'status.connecting': 'Connecting…',
   'status.connected': 'Connected',
   'status.error': 'Connection error',
+  'status.connections_one': '{{count}} server connected',
+  'status.connections_other': '{{count}} servers connected',
   'status.folderCount_one': '{{count}} folder',
   'status.folderCount_other': '{{count}} folders',
   'status.fileCount_one': '{{count}} file',
@@ -261,6 +263,7 @@ export const en = {
   'sidebar.serverConnecting': 'Connecting…',
   'sidebar.serverLost': 'Disconnected · click to reconnect',
   'sidebar.serverOffline': 'Not connected · click to connect',
+  'sidebar.disconnect': 'Disconnect {{name}}',
 
   'place.desktop': 'Desktop',
   'place.downloads': 'Downloads',
@@ -318,7 +321,7 @@ export const en = {
   'explorer.listing_other': 'Listing… {{count}} entries',
   'explorer.noMatch': 'No items match "{{query}}"',
   'explorer.showAll': 'Show all',
-  'explorer.otherServer': 'This tab is a location on {{server}}',
+  'explorer.serverOffline': 'Not connected to {{server}}',
   'explorer.connectTo': 'Connect to {{server}}',
   'explorer.offlineHint': 'Connect to open this location.',
   'explorer.staleBanner': 'Connection lost. Showing the last listing.',
@@ -364,7 +367,6 @@ export const en = {
   'send.invalidNothing': 'Nothing to send',
   'send.invalidIntoItself': "A folder can't go inside itself",
   'send.invalidNotConnected': 'Not connected to a server',
-  'send.invalidOtherServer': 'Connected to a different server',
   'send.invalidHere': 'Already in this folder',
   'send.invalidRemoteCopy': "Copying within the server isn't supported",
 
@@ -423,6 +425,7 @@ export const en = {
   'activity.preparing': 'Preparing {{label}}…',
   'activity.labelMany_one': '{{name}} and {{count}} more',
   'activity.labelMany_other': '{{name}} and {{count}} more',
+  'activity.relay': 'Copy between servers',
   'duration.seconds': '{{number}} s',
   'duration.minutes': '{{number}} min',
   'duration.hours': '{{number}} h',
@@ -458,5 +461,6 @@ export const en = {
   'toast.sendSkipped_one': 'Skipped {{count}} item',
   'toast.sendSkipped_other': 'Skipped {{count}} items',
   'toast.sendFailed': "Couldn't start the transfer",
+  'toast.relayPartialRemoved': 'Removed the incomplete copy of {{name}} on {{server}}',
   'toast.retryFailed': "Couldn't retry"
 }
