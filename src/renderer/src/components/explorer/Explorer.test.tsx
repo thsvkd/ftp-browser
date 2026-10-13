@@ -937,8 +937,8 @@ describe('Explorer — selection is the focus', () => {
     fireEvent.mouseDown(box, { clientX: 40, clientY: FIVE.length * ROW + 10 })
     fireEvent.mouseMove(window, { clientX: 60, clientY: ROW + 10 })
     expect(selectedNames()).toEqual(['b.txt', 'c.txt', 'd.txt', 'e.txt'])
-    expect(activeTab().focus).toBe(activeTab().sel.at(-1))
-    expect(activeId()).toBe(optId(activeTab().sel.at(-1) as string))
+    expect(activeTab().focus).toBe(p('e.txt'))
+    expect(activeId()).toBe(optId(p('e.txt')))
     fireEvent.mouseUp(window)
 
     const before = selectionOf()
@@ -1114,8 +1114,9 @@ describe('Explorer — selection is the focus', () => {
       }
       expect(cls('b.txt')).toBe(cls('c.txt'))
       const before = four.map(cls)
+      key('l', { ctrlKey: true })
       fireEvent.blur(listbox())
-      screen.getByRole('textbox', { name: en['filter.find'] }).focus()
+      screen.getByRole('textbox', { name: en['path.edit'] }).focus()
       expect(four.map(cls)).toEqual(before)
       for (const o of screen.getAllByRole('option')) {
         expect(o.outerHTML).not.toContain('--selin')
