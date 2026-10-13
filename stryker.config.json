@@ -7,7 +7,7 @@
   "concurrency": 4,
   "_comment": "범위는 이번 변경분으로 한정한다. 신규 파일은 통째로, 기존 파일은 추가한 라인 범위만 넣는다. 파일 전체를 넣으면 이번 테스트 케이스 리스트의 대상이 아닌 기존 로직(가상 스크롤, 마퀴 선택, 스트림 복사 등)이 분모에 들어가 점수가 실제 단언 강도를 반영하지 못한다. 범위를 넓혀 측정할 때는 CLI에서 --mutate로 덮어쓴다.",
   "_comment_maintenance": "아래 라인 범위는 해당 파일이 수정되면 조용히 어긋난다. 이 파일들을 건드린 커밋은 `git diff --unified=0 -- <file> | grep '^@@'`로 범위를 재확인할 것.",
-  "_comment_scope": "탐색기 개편 Shelf(docs/handoff/explorer-shelf.md §14-4) 변경분. 신규 순수 모듈(folderPlan, entryList·sendPlan·selectionModel·transferRate·pathCrumbs·listError, useTabsStore·useShelfStore)은 통째로, TransferQueue는 retry, 배치 폴더 메모 보관, removePartial의 claim 되돌리기, 분할 정리 뒤 재시도, transferHandlers는 transfer:send·transfer:retry, localFsHandlers는 local:getPlaces·local:preview와 그 헬퍼 라인 범위만. 제외: import 라인, 컴포넌트(jsdom 테스트는 렌더 결과만 고정해 뮤턴트 점수가 단언 강도를 반영하지 못한다).",
+  "_comment_scope": "탐색기 개편 Shelf(docs/handoff/explorer-shelf.md §14-4) 변경분. 신규 순수 모듈(folderPlan, entryList·sendPlan·selectionModel·transferRate·pathCrumbs·listError, useTabsStore·useShelfStore)은 통째로, TransferQueue는 retry, 배치 폴더 메모 보관, removePartial의 claim 되돌리기, 분할 정리 뒤 재시도, transferHandlers는 transfer:send·transfer:retry, localFsHandlers는 local:getPlaces·local:preview와 그 헬퍼 라인 범위만. 파일 카테고리 필터(docs/handoff/file-category-filter.md §14-4): fileCategories·fileCategoryEdit·useFileCategoryStore는 통째로, entryList(FilterOptions·FilterResult·filterEntries)·useTabsStore(filter 필드·newTab)는 위 통째 항목이 이미 덮는다. 제외: import 라인, 컴포넌트(jsdom 테스트는 렌더 결과만 고정해 뮤턴트 점수가 단언 강도를 반영하지 못한다).",
   "mutate": [
     "src/main/transfer/folderPlan.ts",
     "src/renderer/src/lib/entryList.ts",
@@ -17,6 +17,9 @@
     "src/renderer/src/lib/transferRate.ts",
     "src/renderer/src/lib/pathCrumbs.ts",
     "src/renderer/src/lib/listError.ts",
+    "src/renderer/src/lib/fileCategories.ts",
+    "src/renderer/src/lib/fileCategoryEdit.ts",
+    "src/renderer/src/stores/useFileCategoryStore.ts",
     "src/renderer/src/stores/useTabsStore.ts",
     "src/renderer/src/stores/useShelfStore.ts",
     "src/main/transfer/TransferQueue.ts:158-161",

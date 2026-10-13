@@ -23,8 +23,10 @@ through the preload bridge `window.api`.
 - `src/preload/index.ts` + `index.d.ts` — the only bridge; exposes `window.api`.
 - `src/renderer/src/`: `components/<area>/` (explorer, shelf, activity, layout, server, settings,
   thumbnail, common) · `stores/` one zustand `use*Store.ts` each (`useTabsStore` tabs and their
-  locations, `useListingStore` listing cache, `useShelfStore`; `useFtpStore` only the connection) ·
-  `hooks/` · `lib/` pure helpers · `i18n/` · `test/rendererTestUtils.ts`.
+  locations and their type filter, `useListingStore` listing cache, `useShelfStore`;
+  `useFtpStore` only the connection; `useFileCategoryStore` user edits of the filter categories) ·
+  `hooks/` · `lib/` pure helpers (`fileCategories` the type-filter matcher and default
+  categories, `fileCategoryEdit` its settings reducers) · `i18n/` · `test/rendererTestUtils.ts`.
 - `src/shared/` — imported by both sides: `types/` (incl. `ipc.ts`), `constants.ts`, `debug.ts`,
   plus repo contract tests. Aliases: `@shared/*` everywhere, `@renderer/*` in renderer and vitest.
 - `script/` — dev helpers and `smoke-packaged.mjs`. `docs/handoff/` — feature specs (see below).
