@@ -403,6 +403,27 @@ describe('TabStrip — split pair pill and tab menu', () => {
     expect(document.activeElement).toBe(tab('B'))
   })
 
+  it('gives focus back to the half after Swap sides or Unsplit redraws the pair', async () => {
+    // covers: Test-1072
+    // 메뉴 항목이 탭줄을 다시 그리면(반쪽 버튼이 옮겨지거나 다시 마운트되면) 포커스가 body로 빠졌다.
+    const ids = setupNamed('A', 'C', 'D')
+    useTabsStore.setState({ split: { leftId: ids.C, rightId: ids.D, ratio: 0.5 }, activeId: ids.C })
+    await renderShell()
+    const pick = async (name: string): Promise<void> => {
+      tab('D').focus()
+      fireEvent.keyDown(tab('D'), { key: 'F10', shiftKey: true })
+      await flush()
+      fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name }))
+      await flush()
+    }
+    await pick(en['split.swap'])
+    expect(splitOf(ids)).toEqual(['D', 'C'])
+    expect(document.activeElement).toBe(tab('D'))
+    await pick(en['split.unsplit'])
+    expect(useTabsStore.getState().split).toBeNull()
+    expect(document.activeElement).toBe(tab('D'))
+  })
+
   it('offers only Unsplit and Swap sides on a half of the pair', async () => {
     // covers: Test-1073
     const ids = setupNamed('A', 'C', 'D')

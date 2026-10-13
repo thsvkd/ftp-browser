@@ -187,14 +187,25 @@ export function TabStrip(): React.JSX.Element {
   }
   const closeMenu = (reason?: 'replaced'): void => {
     setMenu(null)
-    const now = document.activeElement
-    // 다른 메뉴가 열렸거나, 사용자가 이미 다른 곳에 포커스를 두었으면 건드리지 않는다.
-    if (reason === 'replaced' || (now && now !== document.body && !now.closest('[role="menu"]')))
-      return
-    const back = opener.current?.isConnected
-      ? opener.current
-      : listRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
-    back?.focus()
+    if (reason === 'replaced') return
+    const from = opener.current
+    const restore = (inMenuToo: boolean): void => {
+      const now = document.activeElement
+      // 다른 메뉴가 열렸거나, 사용자가 이미 다른 곳에 포커스를 두었으면 건드리지 않는다.
+      if (now && now !== document.body && !(inMenuToo && now.closest('[role="menu"]'))) return
+      const list = listRef.current
+      const tabId = from?.dataset.tab
+      const back = from?.isConnected
+        ? from
+        : ((tabId ? list?.querySelector<HTMLElement>(`[data-tab="${tabId}"]`) : null) ??
+          list?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'))
+      back?.focus()
+    }
+    restore(true)
+    // 메뉴 항목(분할 해제·좌우 바꾸기)은 닫은 뒤에 탭줄을 다시 그린다. 반쪽 버튼이 옮겨지거나 다시
+    // 마운트되면 포커스가 body로 빠지므로 그린 뒤에 한 번 더 본다(같은 탭의 새 버튼, 없으면 활성 탭).
+    // 이때 메뉴 안의 포커스는 새로 열린 메뉴의 것이라 두고 본다.
+    setTimeout(() => restore(false), 0)
   }
 
   useEffect(() => {
