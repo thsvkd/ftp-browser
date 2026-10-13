@@ -6,6 +6,8 @@ import { useLayoutStore } from '@renderer/stores/useLayoutStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { emptyDraft } from '@renderer/lib/serverAddress'
+import type { FtpServer } from '@shared/types/ftp'
+import type { IpcResult } from '@shared/types/ipc'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import {
   localLoc,
@@ -126,5 +128,58 @@ describe("Toolbar — the active tab's server", () => {
     await waitFor(() => expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(1))
     await waitFor(() => expect(useServerStore.getState().connecting).toBe(false))
     expect(invokeCalls(h.invoke, 'ftp:disconnect')).toEqual([])
+  })
+
+  it('shows the attempt and its failure when a connected tab adds another server', async () => {
+    // covers: Test-1022
+    const alice: FtpServer = {
+      id: 1,
+      name: 'Alice',
+      host: 'a.example.com',
+      port: 21,
+      username: 'alice',
+      secure: false,
+      hasPassword: true
+    }
+    const bob: FtpServer = {
+      id: 2,
+      name: 'Bob',
+      host: 'b.example.com',
+      port: 2121,
+      username: 'bob',
+      secure: false,
+      hasPassword: true
+    }
+    useServerStore.setState({
+      servers: [alice, bob],
+      draft: emptyDraft(),
+      address: '',
+      connecting: false,
+      error: ''
+    })
+    h.handlers['ftp:getRecentServers'] = async () => ({
+      success: true,
+      data: [alice, bob]
+    })
+    let answer!: (result: IpcResult<void>) => void
+    h.handlers['ftp:connect'] = () => new Promise((resolve) => (answer = resolve))
+    setConnection(A, 'connected')
+    useTabsStore.getState().openTab({ side: 'remote', path: '/', server: A })
+    render(<Toolbar onSettingsClick={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Alice/ }))
+    fireEvent.click(await screen.findByRole('option', { name: /Bob/ }))
+    await waitFor(() => expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(1))
+
+    // A의 연결된 표시줄이 남아 있어도 B 시도가 보이고 취소할 수 있다
+    expect(screen.queryByRole('textbox', { name: 'Server address' })).toBeNull()
+    expect(screen.getByText('Connecting to Bob…')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy()
+
+    await act(async () => answer({ success: false, error: '530 Login incorrect.' }))
+    await waitFor(() => expect(useServerStore.getState().connecting).toBe(false))
+    expect(screen.getByText(/530 Login incorrect\./)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    expect(screen.getByRole('button', { name: /Alice/ })).toBeTruthy()
   })
 })

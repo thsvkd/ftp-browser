@@ -125,6 +125,18 @@ export function ConnectBar(): React.JSX.Element {
       }}
     />
   )
+  // 연결 시도의 상태(진행 문구·실패)는 두 모드에 같이 보인다: 연결된 탭에서 다른 서버를 더하다
+  // 실패해도 알 수 있어야 한다(multi-connection B1 뒤로는 연결된 표시줄이 그대로 남는다).
+  const connectingEl = connecting && !manager && (
+    <span className="truncate text-xs text-[var(--mu)]">
+      {t('connect.connectingTo', { name: serverLabel(draft) })}
+    </span>
+  )
+  const errorEl = error && !popover && !manager && (
+    <div className="absolute left-0 top-[calc(100%+8px)] z-40 w-[440px] max-w-[calc(100vw-24px)]">
+      <ErrorNote message={error} onClose={clearError} className="shadow-lg" />
+    </div>
+  )
   const managerEl = manager && (
     <ServerManagerDialog
       initial={manager}
@@ -162,7 +174,7 @@ export function ConnectBar(): React.JSX.Element {
         }
     const label = serverLabel(shown)
     return (
-      <div ref={barRef} className="relative flex min-w-0 items-center">
+      <div ref={barRef} className="relative flex min-w-0 items-center gap-2">
         <button
           ref={triggerRef}
           onClick={() => setPopover((p) => !p)}
@@ -181,7 +193,14 @@ export function ConnectBar(): React.JSX.Element {
           )}
           <ChevronDown size={14} className="shrink-0 text-[var(--mu)]" />
         </button>
+        {connecting && (
+          <button className={btn('secondary', 'md', 'min-w-[76px]')} onClick={cancel}>
+            {t('common.cancel')}
+          </button>
+        )}
+        {connectingEl}
         {popoverEl}
+        {errorEl}
       </div>
     )
   }
@@ -306,18 +325,10 @@ export function ConnectBar(): React.JSX.Element {
             {t('connect.connect')}
           </button>
         )}
-        {connecting && !manager && (
-          <span className="truncate text-xs text-[var(--mu)]">
-            {t('connect.connectingTo', { name: serverLabel(draft) })}
-          </span>
-        )}
+        {connectingEl}
 
         {popoverEl}
-        {error && !popover && !manager && (
-          <div className="absolute left-0 top-[calc(100%+8px)] z-40 w-[440px] max-w-[calc(100vw-24px)]">
-            <ErrorNote message={error} onClose={clearError} className="shadow-lg" />
-          </div>
-        )}
+        {errorEl}
       </div>
     )
   }
