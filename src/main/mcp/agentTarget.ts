@@ -24,7 +24,10 @@ function describe(servers: FtpServer[], key: ConnKey): string {
   return `${key} (${saved.name ? `${saved.name}, ` : ''}id ${saved.id})`
 }
 
-/** 저장 서버의 연결: 사용자까지 같은 것, 없으면 그 host:port의 유일한 연결 */
+/**
+ * 저장 서버의 연결: 사용자까지 같은 것뿐이다(transfer-stability TS15). 다른 사용자의 연결로 물러서지 않는다:
+ * 그러면 `disconnect`가 다른 계정을 끊는다. 없으면 NOT_CONNECTED이고, 그 host:port의 다른 사용자 키를 알린다.
+ */
 function connectionOf(deps: AgentDeps, server: FtpServer): ConnKey {
   const connected = deps.connections.connectedKeys()
   const at = connected.filter((key) => {
@@ -34,19 +37,17 @@ function connectionOf(deps: AgentDeps, server: FtpServer): ConnKey {
   const user = server.username || 'anonymous'
   const exact = at.find((key) => parseConnKey(key)!.user === user)
   if (exact) return exact
-  if (at.length === 1) return at[0]
+  const name = `${server.name || server.host} (id ${server.id}, ${server.host}:${server.port})`
   if (at.length === 0) {
     throw new AgentError(
       'NOT_CONNECTED',
-      `${server.name || server.host} (id ${server.id}, ${server.host}:${server.port}) is not ` +
-        `connected. Call connect with server ${server.id} first.`
+      `${name} is not connected. Call connect with server ${server.id} first.`
     )
   }
-  const servers = listServers(deps.db)
   throw new AgentError(
-    'AMBIGUOUS',
-    `${at.length} connections match ${server.name || server.host}: ` +
-      `${at.map((key) => describe(servers, key)).join(', ')}.`
+    'NOT_CONNECTED',
+    `${name} is not connected as ${user}. Connected there as other users: ${at.join(', ')}. ` +
+      `Call connect with server ${server.id} first, or pass server with one of those keys.`
   )
 }
 
@@ -65,7 +66,8 @@ function refuseDisconnectedKey(deps: AgentDeps, ref: string): void {
 }
 
 /**
- * 도구가 쓸 연결(multi-connection MC18). ① `server` 인자: 연결 키(대소문자 무시) 또는 저장 서버의 연결.
+ * 도구가 쓸 연결(multi-connection MC18). ① `server` 인자: 연결 키(대소문자 무시) 또는 저장 서버의 그 저장 행
+ * 사용자의 연결.
  * 그것이 마지막 사용 연결이 된다. ② 인자가 없으면 마지막 사용 연결이 아직 연결돼 있으면 그것.
  * ③ 연결이 정확히 하나면 그것. ④ 0개면 NOT_CONNECTED, 둘 이상이면 AMBIGUOUS.
  */
