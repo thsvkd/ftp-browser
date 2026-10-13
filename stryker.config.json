@@ -15,7 +15,7 @@
     "src/renderer/src/hooks/useResizableSidebar.ts",
     "src/main/ipc/localFsHandlers.ts:19-52",
     "src/main/ipc/localFsHandlers.ts:93-131",
-    "src/main/local/LocalFileSystem.ts:36-62",
+    "src/main/local/LocalFileSystem.ts:36-66",
     "src/renderer/src/lib/sendItems.ts:262-294",
     "src/renderer/src/lib/osDropGuard.ts",
     "src/renderer/src/lib/fileCategories.ts",
