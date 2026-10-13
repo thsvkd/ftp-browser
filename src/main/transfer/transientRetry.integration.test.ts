@@ -49,6 +49,16 @@ describe('transient disconnects are retried against a mock FTP server', () => {
     queue.on('queue:updated', (update: TransferUpdate) => updates.push(...update.upserts))
   }
 
+  /** 파일 하나를 넣고 실패로 끝날 때까지 기다린다(재시도 3회, 실제 대기 6초). */
+  async function downloadUntilFailed(localPath: string): Promise<TransferJob> {
+    const id = queue.enqueue('download', localPath, '/file.bin', 'file.bin', FILE.length)
+    await vi.waitFor(() => expect(queue.getAll().find((j) => j.id === id)!.status).toBe('failed'), {
+      timeout: 15_000,
+      interval: 10
+    })
+    return queue.getAll().find((j) => j.id === id)!
+  }
+
   /** 파일 하나를 받아 끝날 때까지 기다린다. 재시도는 실제로 RETRY_DELAY_MS(2초)를 기다린다. */
   async function download(): Promise<{ job: TransferJob; localPath: string }> {
     const localPath = path.join(dir, 'file.bin')
@@ -101,5 +111,30 @@ describe('transient disconnects are retried against a mock FTP server', () => {
     expect(job.retryCount).toBe(1)
     expect(sha256(fs.readFileSync(localPath))).toBe(sha256(FILE))
     expect(server.log.filter((line) => line.startsWith('< RETR'))).toHaveLength(2)
+  }, 20_000)
+
+  it('should leave no partial local file after a download cut by a FIN on every attempt fails', async () => {
+    // covers: Test-1187
+    await setup({ finDuringRetr: 4 })
+    const localPath = path.join(dir, 'file.bin')
+
+    const job = await downloadUntilFailed(localPath)
+
+    expect(job.retryCount).toBe(3)
+    expect(server.log.filter((line) => line.startsWith('< RETR'))).toHaveLength(4)
+    await vi.waitFor(() => expect(fs.existsSync(localPath)).toBe(false))
+  }, 20_000)
+
+  it('should leave no file after a failed GUI download that overwrote an existing file', async () => {
+    // covers: Test-1187
+    await setup({ finDuringRetr: 4 })
+    const localPath = path.join(dir, 'file.bin')
+    // 충돌 시트에서 덮어쓰기를 고른 기존 파일: 첫 시도가 'w'로 열며 이미 잘랐다
+    fs.writeFileSync(localPath, 'existing file the user chose to overwrite')
+
+    const job = await downloadUntilFailed(localPath)
+
+    expect(job.retryCount).toBe(3)
+    await vi.waitFor(() => expect(fs.existsSync(localPath)).toBe(false))
   }, 20_000)
 })

@@ -183,6 +183,13 @@ export class TransferQueue extends EventEmitter {
   private batchDirs = new WeakMap<TransferJob, BatchDirs>()
   /** 분할 구간이 아직 닫히는 중에 들어온 retry. closeSegmented가 정리를 마치고 되살린다. */
   private retryAfterClose = new Set<string>()
+  /**
+   * 이번 실행에서 로컬 파일을 연(만들거나 자른) 다운로드. 최종 실패는 이것만 지운다: 열기 전에 실패한 작업이
+   * 덮어쓰기를 고른 사용자 파일을 지우지 않게 한다. 정리가 파일을 지우면 뺀다.
+   */
+  private opened = new WeakSet<TransferJob>()
+  /** 진행 중인 실패 다운로드의 로컬 파일 정리(작업 id별). 사용자 재시도는 이것이 끝난 뒤에 시작한다. */
+  private localCleanups = new Map<string, Promise<void>>()
 
   constructor(
     private fileOps: FtpFileOperations,
@@ -293,8 +300,18 @@ export class TransferQueue extends EventEmitter {
         dirs = memos.get(batch) ?? { dirSet: old.dirSet, created: new Map() }
         memos.set(batch, dirs)
       }
-      this.work.push({ job, dirs })
       this.markDirty(job)
+      const cleanup = this.localCleanups.get(id)
+      if (!cleanup) {
+        this.work.push({ job, dirs })
+        continue
+      }
+      // 실패한 시도의 파일 정리가 끝난 뒤에 넣는다. 먼저 돌면 새 시도가 연 파일을 옛 정리가 지운다
+      void cleanup.then(() => {
+        if (job.status !== 'pending' || !this.byId.has(job.id)) return
+        this.work.push({ job, dirs })
+        this.pump()
+      })
     }
     this.pump()
   }
@@ -587,7 +604,8 @@ export class TransferQueue extends EventEmitter {
         job.localPath,
         onProgress,
         client ?? undefined,
-        this.claims.get(job)
+        this.claims.get(job),
+        () => this.opened.add(job)
       )
     } else {
       if (item.dirs) {
@@ -647,6 +665,7 @@ export class TransferQueue extends EventEmitter {
     const claim = this.claims.get(job)
     const file = await open(job.localPath, claim && !claim.created ? 'wx' : 'w')
     if (claim) claim.created = true
+    this.opened.add(job)
     try {
       // NTFS는 늘리기만 한 파일의 끝쪽에 처음 쓸 때 그 앞을 0으로 채우며 다른 구간의 쓰기도 막는다(512 MiB에
       // 수 초). 희소 파일은 채우지 않으므로 늘리기 전에 표시한다. 최적화일 뿐이라 실패해도 그대로 받는다.
@@ -859,17 +878,40 @@ export class TransferQueue extends EventEmitter {
     }
   }
 
-  /** 받다 만 로컬 파일을 지운다. 배타적 다운로드는 자기가 만든 파일만 지운다(그 경로에 생긴 남의 파일은 둔다). */
-  private removePartial(job: TransferJob): Promise<void> {
+  /**
+   * 받다 만 로컬 파일을 지운다. 배타적 다운로드는 자기가 만든 파일만 지운다(그 경로에 생긴 남의 파일은 둔다).
+   * 못 지워 파일이 남았으면 true다. 이미 없던 파일(ENOENT)은 지운 것으로 친다.
+   */
+  private removePartial(job: TransferJob): Promise<boolean> {
     const claim = this.claims.get(job)
-    if (claim?.created === false) return Promise.resolve()
+    if (claim?.created === false) return Promise.resolve(false)
     return unlink(job.localPath).then(
       () => {
+        this.opened.delete(job)
         // 자기 파일을 지웠으니 재시도는 'wx'로 새로 만든다
         if (claim) claim.created = false
+        return false
       },
-      () => {}
+      (err: NodeJS.ErrnoException) => {
+        if (err.code !== 'ENOENT') return true
+        this.opened.delete(job)
+        return false
+      }
     )
+  }
+
+  /**
+   * 최종 실패한 한 스트림 다운로드가 연 로컬 파일을 지운다. 받다 만 파일에 기대는 이어받기는 없다. 못 지우면
+   * 작업이 아직 실패 상태일 때 오류에 적는다. 사용자 재시도는 이것이 끝나기를 기다린다(retry).
+   */
+  private cleanUpLocal(job: TransferJob): void {
+    const done: Promise<void> = this.removePartial(job).then((left) => {
+      if (this.localCleanups.get(job.id) === done) this.localCleanups.delete(job.id)
+      if (!left || job.status !== 'failed') return
+      job.error += ' (partial file left on this computer)'
+      this.markDirty(job)
+    })
+    this.localCleanups.set(job.id, done)
   }
 
   private addLease(jobId: string, client: Client): void {
@@ -1003,7 +1045,9 @@ export class TransferQueue extends EventEmitter {
     const { job } = item
     job.status = 'failed'
     job.error = jobError(err)
+    // 구간 항목은 closeSegmented가 지운다. 자동 재시도(retryOrFail)는 다음 시도가 'w'로 다시 열므로 지우지 않는다
     if (item.segment) this.stopSegmented(job, item.segment.state)
+    else if (job.direction === 'download' && this.opened.has(job)) this.cleanUpLocal(job)
     this.markDirty(job)
   }
 

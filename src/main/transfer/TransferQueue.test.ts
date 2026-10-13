@@ -7,7 +7,7 @@ import * as path from 'path'
 import { Readable, type Writable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { FTPError, type Client } from 'basic-ftp'
-import { LOGIN_HOLD_MS, MAX_LOGIN_FAILURES, TransferQueue } from './TransferQueue'
+import { LOGIN_HOLD_MS, MAX_LOGIN_FAILURES, TransferQueue, jobError } from './TransferQueue'
 import { planSegments, LAN_RTT_MS } from './segmentedDownload'
 import {
   LIMIT,
@@ -521,7 +521,8 @@ describe('TransferQueue', () => {
           '/local/file.jpg',
           expect.any(Function),
           pool.clients[0],
-          undefined
+          undefined,
+          expect.any(Function)
         )
       })
       expect(pool.release).toHaveBeenCalledWith(pool.clients[0])
@@ -1146,6 +1147,189 @@ describe('TransferQueue', () => {
 
       expect(queue.getAll()).toEqual([])
       expect(mockFileOps.download).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('failed download cleanup', () => {
+    /** 재시도하지 않는 실패(550) */
+    const denied = (): FTPError => new FTPError({ code: 550, message: '550 Permission denied' })
+    const reset = (): Error => Object.assign(new Error('reset'), { code: 'ECONNRESET' })
+    type OnOpen = () => void
+    type Download = (
+      remote: string,
+      local: string,
+      onProgress: unknown,
+      client: unknown,
+      claim: { created: boolean } | undefined,
+      onOpen: OnOpen | undefined
+    ) => Promise<void>
+
+    function mockDownload(impl: Download): ReturnType<typeof vi.fn> {
+      const download = mockFileOps.download as ReturnType<typeof vi.fn>
+      download.mockImplementation(impl)
+      return download
+    }
+
+    it('should remove the local file a failed single-stream download opened, for GUI and exclusive downloads', async () => {
+      // covers: Test-1180
+      const err = denied()
+      mockDownload(async (_r, _l, _p, _c, _claim, onOpen) => {
+        onOpen!()
+        throw err
+      })
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+
+      expect(queue.getAll()[0]).toMatchObject({ status: 'failed', error: jobError(err) })
+      expect(unlink).toHaveBeenCalledTimes(1)
+      expect(unlink).toHaveBeenCalledWith('/local/a.jpg')
+
+      // 배타적 다운로드: 자기가 만든 파일을 지우고, 다음 시도는 'wx'로 새로 만든다
+      vi.mocked(unlink).mockClear()
+      const seen: Array<{ created: boolean } | undefined> = []
+      const download = mockDownload(async (_r, _l, _p, _c, claim, onOpen) => {
+        seen.push(claim && { ...claim })
+        if (seen.length > 1) return
+        claim!.created = true
+        onOpen!()
+        throw denied()
+      })
+      download.mockClear()
+      const [id] = queue.enqueueBatch(
+        'download',
+        [
+          {
+            localPath: '/local/b.jpg',
+            remotePath: '/remote/b.jpg',
+            fileName: 'b.jpg',
+            totalBytes: 10
+          }
+        ],
+        false,
+        undefined,
+        { exclusive: true }
+      )
+      await settle()
+      expect(queue.getAll()[1].status).toBe('failed')
+      expect(unlink).toHaveBeenCalledTimes(1)
+      expect(unlink).toHaveBeenCalledWith('/local/b.jpg')
+
+      queue.retry([id])
+      await settle()
+      expect(queue.getAll()[1].status).toBe('completed')
+      expect(seen).toEqual([{ created: false }, { created: false }])
+    })
+
+    it('should keep the file through automatic retries and remove it once the last attempt fails', async () => {
+      // covers: Test-1181
+      const download = mockDownload(async (_r, _l, _p, _c, _claim, onOpen) => {
+        onOpen!()
+        throw reset()
+      })
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        expect(download).toHaveBeenCalledTimes(attempt)
+        expect(queue.getAll()[0].status).toBe('pending')
+        await vi.advanceTimersByTimeAsync(1999)
+        expect(unlink).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(1)
+      }
+      expect(download).toHaveBeenCalledTimes(4)
+      expect(queue.getAll()[0]).toMatchObject({ status: 'failed', retryCount: 3 })
+      expect(unlink).toHaveBeenCalledTimes(1)
+      expect(unlink).toHaveBeenCalledWith('/local/a.jpg')
+    })
+
+    it('should not remove a file the job never opened', async () => {
+      // covers: Test-1182
+      // ① 'w' 열기 자체가 실패했다(읽기 전용 기존 파일): 덮어쓰기를 고른 사용자 파일은 남는다
+      mockDownload(async () => {
+        throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+      })
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+      expect(queue.getAll()[0].status).toBe('failed')
+      expect(unlink).not.toHaveBeenCalled()
+
+      // ② 한 번도 시작하지 못하고 로그인 실패 연쇄로 실패했다
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      pool.acquire.mockRejectedValue(new FTPError({ code: 530, message: '530 Login incorrect' }))
+      queue.enqueue('download', '/local/b.jpg', '/remote/b.jpg', 'b.jpg', 10)
+      await vi.advanceTimersByTimeAsync(LOGIN_HOLD_TOTAL)
+      expect(queue.getAll()[1].status).toBe('failed')
+      expect(unlink).not.toHaveBeenCalled()
+      vi.mocked(console.warn).mockRestore()
+    })
+
+    it('should remove the file an earlier attempt opened when the job fails through the login failure chain', async () => {
+      // covers: Test-1183
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      mockDownload(async (_r, _l, _p, _c, _claim, onOpen) => {
+        onOpen!()
+        throw reset()
+      })
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+      expect(queue.getAll()[0]).toMatchObject({ status: 'pending', retryCount: 1 })
+
+      pool.acquire.mockRejectedValue(new FTPError({ code: 530, message: '530 Login incorrect' }))
+      await vi.advanceTimersByTimeAsync(2000 + LOGIN_HOLD_TOTAL)
+
+      expect(queue.getAll()[0].status).toBe('failed')
+      expect(unlink).toHaveBeenCalledTimes(1)
+      expect(unlink).toHaveBeenCalledWith('/local/a.jpg')
+      vi.mocked(console.warn).mockRestore()
+    })
+
+    it('should note in the error when the partial file could not be removed, but not when it was already gone', async () => {
+      // covers: Test-1184
+      const err = denied()
+      mockDownload(async (_r, _l, _p, _c, _claim, onOpen) => {
+        onOpen!()
+        throw err
+      })
+      vi.mocked(unlink).mockRejectedValueOnce(
+        Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' })
+      )
+      queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+      expect(queue.getAll()[0].error).toBe(`${jobError(err)} (partial file left on this computer)`)
+
+      vi.mocked(unlink).mockRejectedValueOnce(
+        Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' })
+      )
+      queue.enqueue('download', '/local/b.jpg', '/remote/b.jpg', 'b.jpg', 10)
+      await settle()
+      expect(queue.getAll()[1]).toMatchObject({ status: 'failed', error: jobError(err) })
+      expect(unlink).toHaveBeenCalledTimes(2)
+    })
+
+    it('should start a user retry only after the cleanup of the failed attempt has finished', async () => {
+      // covers: Test-1185
+      const download = mockDownload(async (_r, _l, _p, _c, _claim, onOpen) => {
+        onOpen!()
+        if (download.mock.calls.length === 1) throw denied()
+      })
+      const removal = deferred()
+      vi.mocked(unlink).mockReturnValueOnce(removal.promise)
+      const id = queue.enqueue('download', '/local/a.jpg', '/remote/a.jpg', 'a.jpg', 10)
+      await settle()
+      expect(queue.getAll()[0].status).toBe('failed')
+      expect(unlink).toHaveBeenCalledTimes(1)
+
+      queue.retry([id])
+      expect(queue.getAll()[0].status).toBe('pending')
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(download).toHaveBeenCalledTimes(1)
+      expect(queue.getAll()[0].status).toBe('pending')
+
+      removal.resolve()
+      await settle()
+      expect(download).toHaveBeenCalledTimes(2)
+      expect(queue.getAll()[0].status).toBe('completed')
+      expect(unlink).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -2385,7 +2569,8 @@ describe('TransferQueue', () => {
         localPath,
         expect.any(Function),
         client,
-        undefined
+        undefined,
+        expect.any(Function)
       )
     })
 
@@ -2529,6 +2714,32 @@ describe('TransferQueue', () => {
       expect(mockFileOps.download).not.toHaveBeenCalled()
       // 미리 늘려 둔 파일은 크기만 서버와 같고 0으로 찬 구멍이 있으므로 남기지 않는다
       await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+    })
+
+    it('should unlink a failed segmented download exactly once and never unlink after a failed upload', async () => {
+      // covers: Test-1188
+      holdAll()
+      server.failures.set(0, new FTPError({ code: 550, message: 'Permission denied' }))
+      enqueueBig()
+      await vi.waitFor(() => expect(big().transferredBytes).toBe(3 * CHUNK))
+      server.holds.get(0)!.resolve()
+      await vi.waitFor(() => expect(big().status).toBe('failed'))
+      for (const start of STARTS) server.holds.get(start)!.resolve()
+      await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(unlink).toHaveBeenCalledTimes(1)
+
+      // 올리다 만 원격 파일은 남기고 로컬 파일은 건드리지 않는다
+      vi.mocked(unlink).mockClear()
+      ;(mockFileOps.upload as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new FTPError({ code: 550, message: '550 Permission denied' })
+      )
+      queue.enqueue('upload', '/local/up.jpg', '/remote/up.jpg', 'up.jpg', 10)
+      await vi.waitFor(() =>
+        expect(queue.getAll().find((job) => job.fileName === 'up.jpg')!.status).toBe('failed')
+      )
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(unlink).not.toHaveBeenCalled()
     })
 
     it('should revive a failed segmented job pressed for retry while its other ranges are still closing', async () => {

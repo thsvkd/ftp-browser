@@ -114,10 +114,12 @@ async function downloadToFile(
   client: Client,
   localPath: string,
   remotePath: string,
-  claim?: LocalFileClaim
+  claim?: LocalFileClaim,
+  onOpen?: () => void
 ): Promise<void> {
   const fd = await openFd(localPath, claim && !claim.created ? 'wx' : 'w')
   if (claim) claim.created = true
+  onOpen?.()
   const writer = new SegmentWriter(fd, { start: 0, end: Number.MAX_SAFE_INTEGER, final: true })
   // basic-ftp가 리스너를 뗀 뒤 남은 쓰기가 실패해도 프로세스가 죽지 않게 한다. 전송 실패는 downloadTo가 알린다.
   writer.on('error', () => {})
@@ -179,13 +181,17 @@ export class FtpFileOperations {
     this.manager.emit('mutation', { kind: 'upload', remotePath })
   }
 
-  /** `claim`이 있으면 배타적 다운로드다(LocalFileClaim). 없으면 지금처럼 'w'로 열어 있는 파일을 덮는다. */
+  /**
+   * `claim`이 있으면 배타적 다운로드다(LocalFileClaim). 없으면 지금처럼 'w'로 열어 있는 파일을 덮는다.
+   * `onOpen`은 로컬 파일을 연(만들거나 자른) 직후, 첫 쓰기 전에 한 번 부른다. 열기가 실패하면 부르지 않는다.
+   */
   async download(
     remotePath: string,
     localPath: string,
     onProgress?: ProgressCallback,
     client?: Client,
-    claim?: LocalFileClaim
+    claim?: LocalFileClaim,
+    onOpen?: () => void
   ): Promise<void> {
     const task = async (c: Client): Promise<void> => {
       if (onProgress) {
@@ -194,7 +200,7 @@ export class FtpFileOperations {
         })
       }
       try {
-        await downloadToFile(c, localPath, remotePath, claim)
+        await downloadToFile(c, localPath, remotePath, claim, onOpen)
       } finally {
         c.trackProgress()
       }
