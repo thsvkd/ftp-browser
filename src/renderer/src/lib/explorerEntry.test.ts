@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it } from 'vitest'
+import { IMAGE_EXTENSIONS, isImageFile } from '@shared/constants'
 import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { categoryOf, fromFtpEntry, fromLocalEntry } from './explorerEntry'
 
@@ -101,7 +102,9 @@ describe('ExplorerEntry', () => {
         's'
       )
       expect(entry.category).toBe('image')
-      expect(entry.isImage).toBe(true)
+      // 이미지 판정(썸네일)은 설정 편집과 무관하게 확장자 집합에서 나온다.
+      expect(isImageFile('a.jpg')).toBe(true)
+      expect(IMAGE_EXTENSIONS.has('.jpg')).toBe(true)
     } finally {
       useFileCategoryStore.setState({ overrides: before })
     }

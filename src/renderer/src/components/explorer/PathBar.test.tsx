@@ -89,7 +89,7 @@ describe('PathBar — crumbs and typing a path', () => {
   })
 })
 
-describe('PathBar — find, photos, sort and view', () => {
+describe('PathBar — find, type filter, sort and view', () => {
   it('focuses find with Ctrl+F and keeps photos only, sort and view on the active tab', async () => {
     // covers: Test-828
     fireEvent.keyDown(listbox(), { key: 'f', ctrlKey: true })

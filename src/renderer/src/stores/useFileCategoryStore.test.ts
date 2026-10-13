@@ -18,7 +18,7 @@ beforeEach(() => {
 })
 
 describe('useFileCategoryStore persistence', () => {
-  it('saves only overrides under its own key and leaves the settings store alone', async () => {
+  it('saves only overrides under its own key, leaves the settings store alone and recomputes defaults after an update', async () => {
     // covers: Test-935
     useSettingsStore.setState({ showHidden: false })
     state().removeExtension('image', 'png')
@@ -55,10 +55,8 @@ describe('useFileCategoryStore persistence', () => {
     )
     await useFileCategoryStore.persist.rehydrate()
     expect(state().overrides).toEqual(EMPTY_OVERRIDES)
-  })
 
-  it('recomputes the default list after an app update instead of reviving a stored one', async () => {
-    // covers: Test-935
+    // 앱 업데이트 뒤에는 저장된 기본 목록을 되살리지 않고 다시 계산한다.
     localStorage.setItem(
       KEY,
       JSON.stringify({
@@ -82,7 +80,7 @@ describe('useFileCategoryStore persistence', () => {
 })
 
 describe('useFileCategoryStore actions and memoisation', () => {
-  it('wraps the reducers, makes unique custom ids and keeps custom categories on restore', () => {
+  it('wraps the reducers, keeps custom categories on restore and returns stable references until overrides change', () => {
     // covers: Test-936
     const added = state().addExtension('video', 'png')
     expect(added).toEqual({ result: 'added', duplicateOf: 'image' })
@@ -97,10 +95,8 @@ describe('useFileCategoryStore actions and memoisation', () => {
     state().restoreAllDefaults()
     expect(extsOf('video')).not.toContain('png')
     expect(state().overrides.custom).toHaveLength(2)
-  })
 
-  it('returns stable references from selectCategories and the hooks until overrides change', () => {
-    // covers: Test-936
+    // selectCategories와 훅은 overrides가 바뀔 때까지 같은 참조를 돌려준다.
     const first = selectCategories(state())
     expect(selectCategories(state())).toBe(first)
     state().setHidden('code', true)

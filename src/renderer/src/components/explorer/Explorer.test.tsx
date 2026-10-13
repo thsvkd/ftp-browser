@@ -1010,6 +1010,14 @@ describe('Explorer — file type filter', () => {
         .getByRole('checkbox', { name: /Images/ })
         .closest('label')?.textContent
     ).toBe('Images (2)')
+    // 찾기가 이미지를 모두 떨궈도 개수는 폴더 전체 기준이다(find로 좁힌 목록이 넘어가면 0이 된다).
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'b' }))
+    expect(shown()).toEqual(['sub'])
+    expect(
+      within(screen.getByRole('dialog'))
+        .getByRole('checkbox', { name: /Images/ })
+        .closest('label')?.textContent
+    ).toBe('Images (2)')
     closeMenu()
 
     // 폴더를 옮기면 찾기는 지워지고 필터는 남는다. 다른 탭은 영향이 없다.

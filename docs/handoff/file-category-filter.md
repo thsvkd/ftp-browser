@@ -524,3 +524,9 @@ jsdom은 실제 클릭 순서·레이아웃·IME·재시작을 재현하지 못�
 | (k) 원격        | 미실시: 이 환경에 pyftpdlib가 없다. 원격 탭 경로는 jsdom의 원격 탭 테스트(Test-945 등)로만 확인했다.                                                                                                                           |
 
 R3 중 발견해 고친 것: "모두 보기"를 누르면 그 버튼이 비활성이 되어 포커스가 body로 빠졌다 → 첫 체크박스로 옮김(Test-940 단언에 포함).
+
+**검증 범위와 남은 확인(병합 전)**
+
+- 이 작업 트리에서는 `@modelcontextprotocol/*`가 공유 `node_modules`에 없어 `typecheck:node`와 메인 프로세스 테스트 7개가 실패한다(환경 문제, 이번 변경은 메인 프로세스를 건드리지 않는다). 그래서 §14-3의 `npm run typecheck` 전체, `npm run build:unpack`, `npm run smoke:packaged`는 **실행하지 못했다**. 병합 전에 깨끗한 체크아웃에서 `npm ci && npm run typecheck && npm run build:unpack && npm run smoke:packaged`를 돌려 결과를 여기에 적는다.
+- R3 (k) 원격 탭과 (i) 실제 한글 입력기는 위 표대로 남아 있다.
+- 테스트 편차: Test-935·936은 `it` 하나로 둔다(스펙의 1:1 규칙). Test-953만 `it` 둘이다.

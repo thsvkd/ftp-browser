@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { en } from '@renderer/i18n/locales/en'
 import { fromLocalEntry, type ExplorerEntry } from '@renderer/lib/explorerEntry'
 import { EMPTY_FILTER, type TabFilter } from '@renderer/lib/fileCategories'
+import { MENU_VIEWPORT_MARGIN } from '@renderer/lib/menuPosition'
 import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
 import { useActiveTab, useTabsStore } from '@renderer/stores/useTabsStore'
 import { stubMenuViewport } from '@renderer/test/rendererTestUtils'
@@ -388,7 +389,7 @@ describe('FileFilterMenu — keyboard and accessibility', () => {
     expect(filterNow().categories).toEqual(['raw'])
   })
 
-  it('stays inside the viewport when the trigger sits at the right edge', () => {
+  it('is moved back inside the viewport by clampMenuPosition when it would overflow', () => {
     // covers: Test-943
     const viewport = stubMenuViewport({ width: 288, height: 200 }, { width: 1000, height: 800 })
     try {
@@ -396,14 +397,15 @@ describe('FileFilterMenu — keyboard and accessibility', () => {
       const el = trigger()
       Object.defineProperty(el, 'getBoundingClientRect', {
         configurable: true,
-        value: () => ({ left: 900, right: 1000, top: 0, bottom: 40, width: 100, height: 40 })
+        value: () => ({ left: 0, right: 100, top: 740, bottom: 780, width: 100, height: 40 })
       })
       fireEvent.click(el)
       const style = dialog().style
       expect(style.position).toBe('fixed')
-      expect(parseFloat(style.left) + 288).toBeLessThanOrEqual(1000)
-      expect(parseFloat(style.left)).toBeGreaterThanOrEqual(0)
-      expect(parseFloat(style.top)).toBe(44)
+      // 왼쪽: right(100) - 288 < 0 이라 여백(4)으로 밀린다.
+      expect(parseFloat(style.left)).toBe(MENU_VIEWPORT_MARGIN)
+      // 아래: bottom(780) + 4 + 200 이 뷰포트(800)를 넘어 앵커 기준으로 뒤집힌다.
+      expect(parseFloat(style.top)).toBe(780 + 4 - 200)
     } finally {
       viewport.restore()
     }

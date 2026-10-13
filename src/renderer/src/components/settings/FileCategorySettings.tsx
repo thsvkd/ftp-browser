@@ -19,15 +19,18 @@ type Note = { kind: 'exists' | 'invalid' | 'duplicate'; ext?: string; other?: st
 function NameInput({
   id,
   name,
-  autoFocus
+  autoFocus,
+  onSettled
 }: {
   id: string
   name: string
   autoFocus: boolean
+  onSettled: () => void
 }): React.JSX.Element {
   const t = useT()
   const [draft, setDraft] = useState(name)
   const commit = (): void => {
+    onSettled()
     const next = draft.trim()
     if (next) useFileCategoryStore.getState().renameCustom(id, next)
     setDraft(next || name)
@@ -43,10 +46,6 @@ function NameInput({
       onKeyDown={(e) => {
         e.stopPropagation()
         if (e.key === 'Enter' && !e.nativeEvent.isComposing) commit()
-        if (e.key === 'Escape') {
-          setDraft(name)
-          e.currentTarget.blur()
-        }
       }}
       className="h-7 min-w-0 flex-1 rounded-md border border-[var(--bd)] bg-[var(--bg)] px-2 text-sm text-[var(--tx)] outline-none focus:border-[var(--ac)]"
     />
@@ -56,10 +55,12 @@ function NameInput({
 function CategoryCard({
   category,
   fresh,
+  onSettled,
   all
 }: {
   category: ResolvedCategory
   fresh: boolean
+  onSettled: () => void
   all: ResolvedCategory[]
 }): React.JSX.Element {
   const t = useT()
@@ -121,7 +122,12 @@ function CategoryCard({
             )}
           </span>
         ) : (
-          <NameInput id={category.id} name={category.name ?? ''} autoFocus={fresh} />
+          <NameInput
+            id={category.id}
+            name={category.name ?? ''}
+            autoFocus={fresh}
+            onSettled={onSettled}
+          />
         )}
         {isDefault ? (
           <>
@@ -220,7 +226,13 @@ export function FileCategorySettings(): React.JSX.Element {
       <p className="mb-3 text-xs text-[var(--mu)]">{t('settings.categoriesHint')}</p>
       <div className="flex flex-col gap-2">
         {all.map((c) => (
-          <CategoryCard key={c.id} category={c} fresh={c.id === freshId} all={all} />
+          <CategoryCard
+            key={c.id}
+            category={c}
+            fresh={c.id === freshId}
+            onSettled={() => setFreshId(null)}
+            all={all}
+          />
         ))}
       </div>
       <div className="mt-3 flex gap-2">
