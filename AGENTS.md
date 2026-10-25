@@ -12,6 +12,30 @@ and servers, and a right rail with the shelf (items gathered to drop into anothe
 details, in 11 UI locales. The two sides talk only
 through the preload bridge `window.api`.
 
+## Before you start: sync the baseline (mandatory)
+
+A stale local checkout silently invalidates specs, test numbers and implementations. It happened
+once: six specs and 92 tests were built on `v1.3.0` while `origin/main` was already at `v1.4.0`
+with its own multi-connection and split view — duplicate implementations of the same subsystem and
+every one of those 92 `Test-N` numbers already taken upstream.
+
+Before writing a spec, a test, or any code:
+
+1. `git fetch --tags origin` — tags and releases move independently of your branch.
+2. `git status -sb` — if you are behind `origin/main`, reconcile **first**, not after the work exists.
+3. `git log --oneline HEAD..origin/main` — read what is already incoming. `gh release list` and
+   `gh run list --limit 5` show the shipped version and the last CI results.
+4. Reserve `Test-N` numbers from `origin`, not from the local tree (numbers are global across
+   branches):
+
+   ```sh
+   git grep -h -o "covers: Test-[0-9]*" origin/main -- src script | sed 's/.*Test-//' | sort -n | tail -1
+   ```
+
+5. Check `git ls-tree --name-only origin/main docs/handoff/` for an existing spec on the same
+   problem before writing one.
+6. Fetch again immediately before `git push` — the remote can move while you work.
+
 ## Source map
 
 - `src/main/index.ts` — bootstrap: creates the window and DB, calls every `register*Handlers`.
@@ -85,7 +109,9 @@ through the preload bridge `window.api`.
   SIZE ignore the path and serve the one `file` buffer; STOR uploads land in `server.stored`.
 - Each test carries `// covers: Test-N`, mapping 1:1 to a case in a `docs/handoff/*.md` spec.
   Numbers are global and specs reserve them before tests exist, so the next free number is one
-  above `grep -rhoE 'Test-[0-9]+' src script docs | sort -t- -k2 -n | tail -1`.
+  above `grep -rhoE 'Test-[0-9]+' src script docs | sort -t- -k2 -n | tail -1` — **after a
+  `git fetch`**. On a stale checkout that number is already taken upstream; take it from
+  `origin/main` instead (see "Before you start: sync the baseline").
 
 ## Handoff specs (`docs/handoff/*.md`, Korean)
 
