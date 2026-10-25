@@ -36,11 +36,20 @@ export function FileGrid({
   setSelection,
   getSelection,
   layout,
-  remote
-}: ViewProps & { layout: GridLayout; remote: boolean }): React.JSX.Element {
+  remote,
+  server
+}: ViewProps & {
+  layout: GridLayout
+  remote: boolean
+  /** 그 탭(항목)의 세션 키 — 썸네일 요청을 세션에 귀속시킨다(A′1) */
+  server?: string
+}): React.JSX.Element {
   const { cols, cellWidth, imageHeight, rowHeight } = layout
-  const host = useFtpStore((s) => s.host)
-  const port = useFtpStore((s) => s.port)
+  // A′5: 캐시 키는 그 탭(항목)의 세션 host·port로 만든다 — main도 세션 기준으로 키를 만든다
+  // (Test-911). primary 투영을 쓰면 비-primary 패널의 썸네일이 영영 도착하지 않는다.
+  // 세션 기록이 없는 호출(투영만으로 연결된 상태)은 예전처럼 primary를 쓴다.
+  const host = useFtpStore((s) => (server ? (s.sessions[server]?.host ?? s.host) : s.host))
+  const port = useFtpStore((s) => (server ? (s.sessions[server]?.port ?? s.port) : s.port))
   const rowCount = Math.ceil(items.length / cols)
 
   const virtualizer = useVirtualizer({
@@ -84,8 +93,9 @@ export function FileGrid({
       .map((x) => x.request)
     // 창을 벗어난 실패 항목은 에러를 지워, 다시 보일 때 재요청되게 한다.
     for (const key of Object.keys(errors)) if (!windowKeys.has(key)) clearError(key)
-    window.api.invoke('thumbnail:requestBatch', requests)
-  }, [remote, visibleStart, visibleEnd, items, cols, host, port])
+    // A′1: 배치 요청에 그 탭의 세션 키를 붙인다(세션이 없으면 인자를 생략, M3·A′4).
+    window.api.invoke('thumbnail:requestBatch', requests, ...(server ? [server] : []))
+  }, [remote, visibleStart, visibleEnd, items, cols, host, port, server])
 
   useEffect(() => {
     const el = scrollRef.current

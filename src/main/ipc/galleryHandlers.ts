@@ -2,7 +2,8 @@ import { ipcMain, BrowserWindow } from 'electron'
 import fs from 'fs/promises'
 import path from 'path'
 import Database from 'better-sqlite3'
-import { FtpConnectionManager, FtpMutationEvent } from '../ftp/FtpConnectionManager'
+import { FtpMutationEvent } from '../ftp/FtpConnectionManager'
+import { FtpSessionRegistry } from '../ftp/FtpSessionRegistry'
 import { RemoteGalleryPreviewQueue } from '../ftp/RemoteGalleryPreviewQueue'
 import { RemoteFolderPreviewCache } from '../ftp/RemoteFolderPreviewCache'
 import { LocalThumbnailManager } from '../local/LocalThumbnailManager'
@@ -53,20 +54,33 @@ async function findFirstImageLocal(folderPath: string): Promise<LocalFolderPrevi
 export function registerGalleryHandlers(
   win: BrowserWindow,
   db: Database.Database,
-  ftpManager: FtpConnectionManager
+  registry: FtpSessionRegistry
 ): LocalThumbnailManager {
   const localThumbnails = new LocalThumbnailManager()
   const folderCache = new RemoteFolderPreviewCache(db)
-  const remoteQueue = new RemoteGalleryPreviewQueue(ftpManager, folderCache)
+
+  // 세션마다 큐 하나(M4): LIST도 캐시도 그 세션의 host·port로 돈다(인자 생략 = primary, M3).
+  const queues = new Map<string, RemoteGalleryPreviewQueue>()
+  const queueFor = (server?: string): RemoteGalleryPreviewQueue => {
+    const key = server ?? ''
+    let queue = queues.get(key)
+    if (!queue) {
+      queue = new RemoteGalleryPreviewQueue(registry.get(server), folderCache)
+      queues.set(key, queue)
+    }
+    return queue
+  }
 
   // 원격 변경(delete/rename/mkdir/upload) 시 영향받는 폴더 미리보기를 자동 무효화.
   // 부모 폴더는 첫 이미지가 바뀔 수 있어서 무조건 invalidate. 대상 자체가 폴더인지
   // 파일인지 메타가 없으므로 안전하게 양쪽 모두 invalidate한다 (폴더가 아니면 no-op).
   // 캐시 키는 normalize된 path 기준이므로 invalidation도 동일하게 normalize해야 한다.
-  ftpManager.on('mutation', (event: FtpMutationEvent) => {
-    if (!ftpManager.isConnected()) return
-    const host = ftpManager.getHost()
-    const port = ftpManager.getPort()
+  registry.on('mutation', (event: FtpMutationEvent) => {
+    // 태그가 있으면 그 세션의, 없으면 primary의 host·port로 무효화한다(M5).
+    const manager = registry.get(event.server)
+    if (!manager.isConnected()) return
+    const host = manager.getHost()
+    const port = manager.getPort()
 
     folderCache.invalidate(host, port, getParentRemotePath(event.remotePath))
     folderCache.invalidate(host, port, normalizeRemotePath(event.remotePath))
@@ -81,13 +95,15 @@ export function registerGalleryHandlers(
     'gallery:remoteFolderPreview',
     async (
       _event,
-      req: RemoteFolderPreviewRequest
+      req: RemoteFolderPreviewRequest,
+      server?: string
     ): Promise<IpcResult<RemoteFolderPreview | null>> => {
-      if (!ftpManager.isConnected()) {
+      const session = registry.get(server)
+      if (!session.isConnected()) {
         return { success: false, error: 'Not connected' }
       }
       try {
-        const preview = await remoteQueue.request(req.remotePath)
+        const preview = await queueFor(server).request(req.remotePath)
         return { success: true, data: preview }
       } catch (err) {
         return ipcError(err)
@@ -96,7 +112,7 @@ export function registerGalleryHandlers(
   )
 
   ipcMain.handle('gallery:cancelAll', (): IpcResult<void> => {
-    remoteQueue.cancelAll()
+    for (const queue of queues.values()) queue.cancelAll()
     return { success: true, data: undefined }
   })
 

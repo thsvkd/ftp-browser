@@ -8,18 +8,20 @@ export interface ShelfItem {
 
 interface ShelfStore {
   items: ShelfItem[]
-  railTab: 'shelf' | 'info'
-  /** 같은 `side+server+path`는 한 번만 담는다. 새로 담은 수를 돌려주고, 있으면 레일을 선반으로 바꾼다. */
+  /** 하단 리모컨 카드를 펼쳤는지. add()가 true로 만든다(레일에 있던 선반 탭의 자리를 잇는다). */
+  dockOpen: boolean
+  /** 같은 `side+server+path`는 한 번만 담는다. 새로 담은 수를 돌려주고, 담으면 카드를 연다. */
   add: (entries: readonly ExplorerEntry[]) => number
   /** `locKey(entry)`로 뺀다. */
   remove: (keys: readonly string[]) => void
   clear: () => void
-  setRailTab: (tab: 'shelf' | 'info') => void
+  setDockOpen: (open: boolean) => void
+  toggleDock: () => void
 }
 
 export const useShelfStore = create<ShelfStore>((set, get) => ({
   items: [],
-  railTab: 'shelf',
+  dockOpen: false,
 
   add: (entries) => {
     const have = new Set(get().items.map((i) => locKey(i.entry)))
@@ -30,7 +32,7 @@ export const useShelfStore = create<ShelfStore>((set, get) => ({
       have.add(key)
       fresh.push({ entry })
     }
-    if (fresh.length) set((s) => ({ items: [...s.items, ...fresh], railTab: 'shelf' }))
+    if (fresh.length) set((s) => ({ items: [...s.items, ...fresh], dockOpen: true }))
     return fresh.length
   },
 
@@ -41,5 +43,7 @@ export const useShelfStore = create<ShelfStore>((set, get) => ({
 
   clear: () => set({ items: [] }),
 
-  setRailTab: (railTab) => set({ railTab })
+  setDockOpen: (dockOpen) => set({ dockOpen }),
+
+  toggleDock: () => set((s) => ({ dockOpen: !s.dockOpen }))
 }))

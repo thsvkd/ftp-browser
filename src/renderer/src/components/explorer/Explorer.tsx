@@ -41,6 +41,7 @@ import {
   type SelectionState
 } from '@renderer/lib/selectionModel'
 import { planSend } from '@renderer/lib/sendPlan'
+import { serverKey } from '@renderer/lib/serverAddress'
 import {
   connectToServer,
   dropShelf,
@@ -53,16 +54,17 @@ import {
 } from '@renderer/lib/sendItems'
 import { cn } from '@renderer/lib/utils'
 import { confirmDelete } from '@renderer/stores/useConfirmStore'
-import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { isConnectedServer, useFtpStore } from '@renderer/stores/useFtpStore'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
+import { useServerStore } from '@renderer/stores/useServerStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useActiveTab, useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
 import { isSafeLocalName, isSafeRemoteName, uniqueLocalNames } from '@shared/entryName'
 import type { FtpConnectionState } from '@shared/types/ftp'
 import type { IpcResult } from '@shared/types/ipc'
-import { startDrag, useDnd, useDropTarget } from './dnd'
+import { startDrag, useDnd, useDropTarget, useSplitDropTarget } from './dnd'
 import { DragGhost } from './DragGhost'
 import {
   EmptyPanel,
@@ -97,12 +99,55 @@ const errorText = (err: unknown): string => (err instanceof Error ? err.message 
 type Gate = 'live' | 'other' | 'stale' | 'lost' | 'offline'
 
 /**
- * 활성 탭의 탐색 영역. 탭이 바뀌면 다시 마운트되어(탭 id가 key) 메뉴·이름 바꾸기 같은
+ * 패널의 탐색 영역. `paneId`를 주면 그 패널의 활성 탭을 그린다(M11) — 없으면(기존 단일 패널
+ * 호출부) 활성 탭을 그대로 쓴다. 탭이 바뀌면 다시 마운트되어(탭 id가 key) 메뉴·이름 바꾸기 같은
  * 지역 상태가 다른 탭으로 새지 않는다. 시작 직후 탭이 없으면 아무것도 그리지 않는다.
  */
-export function Explorer(): React.JSX.Element | null {
-  const tab = useActiveTab()
+export function Explorer({ paneId }: { paneId?: string } = {}): React.JSX.Element | null {
+  const active = useActiveTab()
+  const paneTab = useTabsStore((s) =>
+    paneId === undefined
+      ? undefined
+      : s.tabs.find((t) => t.id === s.panes.find((p) => p.id === paneId)?.activeTabId)
+  )
+  const tab = paneId === undefined ? active : paneTab
   return tab ? <TabExplorer key={tab.id} tab={tab} /> : null
+}
+
+/**
+ * M15: 서버를 끄는 동안 패널을 좌우 반으로 나눈 놓기 자리. 호버한 쪸만 강조하고
+ * `split.dropHint`를 보여 그쪽에 새 패널이 생길 것을 예고한다 — 패널을 실제로 만드는 것은
+ * 놓기(onDrop)에서다(함정 F).
+ */
+function SplitHalf({
+  paneId,
+  side
+}: {
+  paneId: string
+  side: 'left' | 'right'
+}): React.JSX.Element {
+  const t = useT()
+  const { over, handlers } = useSplitDropTarget(`split:${paneId}:${side}`, paneId, side)
+  return (
+    <div
+      data-testid={`split-${side}`}
+      {...handlers}
+      className={cn('relative flex w-1/2 items-center justify-center', over && 'bg-[var(--acw)]')}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute inset-3 rounded-xl border-2 transition-colors',
+          over ? 'border-[var(--ac)]' : 'border-transparent'
+        )}
+      />
+      {over && (
+        <span className="pop pointer-events-none rounded-full border-2 border-[var(--ac)] bg-[var(--sf)] px-4 py-2 text-[13px] font-semibold text-[var(--tx)] shadow-lg">
+          {t('split.dropHint')}
+        </span>
+      )}
+    </div>
+  )
 }
 
 function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
@@ -112,26 +157,40 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
   const remote = loc.side === 'remote'
   const listing = useListingStore((s) => s.byKey[key])
   const status = useFtpStore((s) => s.connectionStatus)
+  const sessions = useFtpStore((s) => s.sessions)
   const conn = useConnection()
   const showHidden = useSettingsStore((s) => s.showHidden)
   const tileSize = useSettingsStore((s) => s.tileSize)
   const shelfKeys = useShelfStore((s) => s.items.map((i) => locKey(i.entry)).join('\n'))
   const shelfCount = useShelfStore((s) => s.items.length)
   const dragging = useDnd((s) => s.items !== null)
+  // M15: 서버를 끄는 동안에는 이 패널에 분할 놓기 자리(좌우 반쪽)를 덮어 둔다.
+  const serverDrag = useDnd((s) => s.server !== null)
+  // M16 ①: 이 탭의 서버로 연결을 시도하는 중이면(분할 자리표시자) "연결 시도 중" 안내만 보인다.
+  // 초안(draft)이 그 서버를 가리킬 때만 — 다른 연결 시도가 이 탭의 패널을 가리지 않는다.
+  const connectingHere = useServerStore((s) => s.connecting && serverKey(s.draft) === loc.server)
+  const pendingConnect = connectingHere && !isConnectedServer(loc.server)
   const patch = (p: Partial<Tab>): void => useTabsStore.getState().patchTab(tab.id, p)
 
   const cached = !!listing && (listing.status === 'ready' || listing.entries.length > 0)
+  // 어느 쪽 세션도 연결돼 있지 않을 때의 패널: 지난 목록(stale)·끊김(lost)·연결 안 됨(offline).
+  const offlineGate: Gate = status === 'error' ? (cached ? 'stale' : 'lost') : 'offline'
+  const anyConnected =
+    status === 'connected' ||
+    Object.values(sessions).some((session) => session.status === 'connected')
+  // M7: 원격 탭의 게이트는 그 탭 자신의 서버 세션을 본다 — "지금 활성 세션과 같은가"가 아니라
+  // "그 서버가 연결돼 있는가"(Test-915·함정 E). 서버 없는(투영에 딸린) 탭은 예전처럼 연결 여부만 본다.
   const gate: Gate = !remote
     ? 'live'
-    : status === 'connected'
-      ? !loc.server || loc.server === conn.server
+    : loc.server
+      ? isConnectedServer(loc.server)
         ? 'live'
-        : 'other'
-      : status === 'error'
-        ? cached
-          ? 'stale'
-          : 'lost'
-        : 'offline'
+        : anyConnected
+          ? 'other'
+          : offlineGate
+      : status === 'connected'
+        ? 'live'
+        : offlineGate
 
   // 새 폴더를 읽는 동안에는 이 탭에서 마지막으로 보인 폴더의 목록을 흐리게 둔다.
   const [shownKey, setShownKey] = useState<string | null>(null)
@@ -327,9 +386,11 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     // 확인을 기다리는 동안 다른 폴더로 옮겨도 고른 시점의 경로를 지운다.
     const targets = entries.map((e) => ({ path: e.path, isDirectory: e.type === 'directory' }))
     try {
+      // A′1: 원격 삭제는 그 탭의 세션 키를 보낸다(로컬은 세션이 없다).
       const r = await window.api.invoke<IpcResult<void>>(
         remote ? 'ftp:deleteBatch' : 'local:deleteBatch',
-        targets
+        targets,
+        ...(remote && loc.server ? [loc.server] : [])
       )
       if (!r.success) toast.error(t('toast.deleteFailed'), { description: r.error })
     } catch (err) {
@@ -357,10 +418,12 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     if (!next || next === entry.name || !validName(next)) return
     const target = joinPath(entry.side, parentPath(entry.side, entry.path) ?? loc.path, next)
     try {
+      // A′1: 원격 이름 바꾸기는 항목(entry)의 세션 키를 보낸다(A′3).
       const r = await window.api.invoke<IpcResult<void>>(
         remote ? 'ftp:rename' : 'local:rename',
         entry.path,
-        target
+        target,
+        ...(remote && entry.server ? [entry.server] : [])
       )
       if (r.success) {
         unshelve([entry])
@@ -383,7 +446,12 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
     if (!name) return
     const path = joinPath(loc.side, loc.path, name)
     try {
-      const r = await window.api.invoke<IpcResult<void>>(remote ? 'ftp:mkdir' : 'local:mkdir', path)
+      // A′1: 원격 새 폴더는 그 탭의 세션 키를 보낸다(로컬은 세션이 없다).
+      const r = await window.api.invoke<IpcResult<void>>(
+        remote ? 'ftp:mkdir' : 'local:mkdir',
+        path,
+        ...(remote && loc.server ? [loc.server] : [])
+      )
       if (!r.success) {
         toast.error(t('toast.createFolderFailed'), { description: r.error })
         return
@@ -758,6 +826,7 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
                 scrollRef={scrollRef}
                 layout={layout}
                 remote={remote && gate === 'live'}
+                server={loc.server}
                 itemProps={itemProps}
                 setSelection={(sel) => patch({ sel, focus: sel.at(-1) ?? tab.focus })}
                 getSelection={() =>
@@ -847,6 +916,26 @@ function TabExplorer({ tab }: { tab: Tab }): React.JSX.Element {
             </div>
           )}
         </>
+      )}
+      {/* M16 ①: 분할로 만든 자리표시자 — 연결이 끝나기 전엔 이 안내만 보인다(뒤의 패널은 가린다). */}
+      {pendingConnect && (
+        <div
+          data-testid="split-connecting"
+          data-nomarquee
+          className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[var(--sf)]"
+        >
+          <Loader className="spin h-6 w-6 text-[var(--mu)]" aria-hidden />
+          <span role="status" className="text-[13px] text-[var(--mu)]">
+            {t('sidebar.serverConnecting')}
+          </span>
+        </div>
+      )}
+      {/* M15: 서버 드래그 동안의 분할 놓기 자리 — 놓으면 그쪽에 패널이 생긴다. */}
+      {serverDrag && (
+        <div data-testid="split-zones" className="absolute inset-0 z-30 flex">
+          <SplitHalf paneId={tab.paneId} side="left" />
+          <SplitHalf paneId={tab.paneId} side="right" />
+        </div>
       )}
       {menu && (
         <ItemMenu

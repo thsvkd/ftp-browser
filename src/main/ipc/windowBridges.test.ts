@@ -23,7 +23,7 @@ describe('event bridges after the window is closed', () => {
     })
     const win = { isDestroyed: () => destroyed, webContents: { send } } as unknown as BrowserWindow
     const operations = registerOperationHandlers(win)
-    const { manager, fileOps } = registerFtpHandlers(win, operations, {} as PasswordVault)
+    const { registry: manager, fileOps } = registerFtpHandlers(win, operations, {} as PasswordVault)
     const queue = registerTransferHandlers(win, fileOps, manager, {} as LocalFileSystem)
     const emitAll = (): void => {
       manager.emit('connectionStatus', { status: 'connected', host: 'h' })
@@ -52,7 +52,7 @@ describe('event bridges after the window is closed', () => {
     let destroyed = false
     const send = vi.fn()
     const win = { isDestroyed: () => destroyed, webContents: { send } } as unknown as BrowserWindow
-    const { manager } = registerFtpHandlers(
+    const { registry: manager } = registerFtpHandlers(
       win,
       registerOperationHandlers(win),
       {} as PasswordVault

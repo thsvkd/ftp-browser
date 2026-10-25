@@ -49,7 +49,7 @@ export function Toolbar({ onSettingsClick }: ToolbarProps): React.JSX.Element {
       {isConnected && (
         <button
           // 시작 폴더를 읽는 동안에도 연결됨으로 보인다. 그때 끊는 건 연결 취소다(실패로 보이지 않게).
-          onClick={connecting ? cancel : disconnect}
+          onClick={connecting ? cancel : () => void disconnect()}
           className={btn(
             'secondary',
             'md',

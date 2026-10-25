@@ -24,14 +24,19 @@ function FolderGlyph({ size }: { size: number }): React.JSX.Element {
 interface RemoteFolderThumbnailProps {
   folderPath: string
   size?: number
+  /** 그 폴더의 세션 키 — 폴더 미리보기·안쪽 썸네일 요청을 세션에 귀속시킨다(A′1) */
+  server?: string
 }
 
 export function RemoteFolderThumbnail({
   folderPath,
-  size = 150
+  size = 150,
+  server
 }: RemoteFolderThumbnailProps): React.JSX.Element {
-  const host = useFtpStore((s) => s.host)
-  const port = useFtpStore((s) => s.port)
+  // A′5: 캐시 키는 그 폴더의 세션 host·port로 만든다(ThumbnailImage와 같은 기준, primary 투영 아님).
+  // 세션 기록이 없으면 예전처럼 primary를 쓴다.
+  const host = useFtpStore((s) => (server ? (s.sessions[server]?.host ?? s.host) : s.host))
+  const port = useFtpStore((s) => (server ? (s.sessions[server]?.port ?? s.port) : s.port))
   const previewState = useGalleryStore((s) => s.remoteFolderPreviews[folderPath])
   const setPending = useGalleryStore((s) => s.setRemotePending)
   const setResolved = useGalleryStore((s) => s.setRemoteResolved)
@@ -45,9 +50,11 @@ export function RemoteFolderThumbnail({
     requestedRef.current = true
     setPending(folderPath)
     try {
+      // A′1: 그 폴더의 세션 키를 보낸다(없으면 primary, M3·A′4).
       const result = await window.api.invoke<IpcResult<RemoteFolderPreview | null>>(
         'gallery:remoteFolderPreview',
-        { remotePath: folderPath }
+        { remotePath: folderPath },
+        ...(server ? [server] : [])
       )
       if (result.success) {
         setResolved(folderPath, result.data)
@@ -57,7 +64,7 @@ export function RemoteFolderThumbnail({
     } catch (err) {
       setError(folderPath, err instanceof Error ? err.message : String(err))
     }
-  }, [folderPath, setPending, setResolved, setError])
+  }, [folderPath, server, setPending, setResolved, setError])
 
   useEffect(() => {
     if (previewState) return
@@ -90,6 +97,7 @@ export function RemoteFolderThumbnail({
           host={host}
           port={port}
           size={size}
+          server={server}
         />
       ) : (
         <FolderGlyph size={size} />
@@ -104,6 +112,7 @@ interface PreviewImageProps {
   host: string
   port: number
   size: number
+  server?: string
 }
 
 function RemoteFolderPreviewImage({
@@ -111,7 +120,8 @@ function RemoteFolderPreviewImage({
   preview,
   host,
   port,
-  size
+  size,
+  server
 }: PreviewImageProps): React.JSX.Element {
   const innerPath = folderPath === '/' ? `/${preview.name}` : `${folderPath}/${preview.name}`
   const cacheKey = generateCacheKeyRenderer(host, port, innerPath, preview.size, preview.modifiedAt)
@@ -122,14 +132,19 @@ function RemoteFolderPreviewImage({
   useEffect(() => {
     if (thumbnailData || requestedRef.current) return
     requestedRef.current = true
-    window.api.invoke('thumbnail:request', {
-      remotePath: innerPath,
-      fileName: preview.name,
-      fileSize: preview.size,
-      modifiedAt: preview.modifiedAt,
-      priority: 1
-    })
-  }, [innerPath, preview.name, preview.size, preview.modifiedAt, thumbnailData])
+    // A′1: 안쪽 썸네일도 그 폴더의 세션 키로 요청한다.
+    window.api.invoke(
+      'thumbnail:request',
+      {
+        remotePath: innerPath,
+        fileName: preview.name,
+        fileSize: preview.size,
+        modifiedAt: preview.modifiedAt,
+        priority: 1
+      },
+      ...(server ? [server] : [])
+    )
+  }, [innerPath, preview.name, preview.size, preview.modifiedAt, thumbnailData, server])
 
   useEffect(() => {
     requestedRef.current = false

@@ -38,7 +38,12 @@ const generations = new Map<string, number>()
 export async function fetchEntries(loc: Loc): Promise<IpcResult<ExplorerEntry[]>> {
   try {
     if (loc.side === 'remote') {
-      const r = await window.api.invoke<IpcResult<FtpListResult>>('ftp:list', loc.path)
+      // A′1: 그 탭의 세션 키를 보낸다 — 세션이 없으면(투영 탭) 인자를 생략해 primary(M3·A′4).
+      const r = await window.api.invoke<IpcResult<FtpListResult>>(
+        'ftp:list',
+        loc.path,
+        ...(loc.server ? [loc.server] : [])
+      )
       return r.success
         ? {
             success: true,

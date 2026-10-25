@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
-import { useShelfStore } from '@renderer/stores/useShelfStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import { useDnd } from './dnd'
@@ -121,7 +121,7 @@ describe('PathBar — find, photos, sort and view', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: en['explorer.details'] }))
-    expect(useShelfStore.getState().railTab).toBe('info')
+    expect(useSettingsStore.getState().showRail).toBe(false)
 
     // A narrow bar shows only the magnifier: Ctrl+F opens the field and focuses it as well.
     cleanup()
@@ -156,6 +156,6 @@ describe('PathBar — dropping on a crumb', () => {
 
     fireEvent.drop(root, { dataTransfer: dt() })
     await flush()
-    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([['/a/b/c/x.jpg', '/x.jpg']])
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([['/a/b/c/x.jpg', '/x.jpg', server()]])
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isImageFile, IMAGE_EXTENSIONS } from './constants'
+import { isImageFile, isVideoFile, IMAGE_EXTENSIONS } from './constants'
 
 describe('isImageFile', () => {
   it('should return true for supported image extensions', () => {
@@ -66,5 +66,28 @@ describe('IMAGE_EXTENSIONS', () => {
 
   it('should have exactly 8 extensions', () => {
     expect(IMAGE_EXTENSIONS.size).toBe(8)
+  })
+})
+
+describe('isVideoFile', () => {
+  it('should accept only Chromium-playable extensions and reject GIFs and undecodable formats', () => {
+    // covers: Test-872
+    for (const name of ['clip.webm', 'clip.mp4', 'clip.mov', 'clip.m4v', 'CLIP.MP4', 'Clip.WebM']) {
+      expect(isVideoFile(name), `expected ${name} to be a video file`).toBe(true)
+    }
+    const notVideos = [
+      'animation.gif',
+      'photo.jpg',
+      'movie.mkv',
+      'movie.avi',
+      'movie.wmv',
+      'movie.mts',
+      'movie.3gp',
+      'README',
+      'clip.mp4.txt'
+    ]
+    for (const name of notVideos) {
+      expect(isVideoFile(name), `expected ${name} to NOT be a video file`).toBe(false)
+    }
   })
 })

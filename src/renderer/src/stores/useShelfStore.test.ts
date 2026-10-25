@@ -18,11 +18,11 @@ function entry(side: ExplorerEntry['side'], path: string, server?: string): Expl
 }
 
 beforeEach(() => {
-  useShelfStore.setState({ items: [], railTab: 'info' })
+  useShelfStore.setState({ items: [], dockOpen: false })
 })
 
 describe('useShelfStore', () => {
-  it('adds without duplicates by side+server+path, switches the rail, removes and clears', () => {
+  it('adds without duplicates by side+server+path, removes and clears', () => {
     // covers: Test-786
     const s = useShelfStore.getState()
     const a = entry('remote', '/a', 'me@h:21')
@@ -30,13 +30,8 @@ describe('useShelfStore', () => {
     const sameLocal = entry('local', '/a')
 
     expect(s.add([a, sameOnOther])).toBe(2)
-    expect(useShelfStore.getState().railTab).toBe('shelf')
 
-    useShelfStore.setState({ railTab: 'info' })
     expect(s.add([a])).toBe(0)
-    // Nothing new: the rail stays where it was.
-    expect(useShelfStore.getState().railTab).toBe('info')
-
     expect(s.add([sameLocal, a, sameLocal])).toBe(1)
     expect(useShelfStore.getState().items.map((i) => i.entry)).toEqual([a, sameOnOther, sameLocal])
 
@@ -45,5 +40,27 @@ describe('useShelfStore', () => {
 
     s.clear()
     expect(useShelfStore.getState().items).toEqual([])
+  })
+
+  it('opens the dock when items are added', () => {
+    // covers: Test-894
+    useShelfStore.setState({ dockOpen: false })
+    expect(useShelfStore.getState().add([entry('local', '/a')])).toBe(1)
+    expect(useShelfStore.getState().dockOpen).toBe(true)
+  })
+
+  it('toggles and sets the dock open, and keeps dockOpen when the shelf is cleared', () => {
+    // covers: Test-895
+    useShelfStore.getState().setDockOpen(true)
+    expect(useShelfStore.getState().dockOpen).toBe(true)
+    useShelfStore.getState().toggleDock()
+    expect(useShelfStore.getState().dockOpen).toBe(false)
+    useShelfStore.getState().toggleDock()
+    expect(useShelfStore.getState().dockOpen).toBe(true)
+
+    useShelfStore.getState().add([entry('local', '/a')])
+    useShelfStore.getState().clear()
+    expect(useShelfStore.getState().items).toEqual([])
+    expect(useShelfStore.getState().dockOpen).toBe(true)
   })
 })

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  canConnectSaved,
   formatLastConnected,
   parseServerAddress,
   resolveDraft,
@@ -175,5 +176,16 @@ describe('saved password in a draft', () => {
     expect(sameFields({ ...toDraft(saved), password: 'new' }, saved)).toBe(false)
     expect(sameFields({ ...toDraft(saved), savedPassword: false }, saved)).toBe(false)
     expect(sameFields({ ...toDraft(none), password: 'new' }, none)).toBe(false)
+  })
+})
+
+describe('canConnectSaved', () => {
+  it('allows a saved password or an anonymous server, and stops at a username without one', () => {
+    // covers: Test-846
+    expect(canConnectSaved({ username: 'me', hasPassword: true })).toBe(true)
+    expect(canConnectSaved({ username: 'me', hasPassword: false })).toBe(false)
+    expect(canConnectSaved({ username: '', hasPassword: false })).toBe(true)
+    expect(canConnectSaved({ username: 'anonymous', hasPassword: false })).toBe(true)
+    expect(canConnectSaved({ username: 'Anonymous', hasPassword: false })).toBe(true)
   })
 })

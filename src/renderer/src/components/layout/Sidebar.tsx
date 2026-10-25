@@ -20,7 +20,7 @@ import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useActiveTab, useTabsStore } from '@renderer/stores/useTabsStore'
 import { SourceBadge } from '@renderer/components/common/SourceBadge'
-import { useDropTarget } from '@renderer/components/explorer/dnd'
+import { endDrag, startServerDrag, useDropTarget } from '@renderer/components/explorer/dnd'
 import type { ConnectionStatus, FtpServer, RecentPath } from '@shared/types/ftp'
 import type { IpcResult } from '@shared/types/ipc'
 import type { LocalPlaces } from '@shared/types/local'
@@ -136,42 +136,78 @@ function Place({
 }
 
 /**
- * 서버 한 줄(D6): 상태 점, 연결됐으면 주소, 아니면 상태 안내. 연결된 서버를 누르면 그 서버의 루트로
- * 활성 탭이 가고, 그 밖에는 연결한다(끊겼으면 다시 연결).
+ * 서버 한 줄(D6·D7): 상태 점, 연결됐으면 주소, 아니면 상태 안내. 연결된 서버를 누르면 그 서버의
+ * 루트로 활성 탭이 가고, 미연결 저장 서버는 클릭=선택, 더블클릭·Enter=연결이다(D3·D8).
+ * 연결 시작을 막는 것은 스토어의 재진입 가드이므로 행을 비활성화하지 않는다(함정 C).
  */
 function ServerRow({
   name,
   sub,
   status,
-  onActivate,
+  saved,
+  server,
   root
 }: {
   name: string
   sub: string
   status: ConnectionStatus
-  onActivate: () => void
+  /** 저장된 서버면 클릭은 선택만, 더블클릭·Enter는 연결(D3·D8). 없으면 지금 연결의 행이다. */
+  saved?: FtpServer
+  /** 서버 키 `"user@host:port"`. 저장되지 않은 행의 클릭·Enter가 이걸로 바로 연결한다. */
+  server: string
   root: Loc | null
 }): React.JSX.Element {
   const t = useT()
   const { navigate, openTab } = useTabsStore.getState()
+  const { select } = useServerStore.getState()
   const drop = useDropTarget(`server:${root ? locKey(root) : name}`, root, {
     spring: () => root && navigate(root),
     springMs: SPRING_MS
   })
   return (
     <button
+      // M14: 저장 서버 행은 끌 수 있다 — 클릭·더블클릭 연결 규칙(D3·D8)은 그대로다.
+      draggable={!!saved}
+      onDragStart={(e) => {
+        if (saved) startServerDrag(e, saved)
+      }}
+      onDragEnd={endDrag}
       onClick={(e) => {
-        if (!root) return onActivate()
-        if (e.ctrlKey || e.metaKey) openTab(root)
-        else navigate(root)
+        if (root) {
+          if (e.ctrlKey || e.metaKey) openTab(root)
+          else navigate(root)
+          return
+        }
+        // D3: 클릭은 선택만. 저장되지 않은 지금 연결 행만 예전처럼 바로 연결한다.
+        if (saved) select(saved)
+        else connectToServer(server)
+      }}
+      onDoubleClick={() => {
+        if (root || !saved) return
+        void connectSaved(saved)
+      }}
+      onKeyDown={(e) => {
+        // D8: Enter는 더블클릭의 키보드 등가물. 연결된 행의 Enter는 기본 동작(=클릭)에 맡긴다.
+        if (e.key !== 'Enter' || root) return
+        e.preventDefault()
+        if (saved) void connectSaved(saved)
+        else connectToServer(server)
       }}
       onAuxClick={(e) => e.button === 1 && root && openTab(root, false)}
       onDragOver={drop.handlers.onDragOver}
       onDrop={drop.handlers.onDrop}
-      disabled={status === 'connecting'}
-      title={drop.over ? (drop.valid ? `${drop.verb} → ${name}` : (drop.reason ?? '')) : sub}
+      title={
+        drop.over
+          ? drop.valid
+            ? `${drop.verb} → ${name}`
+            : (drop.reason ?? '')
+          : status === 'connected'
+            ? sub
+            : // D7: 규칙이 바뀌었으니 미연결 행에는 기존 연결 힌트를 덧붙인다(새 i18n 키 없이).
+              `${sub} · ${t('servers.hint')}`
+      }
       className={cn(
-        'relative flex h-11 w-full shrink-0 items-center gap-2.5 rounded-[10px] px-2 text-left text-[var(--tx)] transition-colors hover:bg-[var(--hv)] disabled:cursor-wait',
+        'relative flex h-11 w-full shrink-0 items-center gap-2.5 rounded-[10px] px-2 text-left text-[var(--tx)] transition-colors hover:bg-[var(--hv)]',
         drop.over &&
           (drop.valid ? 'bg-[var(--acw)] ring-2 ring-[var(--ac)]' : 'ring-2 ring-[var(--dg)]')
       )}
@@ -251,8 +287,9 @@ function Servers(): React.JSX.Element {
               name={row.name}
               sub={row.sub}
               status={rowStatus}
+              saved={row.saved}
+              server={row.key}
               root={root}
-              onActivate={() => (row.saved ? connectSaved(row.saved) : connectToServer(row.key))}
             />
             {root &&
               recent.map((path) => {

@@ -6,6 +6,7 @@ import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
 import { PAD } from '@renderer/lib/explorerLayout'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
 import { gridLayout } from '@renderer/lib/gridGeometry'
+import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
@@ -163,7 +164,8 @@ describe('FileGrid — viewport thumbnail batches (migrated)', () => {
           fileSize: 1000,
           modifiedAt: MODIFIED_AT,
           priority: 0
-        }
+        },
+        server()
       ]
     ])
     expect(useThumbnailStore.getState().errors[key(1)]).toBeUndefined()
@@ -254,5 +256,62 @@ describe('FileGrid — zoom modifiers (migrated)', () => {
     await grid('local', [])
     fireEvent.wheel(listbox(), { deltaY: 100, metaKey: true })
     expect(useSettingsStore.getState().tileSize).toBe(160 - ZOOM_STEP)
+  })
+})
+
+// ---------- Phase A′5: 썸네일 캐시 키는 탭 자신의 세션 host·port ----------
+
+describe('FileGrid — session-scoped thumbnail cache keys', () => {
+  it('keys a non-primary tab’s thumbnails by that session’s host/port, not the primary projection', async () => {
+    // covers: Test-935
+    const OTHER = 'me@other.example.org:2121'
+    h = setupExplorer({
+      remote: {
+        '/': [
+          ftp('img000.jpg', { size: 1000 }),
+          ftp('img001.jpg', { size: 1000 }),
+          ftp('img002.jpg', { size: 1000 })
+        ]
+      }
+    })
+    // primary 투영(HOST:PORT)은 그대로 두고, 다른 host·port의 두 번째 세션만 연결돼 있다고 친다.
+    useFtpStore.setState({
+      sessions: {
+        [OTHER]: {
+          status: 'connected',
+          host: 'other.example.org',
+          port: 2121,
+          username: 'me',
+          server: OTHER
+        }
+      }
+    })
+    const sessionKey = (name: string): string =>
+      generateCacheKeyRenderer('other.example.org', 2121, `/${name}`, 1000, MODIFIED_AT)
+    const primaryKey = (name: string): string =>
+      generateCacheKeyRenderer(HOST, PORT, `/${name}`, 1000, MODIFIED_AT)
+    useThumbnailStore.setState({
+      thumbnails: {
+        [sessionKey('img000.jpg')]: { dataUrl: 'data:image/jpeg;base64,AA==', width: 1, height: 1 }
+      },
+      errors: {
+        [sessionKey('img001.jpg')]: 'Download timeout',
+        [primaryKey('img002.jpg')]: 'Download timeout'
+      }
+    })
+    await renderExplorer({ side: 'remote', path: '/', server: OTHER })
+
+    const batches = invokeCalls(h.invoke, 'thumbnail:requestBatch')
+    if (!batches.length) throw new Error('no thumbnail:requestBatch')
+    const names = (batches[batches.length - 1][0] as Array<{ fileName: string }>).map(
+      (r) => r.fileName
+    )
+    // 그 탭의 세션 키에 이미 있는 항목은 건너뛴다 — 키가 그 세션의 host·port로 만들어졌다는 증거다.
+    expect(names).not.toContain('img000.jpg')
+    expect(names).not.toContain('img001.jpg')
+    // primary 투영 키는 무시한다: 같은 항목은 그대로 요청된다.
+    expect(names).toContain('img002.jpg')
+    // 타일도 그 세션 키로 스토어를 읽어 이미지를 그대로 보여준다(ThumbnailImage의 키도 같다).
+    expect(option('img000.jpg').querySelector('img')).toBeTruthy()
   })
 })

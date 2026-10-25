@@ -5,7 +5,7 @@ import type { Loc } from '@renderer/lib/explorerEntry'
 import { SPRING_MS } from '@renderer/lib/explorerLayout'
 import { loadPlaces, locLabel, sourceLabel, useConnection } from '@renderer/lib/sendItems'
 import { cn } from '@renderer/lib/utils'
-import { useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
+import { focusedPane, useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
 import { SourceBadge } from '@renderer/components/common/SourceBadge'
 import { useDropTarget } from '@renderer/components/explorer/dnd'
 import { ItemMenu, type MenuItem } from '@renderer/components/explorer/ItemMenu'
@@ -92,20 +92,29 @@ function TabPill({
 
 /**
  * 알약 탭: 어느 쪽의 어느 폴더든 담는다. Ctrl+T(지금 위치로 새 탭)·Ctrl+W·Ctrl+Tab은 창 어디서나,
- * ←→·Home/End·Delete는 탭 줄 안에서.
+ * ←→·Home/End·Delete는 탭 줄 안에서. `paneId`를 받으면 그 패널의 탭만 보여준다(M11) —
+ * 없는 쪽(기존 단일 패널 호출부)은 지금처럼 전체 탭을 그린다.
  */
-export function TabStrip(): React.JSX.Element {
+export function TabStrip({ paneId }: { paneId?: string } = {}): React.JSX.Element {
   const t = useT()
-  const tabs = useTabsStore((s) => s.tabs)
+  const allTabs = useTabsStore((s) => s.tabs)
+  const panes = useTabsStore((s) => s.panes)
   const activeId = useTabsStore((s) => s.activeId)
   const conn = useConnection()
   const listRef = useRef<HTMLDivElement>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
 
+  const pane = paneId === undefined ? undefined : panes.find((p) => p.id === paneId)
+  const tabs = pane ? allTabs.filter((x) => x.paneId === pane.id) : allTabs
+  // 패널마다 자기 활성 탭을 선택으로 보인다(M11). 패널이 없으면 기존대로 activeId.
+  const selectedId = pane ? pane.activeTabId : activeId
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.defaultPrevented || !(e.ctrlKey || e.metaKey) || e.altKey) return
       const s = useTabsStore.getState()
+      // 창 단축키는 지금 포커스가 있는 패널의 스트립만 처리한다(두 스트립이 중복 실행하지 않게).
+      if (paneId !== undefined && focusedPane(s)?.id !== paneId) return
       const active = s.tabs.find((x) => x.id === s.activeId)
       if (!active) return
       const key = e.key.toLowerCase()
@@ -117,7 +126,7 @@ export function TabStrip(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [paneId])
 
   const focusTab = (i: number): void => {
     const btns = listRef.current?.querySelectorAll<HTMLElement>('[role="tab"]')
@@ -161,7 +170,7 @@ export function TabStrip(): React.JSX.Element {
         ref={listRef}
         role="tablist"
         aria-label={t('tabs.label')}
-        data-region="tabs"
+        data-region={paneId === undefined ? 'tabs' : `tabs-${paneId}`}
         className="scroll flex min-w-0 items-center gap-1 overflow-x-auto py-1"
         onKeyDown={(e) => {
           const i = tabs.findIndex((x) => x.id === (e.target as HTMLElement).dataset.tab)
@@ -183,7 +192,7 @@ export function TabStrip(): React.JSX.Element {
         }}
       >
         {tabs.map((x) => (
-          <TabPill key={x.id} tab={x} active={x.id === activeId} closable={tabs.length > 1} />
+          <TabPill key={x.id} tab={x} active={x.id === selectedId} closable={tabs.length > 1} />
         ))}
       </div>
       <button
@@ -198,6 +207,18 @@ export function TabStrip(): React.JSX.Element {
       >
         <Plus className="h-4 w-4" aria-hidden />
       </button>
+      {/* M21: 분할을 닫는控件 — 두 번째 패널의 스트립에만 뜬다(Test-937). 없으면 사용자가
+          두 패널로 영영 돌아올 수 없다(M12의 결정이 제품에 없는 구멍). */}
+      {pane !== undefined && panes.length === 2 && panes[1].id === pane.id && (
+        <button
+          onClick={() => useTabsStore.getState().closePane(pane.id)}
+          aria-label={t('split.closePane')}
+          title={t('split.closePane')}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--mu)] hover:bg-[var(--hv)] hover:text-[var(--tx)]"
+        >
+          <X className="h-4 w-4" aria-hidden />
+        </button>
+      )}
       {menu && (
         <ItemMenu
           x={menu.x}

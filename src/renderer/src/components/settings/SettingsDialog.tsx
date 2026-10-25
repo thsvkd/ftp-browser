@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useEscapeKey } from '@renderer/hooks/useEscapeKey'
-import { X, Database, Trash2 } from 'lucide-react'
+import { X, Copy, Database, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { useServerStore } from '@renderer/stores/useServerStore'
+import { confirmDialog } from '@renderer/stores/useConfirmStore'
 import { TILE_MAX, TILE_MIN, TILE_STEP } from '@renderer/lib/explorerLayout'
 import { formatBytes } from '@renderer/lib/utils'
 import { installUpdate } from '@renderer/lib/installUpdate'
@@ -10,7 +12,8 @@ import { LOCALES, useLocale, useT, type LanguageSetting } from '@renderer/i18n'
 import type { IpcResult } from '@shared/types/ipc'
 import type { UpdateState } from '@shared/types/update'
 import type { McpState } from '@shared/types/mcp'
-import type { ThemeSetting } from '@shared/constants'
+import type { PasswordProtection } from '@shared/types/ftp'
+import { MAX_CACHE_SIZE_BYTES, type ThemeSetting } from '@shared/constants'
 
 interface SettingsDialogProps {
   open: boolean
@@ -25,6 +28,8 @@ interface CacheStats {
 export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JSX.Element | null {
   const tileSize = useSettingsStore((s) => s.tileSize)
   const setTileSize = useSettingsStore((s) => s.setTileSize)
+  const viewMode = useSettingsStore((s) => s.viewMode)
+  const setViewMode = useSettingsStore((s) => s.setViewMode)
   const showHidden = useSettingsStore((s) => s.showHidden)
   const setShowHidden = useSettingsStore((s) => s.setShowHidden)
   const confirmBeforeDelete = useSettingsStore((s) => s.confirmBeforeDelete)
@@ -32,6 +37,13 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   const setLanguage = useSettingsStore((s) => s.setLanguage)
   const theme = useSettingsStore((s) => s.theme)
   const setTheme = useSettingsStore((s) => s.setTheme)
+  const showSidebar = useSettingsStore((s) => s.showSidebar)
+  const setShowSidebar = useSettingsStore((s) => s.setShowSidebar)
+  const showRail = useSettingsStore((s) => s.showRail)
+  const setShowRail = useSettingsStore((s) => s.setShowRail)
+  const resetSettings = useSettingsStore((s) => s.reset)
+  const servers = useServerStore((s) => s.servers)
+  const loadServers = useServerStore((s) => s.loadServers)
   const t = useT()
   const locale = useLocale()
   const setConfirmBeforeDelete = useSettingsStore((s) => s.setConfirmBeforeDelete)
@@ -40,6 +52,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   const [clearing, setClearing] = useState(false)
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
   const [mcpState, setMcpState] = useState<McpState | null>(null)
+  // 저장된 서버 수는 로드 전에 0개로 단정하지 않는다(함정 C).
+  const [serversLoaded, setServersLoaded] = useState(false)
+  const [protection, setProtection] = useState<PasswordProtection['level']>()
   // 톱니 버튼으로 열면 포커스가 창 밖에 남으므로, 포커스와 관계없이 Esc로 닫는다.
   useEscapeKey(onClose, open)
 
@@ -60,15 +75,30 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
     if (result.success) setMcpState(result.data)
   }, [])
 
+  // 저장된 서버 수를 세기 위해 설정창이 열릴 때마다 다시 부른다(함정 C).
+  const refreshServers = useCallback(async () => {
+    await loadServers()
+    setServersLoaded(true)
+  }, [loadServers])
+
+  const fetchProtection = useCallback(async () => {
+    const result = await window.api.invoke<IpcResult<PasswordProtection>>(
+      'ftp:getPasswordProtection'
+    )
+    if (result.success && result.data) setProtection(result.data.level)
+  }, [])
+
   useEffect(() => {
     if (!open) return
     void fetchCacheStats()
     void fetchUpdateState()
     void fetchMcpState()
+    void refreshServers()
+    void fetchProtection()
     return window.api.on('update:stateChanged', (...args: unknown[]) => {
       setUpdateState(args[0] as UpdateState)
     })
-  }, [open, fetchCacheStats, fetchUpdateState, fetchMcpState])
+  }, [open, fetchCacheStats, fetchUpdateState, fetchMcpState, refreshServers, fetchProtection])
 
   if (!open) return null
 
@@ -123,6 +153,37 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
     if (!result.success) return
     setMcpState(result.data)
     toast.success(t('settings.mcpTokenRegenerated'))
+  }
+
+  // 제보에 필요한 조합을 한 줄로 복사한다(S5). 새 IPC 없이 전부 이미 가진 값이다(S4).
+  const copyDiagnostics = async (): Promise<void> => {
+    const proc = window.electron?.process
+    const line = [
+      `FTP Browser ${updateState?.currentVersion ?? ''}`,
+      proc?.platform ?? '',
+      `electron ${proc?.versions.electron ?? ''}`,
+      `node ${proc?.versions.node ?? ''}`,
+      `locale ${locale}`
+    ].join(' · ')
+    try {
+      await navigator.clipboard.writeText(line)
+      toast.success(t('settings.diagnosticsCopied'))
+    } catch (err) {
+      // 실패해도 조용히 토스트로만 알린다(S5). 새 키를 만들지 않기 위해 사유를 그대로 보여 준다.
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const resetAllSettings = async (): Promise<void> => {
+    const confirmed = await confirmDialog({
+      title: t('settings.reset'),
+      message: t('settings.resetConfirm'),
+      confirmLabel: t('settings.reset'),
+      destructive: true
+    })
+    if (!confirmed) return
+    resetSettings()
+    toast.success(t('settings.resetDone'))
   }
 
   const downloadingLabel = (percent = 0): string =>
@@ -208,6 +269,27 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 <option value="dark">{t('settings.themeDark')}</option>
               </select>
             </label>
+            {/* 새 탭의 기본 보기(D16). 격자 섹션은 크기 전용으로 남는다(S2). */}
+            <label className="mt-3 flex items-center justify-between gap-6">
+              <span className="text-sm text-[var(--tx)]">{t('settings.viewMode')}</span>
+              <div className="flex w-56 shrink-0 rounded-full bg-[var(--bg)] p-1 text-[12.5px]">
+                {(['grid', 'list'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={viewMode === mode}
+                    onClick={() => setViewMode(mode)}
+                    className={`flex-1 rounded-full px-3 py-1 ${
+                      viewMode === mode
+                        ? 'bg-[var(--sf)] text-[var(--tx)] shadow'
+                        : 'text-[var(--mu)] hover:text-[var(--tx)]'
+                    }`}
+                  >
+                    {mode === 'grid' ? t('settings.viewModeGrid') : t('settings.viewModeList')}
+                  </button>
+                ))}
+              </div>
+            </label>
           </section>
 
           {/* Grid */}
@@ -267,6 +349,65 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
             </label>
           </section>
 
+          {/* Display */}
+          <section>
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--mu)]">
+              {t('settings.display')}
+            </h3>
+            <label className="flex cursor-pointer items-center justify-between py-1">
+              <span className="text-sm text-[var(--tx)]">{t('settings.showSidebar')}</span>
+              <input
+                type="checkbox"
+                checked={showSidebar}
+                onChange={(e) => setShowSidebar(e.target.checked)}
+                className="h-4 w-4 rounded accent-[var(--ac)]"
+              />
+            </label>
+            <label className="flex cursor-pointer items-center justify-between py-1">
+              <span className="text-sm text-[var(--tx)]">{t('settings.showRail')}</span>
+              <input
+                type="checkbox"
+                checked={showRail}
+                onChange={(e) => setShowRail(e.target.checked)}
+                className="h-4 w-4 rounded accent-[var(--ac)]"
+              />
+            </label>
+          </section>
+
+          {/* Account & security */}
+          <section>
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--mu)]">
+              {t('settings.account')}
+            </h3>
+            <p className="text-sm text-[var(--tx)]">
+              {/* loadServers는 success+undefined 응답에서 undefined를 넣을 수 있어 방어한다. */}
+              {serversLoaded
+                ? t('settings.savedServersCount', { count: servers?.length ?? 0 })
+                : t('common.loading')}
+            </p>
+            <div className="mt-2 flex items-center justify-between gap-6 py-1">
+              <span className="text-sm text-[var(--tx)]">
+                {t('settings.passwordProtectionLevel')}
+              </span>
+              {/* 약한 보호(basic·none)의 경고 문구를 섹션 안에서 항상 보여 준다(S6). */}
+              <span
+                className={`text-sm ${
+                  protection === 'keyring' || protection === undefined
+                    ? 'text-[var(--mu)]'
+                    : 'text-[var(--dg)]'
+                }`}
+              >
+                {protection === undefined
+                  ? t('common.loading')
+                  : protection === 'keyring'
+                    ? t('settings.passwordProtectionStrong')
+                    : protection === 'basic'
+                      ? t('servers.passwordProtectionBasic')
+                      : t('servers.passwordProtectionNone')}
+              </span>
+            </div>
+          </section>
+
           {/* Cache */}
           <section>
             <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--mu)]">
@@ -293,6 +434,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 {clearing ? t('settings.clearingCache') : t('settings.clearCache')}
               </button>
             </div>
+            <p className="mt-2 text-xs text-[var(--mu)]">
+              {t('settings.cacheLimit', { size: formatBytes(MAX_CACHE_SIZE_BYTES) })}
+            </p>
           </section>
 
           {/* Updates */}
@@ -415,6 +559,43 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 </div>
               </div>
             )}
+          </section>
+
+          {/* About — 새 IPC 없이 창에 이미 있는 값으로 만든다(S4). */}
+          <section>
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--mu)]">
+              {t('settings.about')}
+            </h3>
+            <dl className="space-y-1 text-sm text-[var(--tx)]">
+              <div className="flex items-center justify-between gap-6">
+                <dt className="text-[var(--mu)]">{window.electron?.process.platform}</dt>
+                <dd>{updateState?.currentVersion ?? t('update.versionUnknown')}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-6">
+                <dt className="text-[var(--mu)]">electron</dt>
+                <dd>{window.electron?.process.versions.electron}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-6">
+                <dt className="text-[var(--mu)]">node</dt>
+                <dd>{window.electron?.process.versions.node}</dd>
+              </div>
+            </dl>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={() => void copyDiagnostics()}
+                className="flex items-center gap-1.5 rounded-md border border-[var(--bd2)] px-3 py-1.5 text-sm text-[var(--tx)] hover:bg-[var(--hv)]"
+              >
+                <Copy size={14} />
+                {t('settings.copyDiagnostics')}
+              </button>
+              <button
+                onClick={() => void resetAllSettings()}
+                className="flex items-center gap-1.5 rounded-md border border-[var(--bd2)] px-3 py-1.5 text-sm text-[var(--tx)] hover:bg-[var(--hv)]"
+              >
+                <RotateCcw size={14} />
+                {t('settings.reset')}
+              </button>
+            </div>
           </section>
         </div>
 

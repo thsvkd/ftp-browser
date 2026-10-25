@@ -5,8 +5,10 @@ import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
 import { fromFtpEntry, fromLocalEntry, type ExplorerEntry } from '@renderer/lib/explorerEntry'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { useServerStore } from '@renderer/stores/useServerStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
+import { emptyDraft } from '@renderer/lib/serverAddress'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import {
   ftp,
@@ -19,6 +21,7 @@ import {
 } from '@renderer/components/explorer/explorerTestHarness'
 import { AppShell } from '@renderer/components/layout/AppShell'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
+import type { FtpServer } from '@shared/types/ftp'
 import { Shelf } from './Shelf'
 
 vi.mock('sonner', () => ({
@@ -99,9 +102,10 @@ describe('Shelf — dropping into the active tab', () => {
     // covers: Test-807
     setup()
     render(<AppShell />)
+    // 선반은 이제 하단 도크에 있다: 담으면 카드(role=region "선반")가 뜬다.
+    useShelfStore.getState().add([remoteItem('a.jpg')])
     await screen.findByRole('region', { name: en['shelf.title'] })
 
-    useShelfStore.getState().add([remoteItem('a.jpg')])
     fireEvent.click(
       await screen.findByRole('button', { name: /^Download 1 to dl\s*→ This PC › C:\\dl/ })
     )
@@ -195,12 +199,12 @@ describe('Shelf — same-side conflicts', () => {
     const aside = renames()[0][1] as string
     expect(aside).toMatch(/^\/dst\/\.a\.jpg\.[a-z0-9]+\.old$/)
     expect(renames()).toEqual([
-      ['/dst/a.jpg', aside],
-      ['/x/a.jpg', '/dst/a.jpg'],
-      ['/x/c.jpg', '/dst/c.jpg']
+      ['/dst/a.jpg', aside, server()],
+      ['/x/a.jpg', '/dst/a.jpg', server()],
+      ['/x/c.jpg', '/dst/c.jpg', server()]
     ])
     expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toEqual([
-      [[{ path: aside, isDirectory: false }]]
+      [[{ path: aside, isDirectory: false }], server()]
     ])
     expect(channels()).toEqual(['ftp:rename', 'ftp:rename', 'ftp:deleteBatch', 'ftp:rename'])
 
@@ -215,9 +219,9 @@ describe('Shelf — same-side conflicts', () => {
     await waitFor(() => expect(renames()).toHaveLength(6))
     const aside2 = renames()[3][1] as string
     expect(renames().slice(3)).toEqual([
-      ['/dst/a.jpg', aside2],
-      ['/x/a.jpg', '/dst/a.jpg'],
-      [aside2, '/dst/a.jpg']
+      ['/dst/a.jpg', aside2, server()],
+      ['/x/a.jpg', '/dst/a.jpg', server()],
+      [aside2, '/dst/a.jpg', server()]
     ])
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
     expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toHaveLength(1)
@@ -227,7 +231,11 @@ describe('Shelf — same-side conflicts', () => {
     drop()
     fireEvent.click(within(await sheet()).getByRole('button', { name: 'Keep both (rename)' }))
     await waitFor(() => expect(shelfNames()).toEqual([]))
-    expect(invokeCalls(h.invoke, 'ftp:rename').at(-1)).toEqual(['/x/a.jpg', '/dst/a (2).jpg'])
+    expect(invokeCalls(h.invoke, 'ftp:rename').at(-1)).toEqual([
+      '/x/a.jpg',
+      '/dst/a (2).jpg',
+      server()
+    ])
     expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toHaveLength(1)
   })
 
@@ -276,5 +284,139 @@ describe('Shelf — same-side conflicts', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(copies()).toHaveLength(1)
     expect(shelfNames()).toEqual(['b.jpg'])
+  })
+})
+
+describe('Shelf — two steps to an unconnected server', () => {
+  const B: FtpServer = {
+    id: 9,
+    name: 'Backup',
+    host: 'b.lan',
+    port: 21,
+    username: 'bob',
+    hasPassword: true,
+    secure: false
+  }
+  const B_KEY = 'bob@b.lan:21'
+  const dt = (): Record<string, unknown> => ({
+    types: [],
+    files: [],
+    dropEffect: '',
+    setData: vi.fn(),
+    setDragImage: vi.fn(),
+    effectAllowed: ''
+  })
+  const sends = (): unknown[][] => invokeCalls(h.invoke, 'transfer:send')
+
+  /** 로컬 탭과 미연결 서버 B의 탭(비활성)이 있는 한 패널 앱. 선반에 로컬 항목 하나를 담아 둔다. */
+  async function openUnconnectedTab(): Promise<void> {
+    h = setupExplorer({
+      local: { 'C:\\pics': [local('C:\\pics', 'a.jpg')] },
+      remote: { '/y': [ftp('sub', { dir: true }), ftp('b.jpg')], '/old': [] }
+    })
+    h.handlers['ftp:getRecentServers'] = () => ({ success: true, data: [B] })
+    h.handlers['ftp:getRecentPaths'] = () => ({
+      success: true,
+      data: [{ path: '/y', lastVisited: '' }]
+    })
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['t1'], skipped: [], conflicts: [], totalBytes: 1024 }
+    })
+    useServerStore.setState({
+      servers: [B],
+      draft: emptyDraft(),
+      address: '',
+      connecting: false,
+      error: ''
+    })
+    useTabsStore.getState().openTab(localLoc('C:\\pics'))
+    useTabsStore.getState().openTab({ side: 'remote', path: '/old', server: B_KEY }, false)
+    useShelfStore.getState().add([localItem('a.jpg')])
+    render(<AppShell />)
+    await screen.findByRole('region', { name: en['shelf.title'] })
+  }
+
+  it('starts a connect with a pane instead of a transfer when the shelf lands on an unconnected server tab', async () => {
+    // covers: Test-929
+    await openUnconnectedTab()
+
+    fireEvent.dragStart(row('a.jpg'), { dataTransfer: dt() })
+    fireEvent.drop(screen.getByRole('tab', { name: 'old' }), { dataTransfer: dt() })
+
+    // 전송은 시작되지 않는다...
+    expect(sends()).toEqual([])
+    // ① 패널이 먼저 생기고 그 안에 연결 시도 안내가 뜬다...
+    expect(useTabsStore.getState().panes).toHaveLength(2)
+    const region = document.querySelector(
+      `[data-region="content-${useTabsStore.getState().panes[1].id}"]`
+    )
+    expect(region?.textContent).toContain(en['sidebar.serverConnecting'])
+    // ...연결 시도가 시작된다.
+    await waitFor(() => expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(1))
+    expect(invokeCalls(h.invoke, 'ftp:connect')[0][0]).toMatchObject({ host: B.host, user: 'bob' })
+    // ② 선반은 그대로다.
+    expect(shelfNames()).toEqual(['a.jpg'])
+    expect(sends()).toEqual([])
+    await waitFor(() => expect(useServerStore.getState().connecting).toBe(false))
+  })
+
+  it('drops the shelf into a folder of the pane that connect opened and sends it as before', async () => {
+    // covers: Test-930
+    await openUnconnectedTab()
+    fireEvent.dragStart(row('a.jpg'), { dataTransfer: dt() })
+    fireEvent.drop(screen.getByRole('tab', { name: 'old' }), { dataTransfer: dt() })
+
+    // 그 연결이 성공해 그 서버 패널이 열린다(선반은 그대로).
+    await waitFor(() => {
+      const s = useTabsStore.getState()
+      const tab = s.tabs.find((t) => t.id === s.panes[1]?.activeTabId)
+      expect(tab?.loc).toEqual({ side: 'remote', path: '/y', server: B_KEY })
+    })
+    expect(shelfNames()).toEqual(['a.jpg'])
+
+    // ③ 그 패널의 폴더로 다시 끌어 놓으면 기존처럼 전송된다.
+    fireEvent.dragStart(row('a.jpg'), { dataTransfer: dt() })
+    const list = document.getElementById(
+      `explorer-list-${useTabsStore.getState().panes[1].activeTabId}`
+    )
+    expect(list).toBeTruthy()
+    fireEvent.dragOver(list as HTMLElement, { dataTransfer: dt() })
+    fireEvent.drop(list as HTMLElement, { dataTransfer: dt() })
+    await waitFor(() => expect(sends()).toHaveLength(1))
+    expect(sends()[0]).toEqual([
+      { direction: 'upload', sources: ['C:\\pics\\a.jpg'], destDir: '/y' },
+      B_KEY
+    ])
+    expect(shelfNames()).toEqual([])
+    expect(useTabsStore.getState().panes).toHaveLength(2)
+  })
+
+  it('sends right away on an already connected server tab, without splitting', async () => {
+    // covers: Test-931
+    h = setupExplorer({
+      local: { 'C:\\pics': [local('C:\\pics', 'b.jpg')] },
+      remote: { '/x': [ftp('sub', { dir: true })] }
+    })
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['t1'], skipped: [], conflicts: [], totalBytes: 1024 }
+    })
+    useTabsStore.getState().openTab(remoteLoc('/x')) // 이미 연결된 서버의 탭
+    useShelfStore.getState().add([localItem('b.jpg')])
+    render(<AppShell />)
+    await screen.findByRole('region', { name: en['shelf.title'] })
+
+    fireEvent.dragStart(row('b.jpg'), { dataTransfer: dt() })
+    fireEvent.drop(screen.getByRole('tab', { name: 'x' }), { dataTransfer: dt() })
+
+    await waitFor(() => expect(sends()).toHaveLength(1))
+    expect(sends()[0]).toEqual([
+      { direction: 'upload', sources: ['C:\\pics\\b.jpg'], destDir: '/x' },
+      server()
+    ])
+    // 분할 없이 현행대로 바로 전송한다(M19의 예외).
+    expect(useTabsStore.getState().panes).toHaveLength(1)
+    expect(shelfNames()).toEqual([])
   })
 })

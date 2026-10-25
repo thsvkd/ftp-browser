@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Toolbar } from './Toolbar'
 import { StatusBar } from './StatusBar'
 import { Sidebar } from './Sidebar'
@@ -7,26 +7,33 @@ import { RightRail } from './RightRail'
 import { Explorer } from '@renderer/components/explorer/Explorer'
 import { useDnd } from '@renderer/components/explorer/dnd'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
+import { ShelfDock } from '@renderer/components/shelf/ShelfDock'
 import { SettingsDialog } from '@renderer/components/settings/SettingsDialog'
 import { useThumbnailListener } from '@renderer/hooks/useThumbnailListener'
 import { useLocalThumbnailListener } from '@renderer/hooks/useLocalThumbnailListener'
 import { useUpdateListener } from '@renderer/hooks/useUpdateListener'
 import { useAgentSync } from '@renderer/hooks/useAgentSync'
 import { dropShelf, reloadActiveTab } from '@renderer/lib/sendItems'
-import { useShelfStore } from '@renderer/stores/useShelfStore'
-import { useTabsStore } from '@renderer/stores/useTabsStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { focusedPane, useTabsStore } from '@renderer/stores/useTabsStore'
 import type { IpcResult } from '@shared/types/ipc'
 
-/** F6 순서. 지역마다 앞의 것부터 처음 맞는 요소에 포커스를 준다(랩 V2). */
-const REGIONS = [
+/**
+ * F6 순서. 지역마다 앞의 것부터 처음 맞는 요소에 포커스를 준다(랩 V2). 패널이 둘이면
+ * 탭·목록 지역은 지금 포커스가 있는 패널의 요소를 먼저 찾는다(함정 G — 셋째 지역이
+ * `[id^="explorer-list-"]` 첫 일치만 잡으면 첫 패널에 갇힌다).
+ */
+const regions = (paneId: string): string[][] => [
   ['[data-region="sidebar"] [aria-current]', '[data-region="sidebar"] button'],
-  ['[data-region="tabs"] [role="tab"][aria-selected="true"]'],
-  ['[data-region="content"] [id^="explorer-list-"]'],
   [
-    '[data-region="shelf"] li[tabindex]',
-    '[data-region="shelf"] [role="tab"][aria-selected="true"]',
-    '[data-region="shelf"] button'
-  ]
+    `[data-region="tabs-${paneId}"] [role="tab"][aria-selected="true"]`,
+    '[data-region="tabs"] [role="tab"][aria-selected="true"]'
+  ],
+  [
+    `[data-region="content-${paneId}"] [id^="explorer-list-"]`,
+    '[data-region="content"] [id^="explorer-list-"]'
+  ],
+  ['[data-region="shelf-dock"] li[tabindex]', '[data-region="shelf-dock"] button']
 ]
 
 const isTyping = (target: EventTarget | null): boolean =>
@@ -37,6 +44,11 @@ export function AppShell(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const openSettings = useCallback(() => setSettingsOpen(true), [])
   const rootRef = useRef<HTMLDivElement>(null)
+  // 화면 설정(S3). F6 지역 목록(regions)은 CSS 쿼리를 필터링하므로 요소가 없어도 안전하다(함정 A).
+  const showSidebar = useSettingsStore((s) => s.showSidebar)
+  const showRail = useSettingsStore((s) => s.showRail)
+  // 패널(1~2개, M10)마다 하나의 콘텐츠 영역을 그린다.
+  const panes = useTabsStore((s) => s.panes)
 
   useThumbnailListener()
   useLocalThumbnailListener()
@@ -60,9 +72,10 @@ export function AppShell(): React.JSX.Element {
     const cycleRegion = (delta: number): void => {
       const root = rootRef.current
       if (!root) return
-      const els = REGIONS.map((qs) =>
-        qs.map((q) => root.querySelector<HTMLElement>(q)).find(Boolean)
-      ).filter((el): el is HTMLElement => !!el)
+      const pane = focusedPane(useTabsStore.getState())
+      const els = regions(pane?.id ?? '')
+        .map((qs) => qs.map((q) => root.querySelector<HTMLElement>(q)).find(Boolean))
+        .filter((el): el is HTMLElement => !!el)
       const cur = els.findIndex((el) =>
         el.closest('[data-region]')?.contains(document.activeElement)
       )
@@ -83,8 +96,8 @@ export function AppShell(): React.JSX.Element {
       else if (e.key === 'F5' || (ctrl && key === 'r')) run = reloadActiveTab
       else if (e.altKey && e.shiftKey && key === 'p')
         run = () => {
-          const shelf = useShelfStore.getState()
-          shelf.setRailTab(shelf.railTab === 'info' ? 'shelf' : 'info')
+          const s = useSettingsStore.getState()
+          s.setShowRail(!s.showRail)
         }
       else if (ctrl && (key === 'l' || key === 'f') && tab) {
         // 목록이 가진 동작(경로 입력, 찾기 칸)을 목록에 넘긴다.
@@ -115,15 +128,28 @@ export function AppShell(): React.JSX.Element {
     >
       <Toolbar onSettingsClick={openSettings} />
       <div className="flex min-h-0 flex-1">
-        <Sidebar />
-        <main data-region="content" className="relative flex min-w-0 flex-1 flex-col">
-          <TabStrip />
-          <Explorer />
+        {showSidebar && <Sidebar />}
+        <main className="relative flex min-w-0 flex-1 flex-row">
+          {panes.map((pane, i) => (
+            <Fragment key={pane.id}>
+              {i > 0 && <div className="w-px shrink-0 bg-[var(--bd)]" aria-hidden />}
+              {/* 패널마다 자기 TabStrip·Explorer를 가진다(M11). 클릭한 패널이 포커스 패널이 된다. */}
+              <section
+                data-region={`content-${pane.id}`}
+                onPointerDown={() => useTabsStore.getState().activatePane(pane.id)}
+                className="relative flex min-w-0 flex-1 flex-col"
+              >
+                <TabStrip paneId={pane.id} />
+                <Explorer paneId={pane.id} />
+              </section>
+            </Fragment>
+          ))}
         </main>
-        <RightRail />
+        {showRail && <RightRail />}
       </div>
       <StatusBar />
       <ConflictSheet />
+      <ShelfDock />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )

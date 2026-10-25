@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow } from 'electron'
-import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
+import { FtpSessionRegistry } from '../ftp/FtpSessionRegistry'
 import { FtpFileOperations } from '../ftp/FtpFileOperations'
 import { OperationManager } from '../operation/OperationManager'
 import { getDatabase } from '../db/database'
@@ -37,7 +37,12 @@ function remoteBasename(remotePath: string): string {
 }
 
 export interface FtpHandlersResult {
-  manager: FtpConnectionManager
+  /**
+   * 세션 레지스트리. 단일 매니저처럼 쓰면 primary 경로(M3)이고, `get(server)`로 특정 세션을 고른다(M4).
+   * `FtpConnectionManager` 자리에 넘겨도 위임 때문에 그대로 동작한다(MCP·전송 큐·썸네일 등).
+   */
+  registry: FtpSessionRegistry
+  /** 위임(primary) 파일 작업. 에이전트·전송 큐가 쓴다. 핸들러 호출은 세션마다 새로 만든다. */
   fileOps: FtpFileOperations
 }
 
@@ -46,16 +51,21 @@ export function registerFtpHandlers(
   operationManager: OperationManager,
   passwords: PasswordVault
 ): FtpHandlersResult {
-  const manager = new FtpConnectionManager()
-  const fileOps = new FtpFileOperations(manager)
+  const registry = new FtpSessionRegistry()
+  const fileOps = new FtpFileOperations(registry)
 
-  manager.on('connectionStatus', (state: FtpConnectionState) => {
+  // 세션 이벤트는 이미 `server`태그가 붙어 있다(M5). 위임(primary)emit은 태그가 없어 그대로 간다.
+  registry.on('connectionStatus', (state: FtpConnectionState) => {
     if (!win.isDestroyed()) win.webContents.send('ftp:connectionStatus', state)
   })
   // GUI가 시작한 것도 포함해 원격 변경을 알린다. 에이전트가 바꾼 폴더를 GUI가 새로 고친다(K5).
-  manager.on('mutation', (event: FtpMutationEvent) => {
+  registry.on('mutation', (event: FtpMutationEvent) => {
     if (!win.isDestroyed()) win.webContents.send('ftp:remoteChanged', event)
   })
+
+  /** 그 세션의 파일 작업. 인자를 생략하면 primary(M3). */
+  const fileOpsFor = (server?: string): FtpFileOperations =>
+    new FtpFileOperations(registry.get(server))
 
   ipcMain.handle(
     'ftp:connect',
@@ -80,7 +90,8 @@ export function registerFtpHandlers(
         const usesSaved = login.password === undefined && savedPasswordOf !== undefined
         const password = usesSaved ? await passwords.reveal(savedPasswordOf) : login.password
         const config: FtpConnectPayload = { ...login, password: password || 'anonymous@' }
-        const result = await manager.connect(config)
+        // M2: 로그인 정보에서 세션 키를 뽑아 그 세션의 매니저로 연결한다(같은 키 = 같은 매니저).
+        const result = await registry.connect(config)
         if (result.cancelled) {
           return { success: false, error: 'Connection cancelled' }
         }
@@ -196,9 +207,10 @@ export function registerFtpHandlers(
     }
   )
 
-  ipcMain.handle('ftp:disconnect', async (): Promise<IpcResult<void>> => {
+  ipcMain.handle('ftp:disconnect', async (_event, server?: string): Promise<IpcResult<void>> => {
     try {
-      await manager.disconnect()
+      // M3: 인자가 없으면 primary. 있으면 그 세션만 끊는다(나머지 세션은 살아 있다).
+      await registry.disconnect(server)
       return { success: true, data: undefined }
     } catch (err) {
       return ipcError(err)
@@ -207,16 +219,18 @@ export function registerFtpHandlers(
 
   ipcMain.handle(
     'ftp:list',
-    async (_event, remotePath: string): Promise<IpcResult<FtpListResult>> => {
+    async (_event, remotePath: string, server?: string): Promise<IpcResult<FtpListResult>> => {
       try {
-        const result = await manager.list(remotePath)
+        // M4: 그 세션의 매니저로 읽는다. 인자를 생략하면 primary.
+        const session = registry.get(server)
+        const result = await session.list(remotePath)
 
         // Save recent path for current server
-        if (manager.isConnected()) {
+        if (session.isConnected()) {
           try {
             const db = getDatabase()
-            const host = manager.getHost()
-            const port = manager.getPort()
+            const host = session.getHost()
+            const port = session.getPort()
             // 밀리초까지 찍는다. 다시 연결할 때 가장 최근 경로에서 여는데, 1초 안에
             // 폴더를 여러 번 옮기면 초 단위로는 어느 것이 마지막인지 가릴 수 없다.
             db.prepare(
@@ -253,15 +267,16 @@ export function registerFtpHandlers(
     return {
       success: true,
       data: {
-        status: manager.isConnected() ? 'connected' : 'disconnected',
-        host: manager.getHost()
+        status: registry.isConnected() ? 'connected' : 'disconnected',
+        host: registry.getHost()
       }
     }
   })
 
   ipcMain.handle(
     'ftp:deleteBatch',
-    async (_event, targets: DeleteTarget[]): Promise<IpcResult<void>> => {
+    async (_event, targets: DeleteTarget[], server?: string): Promise<IpcResult<void>> => {
+      const sessionFileOps = fileOpsFor(server)
       const items = {
         itemCount: targets.length,
         itemName: targets.length === 1 ? remoteBasename(targets[0].path) : undefined
@@ -282,13 +297,13 @@ export function registerFtpHandlers(
           operationManager.progress(job.id, done, remoteBasename(target.path), done + 1 + rest)
           if (target.isDirectory) {
             let removed = 0
-            await fileOps.deleteDirectory(target.path, (n, total, path) => {
+            await sessionFileOps.deleteDirectory(target.path, (n, total, path) => {
               removed = n
               operationManager.progress(job.id, done + n, remoteBasename(path), done + total + rest)
             })
             done += removed
           } else {
-            await fileOps.deleteFile(target.path)
+            await sessionFileOps.deleteFile(target.path)
             done += 1
           }
           operationManager.progress(job.id, done, remoteBasename(target.path), done + rest)
@@ -304,9 +319,9 @@ export function registerFtpHandlers(
 
   ipcMain.handle(
     'ftp:rename',
-    async (_event, oldPath: string, newPath: string): Promise<IpcResult<void>> => {
+    async (_event, oldPath: string, newPath: string, server?: string): Promise<IpcResult<void>> => {
       try {
-        await fileOps.rename(oldPath, newPath)
+        await fileOpsFor(server).rename(oldPath, newPath)
         return { success: true, data: undefined }
       } catch (err) {
         return ipcError(err)
@@ -314,14 +329,17 @@ export function registerFtpHandlers(
     }
   )
 
-  ipcMain.handle('ftp:mkdir', async (_event, remotePath: string): Promise<IpcResult<void>> => {
-    try {
-      await fileOps.mkdir(remotePath)
-      return { success: true, data: undefined }
-    } catch (err) {
-      return ipcError(err)
+  ipcMain.handle(
+    'ftp:mkdir',
+    async (_event, remotePath: string, server?: string): Promise<IpcResult<void>> => {
+      try {
+        await fileOpsFor(server).mkdir(remotePath)
+        return { success: true, data: undefined }
+      } catch (err) {
+        return ipcError(err)
+      }
     }
-  })
+  )
 
-  return { manager, fileOps }
+  return { registry, fileOps }
 }

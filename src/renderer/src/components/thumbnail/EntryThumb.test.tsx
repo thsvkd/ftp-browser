@@ -5,6 +5,7 @@ import { en } from '@renderer/i18n/locales/en'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
 import { fromFtpEntry, fromLocalEntry } from '@renderer/lib/explorerEntry'
 import { useGalleryStore } from '@renderer/stores/useGalleryStore'
+import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import {
@@ -55,7 +56,8 @@ describe('EntryThumb', () => {
           fileSize: 1024,
           modifiedAt: MODIFIED_AT,
           priority: 1
-        }
+        },
+        'me@nas:21'
       ]
     ])
     cleanup()
@@ -75,6 +77,33 @@ describe('EntryThumb', () => {
     useThumbnailStore.setState({
       thumbnails: {
         [generateCacheKeyRenderer(HOST, PORT, '/photos/sub/x.jpg', 10, MODIFIED_AT)]: {
+          dataUrl: 'data:image/png;base64,AA==',
+          width: 1,
+          height: 1
+        }
+      }
+    })
+    render(<EntryThumb entry={remote('sub', { dir: true })} folderPreview />)
+    expect(
+      screen.getByAltText(en['preview.folderAlt'].replace('{{path}}', '/photos/sub'))
+    ).toBeTruthy()
+  })
+
+  it('keys the folder preview thumbnail by the entry’s session host and port, not the primary', () => {
+    // covers: Test-936
+    const inner = { name: 'x.jpg', size: 10, modifiedAt: MODIFIED_AT, itemCount: 4 }
+    useGalleryStore.setState({
+      remoteFolderPreviews: { '/photos/sub': { status: 'resolved', preview: inner } }
+    })
+    // 항목의 세션만 다른 서버다 — primary 투영(HOST:PORT)은 쓰지 않는다(A′5).
+    useFtpStore.setState({
+      sessions: {
+        'me@nas:21': { status: 'connected', host: 'nas.other', port: 2121, username: 'me' }
+      }
+    })
+    useThumbnailStore.setState({
+      thumbnails: {
+        [generateCacheKeyRenderer('nas.other', 2121, '/photos/sub/x.jpg', 10, MODIFIED_AT)]: {
           dataUrl: 'data:image/png;base64,AA==',
           width: 1,
           height: 1

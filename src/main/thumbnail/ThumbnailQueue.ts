@@ -1,6 +1,6 @@
 import { Client } from 'basic-ftp'
 import { Writable } from 'stream'
-import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
+import type { FtpManagerHandle } from '../ftp/FtpSessionRegistry'
 import { ThumbnailGenerator } from './ThumbnailGenerator'
 import { CacheManager } from './CacheManager'
 import { generateCacheKey } from '../utils/cacheKey'
@@ -45,7 +45,7 @@ export class ThumbnailQueue {
   private generation = 0
 
   constructor(
-    private ftpManager: FtpConnectionManager,
+    private ftpManager: FtpManagerHandle,
     private generator: ThumbnailGenerator,
     private cacheManager: CacheManager,
     private onReady: ReadyCallback,

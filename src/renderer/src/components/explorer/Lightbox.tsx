@@ -6,6 +6,7 @@ import { locKey, type ExplorerEntry } from '@renderer/lib/explorerEntry'
 import { cn, formatBytes, formatDate } from '@renderer/lib/utils'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { EntryThumb } from '@renderer/components/thumbnail/EntryThumb'
+import { isVideoFile } from '@shared/constants'
 import type { IpcResult } from '@shared/types/ipc'
 
 interface Loaded {
@@ -19,15 +20,21 @@ function usePreview(entry: ExplorerEntry): Loaded | null {
   const key = `${entry.side}|${entry.path}|${entry.size}|${entry.modifiedAt}`
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   useEffect(() => {
-    if (!entry.isImage) return
+    // 영상은 확장자로 판정한다(P2): entry.isImage는 이미지에만 참이다.
+    if (!entry.isImage && !isVideoFile(entry.name)) return
     let live = true
     const request =
       entry.side === 'remote'
-        ? window.api.invoke<IpcResult<string>>('ftp:downloadPreview', {
-            remotePath: entry.path,
-            fileSize: entry.size,
-            modifiedAt: entry.modifiedAt
-          })
+        ? // A′1: 항목(entry)의 세션 키를 보낸다(A′3).
+          window.api.invoke<IpcResult<string>>(
+            'ftp:downloadPreview',
+            {
+              remotePath: entry.path,
+              fileSize: entry.size,
+              modifiedAt: entry.modifiedAt
+            },
+            ...(entry.server ? [entry.server] : [])
+          )
         : window.api.invoke<IpcResult<string>>('local:preview', entry.path)
     request
       .then((r) => {
@@ -45,7 +52,16 @@ function usePreview(entry: ExplorerEntry): Loaded | null {
     return () => {
       live = false
     }
-  }, [key, entry.isImage, entry.side, entry.path, entry.size, entry.modifiedAt])
+  }, [
+    key,
+    entry.isImage,
+    entry.name,
+    entry.side,
+    entry.path,
+    entry.size,
+    entry.modifiedAt,
+    entry.server
+  ])
   return loaded?.key === key ? loaded : null
 }
 
@@ -81,6 +97,8 @@ export function Lightbox({
   if (!entry) return null
 
   const go = (d: number): void => onIndex(Math.max(0, Math.min(items.length - 1, index + d)))
+  // P2: 영상 판정은 확장자로 한다. 카테고리 video 목록(mkv·avi 등)과는 갈린다(함정 A).
+  const video = isVideoFile(entry.name)
   const isShelved = shelved.has(locKey(entry))
   const toggleShelf = (): void => {
     const shelf = useShelfStore.getState()
@@ -100,6 +118,8 @@ export function Lightbox({
       onMouseDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         e.stopPropagation()
+        // 영상 컨트롤에 포커스가 있으면 가로채지 않고 그대로 넘긴다(P6). 아니면 기존 닫기·넘김.
+        if (e.target instanceof Element && e.target.closest('video')) return
         if (e.key === 'ArrowRight') go(1)
         else if (e.key === 'ArrowLeft') go(-1)
         else if (e.key === 'Home') onIndex(0)
@@ -145,7 +165,16 @@ export function Lightbox({
         </button>
       </div>
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-16">
-        {preview?.url ? (
+        {preview?.url && video ? (
+          <video
+            key={entry.path}
+            src={preview.url}
+            controls
+            autoPlay
+            muted
+            className="fade max-h-full max-w-full drop-shadow-2xl"
+          />
+        ) : preview?.url ? (
           <img
             key={entry.path}
             src={preview.url}

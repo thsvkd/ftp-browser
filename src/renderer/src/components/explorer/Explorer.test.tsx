@@ -24,6 +24,7 @@ import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import type { FtpServer } from '@shared/types/ftp'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
+import { AppShell } from '@renderer/components/layout/AppShell'
 import { useDnd } from './dnd'
 import {
   activeTab,
@@ -145,7 +146,7 @@ describe('Explorer — keyboard selection', () => {
     act(() => useTabsStore.getState().navigate(remoteLoc('/other')))
     await act(async () => request?.resolve(true))
     expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toEqual([
-      [[{ path: `${DIR}/a.jpg`, isDirectory: false }]]
+      [[{ path: `${DIR}/a.jpg`, isDirectory: false }], server()]
     ])
   })
 
@@ -204,6 +205,105 @@ describe('Explorer — lightbox', () => {
       expect(listbox().getAttribute('aria-activedescendant')).toBe(optId(pathOf('b.jpg')))
     }
   )
+
+  it.each([
+    ['remote', 'ftp:downloadPreview'],
+    ['local', 'local:preview']
+  ] as const)(
+    'draws the %s video lightbox as a <video> of the preview data URL',
+    async (side, channel) => {
+      // covers: Test-878
+      if (side === 'remote') {
+        h = setupExplorer({ remote: { [DIR]: [ftp('a.webm'), ftp('b.webm')] } })
+        await renderExplorer(remoteLoc(DIR))
+      } else {
+        h = setupExplorer({ local: { [LDIR]: [local(LDIR, 'a.webm'), local(LDIR, 'b.webm')] } })
+        await renderExplorer(localLoc(LDIR))
+      }
+      h.handlers[channel] = () => ({ success: true, data: 'data:video/webm;base64,AA==' })
+      listbox().focus()
+      key('Home')
+      key(' ')
+      await flush()
+
+      const dialog = screen.getByRole('dialog', { name: 'Preview: a.webm' })
+      const video = dialog.querySelector('video')
+      expect(invokeCalls(h.invoke, channel)).toHaveLength(1)
+      expect(video).not.toBeNull()
+      expect(video?.hasAttribute('controls')).toBe(true)
+      expect(video?.getAttribute('src')).toBe('data:video/webm;base64,AA==')
+    }
+  )
+
+  it('keeps the GIF lightbox on <img> with the image/gif data URL', async () => {
+    // covers: Test-879
+    h = setupExplorer({ remote: { [DIR]: [ftp('anim.gif', { isImage: true })] } })
+    await renderExplorer(remoteLoc(DIR))
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: true,
+      data: 'data:image/gif;base64,R0lGOD'
+    })
+    listbox().focus()
+    key('Home')
+    key(' ')
+    await flush()
+
+    const dialog = screen.getByRole('dialog', { name: 'Preview: anim.gif' })
+    expect(dialog.querySelector('video')).toBeNull()
+    const img = dialog.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute('src')).toBe('data:image/gif;base64,R0lGOD')
+  })
+
+  it('gives Space, Enter and arrows to the video controls, and closes and pages outside them', async () => {
+    // covers: Test-880
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.webm'), ftp('b.webm')] } })
+    await renderExplorer(remoteLoc(DIR))
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: true,
+      data: 'data:video/webm;base64,AA=='
+    })
+    listbox().focus()
+    key('Home')
+    key(' ')
+    await flush()
+    const dialog = screen.getByRole('dialog', { name: 'Preview: a.webm' })
+    const video = dialog.querySelector('video')
+    expect(video).not.toBeNull()
+
+    // 포커스가 영상 안에 있으면 라이트박스가 닫히지도, 목록을 넘기지도 않는다.
+    for (const k of [' ', 'Enter', 'ArrowRight', 'ArrowLeft']) {
+      fireEvent.keyDown(video as HTMLElement, { key: k })
+    }
+    await flush()
+    expect(screen.getByRole('dialog', { name: 'Preview: a.webm' })).toBeTruthy()
+
+    // 영상 밖에서는 기존 동작이 그대로다: ←/→는 넘기고, Space는 닫는다.
+    fireEvent.keyDown(dialog, { key: 'ArrowRight' })
+    await flush()
+    expect(screen.getByRole('dialog', { name: 'Preview: b.webm' })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: ' ' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('shows the existing preview.failed notice when the preview is refused as too large', async () => {
+    // covers: Test-881
+    h = setupExplorer({ remote: { [DIR]: [ftp('huge.webm')] } })
+    await renderExplorer(remoteLoc(DIR))
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: false,
+      error: 'File too large for preview'
+    })
+    listbox().focus()
+    key('Home')
+    key(' ')
+    await flush()
+
+    // 기존 안내 문구가 그대로 쓰인다: 새 오류 문구는 없다.
+    const reason = 'File too large for preview'
+    expect(screen.getByText(en['preview.failed'].replace('{{reason}}', reason))).toBeTruthy()
+    expect(screen.queryByText(en['preview.none'])).toBeNull()
+  })
 })
 
 describe('Explorer — shelf and type-ahead', () => {
@@ -331,7 +431,9 @@ describe('Explorer — inline rename and new folder', () => {
       fireEvent.keyDown(input, { key: 'Enter' })
       await flush()
       expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
-      expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([[`${DIR}/a.txt`, `${DIR}/c.txt`]])
+      expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([
+        [`${DIR}/a.txt`, `${DIR}/c.txt`, server()]
+      ])
       expect(document.activeElement).toBe(listbox())
     }
   )
@@ -361,7 +463,9 @@ describe('Explorer — inline rename and new folder', () => {
       key('N', { ctrlKey: true, shiftKey: true })
       await flush()
       await flush()
-      expect(invokeCalls(h.invoke, channel)).toEqual([[made]])
+      expect(invokeCalls(h.invoke, channel)).toEqual([
+        side === 'remote' ? [made, server()] : [made]
+      ])
       expect(within(option('New folder (1)')).getByRole('textbox')).toBeTruthy()
     }
   )
@@ -396,8 +500,8 @@ describe('Explorer — drag and drop', () => {
     fireEvent.drop(option('sub'), { dataTransfer: dt() })
     await flush()
     expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([
-      [`${DIR}/a.jpg`, `${DIR}/sub/a.jpg`],
-      [`${DIR}/b.jpg`, `${DIR}/sub/b.jpg`]
+      [`${DIR}/a.jpg`, `${DIR}/sub/a.jpg`, server()],
+      [`${DIR}/b.jpg`, `${DIR}/sub/b.jpg`, server()]
     ])
 
     // 빈 곳에 놓으면 현재 폴더로 보낸다(다른 곳에서 끌어 온 항목).
@@ -412,7 +516,11 @@ describe('Explorer — drag and drop', () => {
     expect(screen.getByText('Move 1 to photos')).toBeTruthy()
     fireEvent.drop(listbox(), { dataTransfer: dt() })
     await flush()
-    expect(invokeCalls(h.invoke, 'ftp:rename').at(-1)).toEqual(['/elsewhere/x.jpg', `${DIR}/x.jpg`])
+    expect(invokeCalls(h.invoke, 'ftp:rename').at(-1)).toEqual([
+      '/elsewhere/x.jpg',
+      `${DIR}/x.jpg`,
+      server()
+    ])
 
     // 폴더를 자기 위에 놓을 수는 없다. 고스트는 "+ folder contents"를 붙인다.
     fireEvent.dragStart(option('sub'), { dataTransfer: dt() })
@@ -446,7 +554,7 @@ describe('Explorer — drag and drop', () => {
     await flush()
     expect(invokeCalls(h.invoke, channel)[0]).toEqual(
       side === 'remote'
-        ? [{ direction: 'upload', sources: ['C:\\in\\x.jpg'], destDir: DIR }]
+        ? [{ direction: 'upload', sources: ['C:\\in\\x.jpg'], destDir: DIR }, server()]
         : [['C:\\in\\x.jpg'], LDIR, ['x.jpg']]
     )
   })
@@ -474,6 +582,88 @@ describe('Explorer — drag and drop', () => {
     const folder = await screen.findByRole('alertdialog')
     expect(within(folder).queryByRole('button', { name: 'Overwrite' })).toBeNull()
     expect(within(folder).getByRole('button', { name: 'Skip' })).toBeTruthy()
+  })
+
+  it('shows the transfer pill and the shelf drop strip together, and shelves on the strip', async () => {
+    // covers: Test-905
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    useTabsStore.getState().openTab(remoteLoc(DIR))
+    render(<AppShell />)
+    await screen.findByRole('listbox')
+
+    // 다른 폴더에서 끌던 항목: 탐색기의 기존 전송 안내 pill이 뜬 자리에서 새 담기 띠가 함께 뜬다(함정 B).
+    act(() =>
+      useDnd.setState({
+        items: [fromFtpEntry(ftp('x.jpg'), '/elsewhere', server())],
+        over: null,
+        thumbs: [],
+        fromShelf: false
+      })
+    )
+    fireEvent.dragOver(listbox(), { dataTransfer: dt() })
+    expect(screen.getByText('Move 1 to photos')).toBeTruthy()
+    const bar = document.querySelector<HTMLElement>('[data-region="shelf-dock"][data-shelf-target]')
+    expect(bar).toBeTruthy()
+    expect(screen.getByText(en['shelf.dockHint'])).toBeTruthy()
+
+    const over = dt()
+    fireEvent.dragOver(bar as HTMLElement, { dataTransfer: over })
+    expect(over.dropEffect).toBe('copy')
+    fireEvent.drop(bar as HTMLElement, { dataTransfer: dt() })
+    expect(useShelfStore.getState().items.map((i) => i.entry.name)).toEqual(['x.jpg'])
+  })
+})
+
+describe('Explorer — split zones for a server drag', () => {
+  const zoneDt = (): Record<string, unknown> => ({
+    types: [],
+    files: [],
+    dropEffect: '',
+    setData: vi.fn(),
+    setDragImage: vi.fn(),
+    effectAllowed: ''
+  })
+  const OFFICE: FtpServer = {
+    id: 2,
+    name: 'Office',
+    host: 'ftp.office.lan',
+    port: 2121,
+    username: 'kim',
+    hasPassword: true,
+    secure: false
+  }
+
+  it('highlights only the hovered half with the split hint while a server is dragged', async () => {
+    // covers: Test-923
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    await renderExplorer(remoteLoc(DIR))
+
+    // 항목을 끄는 동안에는 분할 자리가 뜨지 않는다(M14·M15의 구분).
+    act(() =>
+      useDnd.setState({
+        items: [fromFtpEntry(ftp('a.jpg'), DIR, server())],
+        over: null,
+        thumbs: []
+      })
+    )
+    expect(screen.queryByTestId('split-zones')).toBeNull()
+
+    act(() =>
+      useDnd.setState({ server: OFFICE, items: null, over: null, thumbs: [], fromShelf: false })
+    )
+    const zones = screen.getByTestId('split-zones')
+    const left = within(zones).getByTestId('split-left')
+    const right = within(zones).getByTestId('split-right')
+
+    fireEvent.dragOver(left, { dataTransfer: zoneDt() })
+    expect(within(left).getByText(en['split.dropHint'])).toBeTruthy()
+    expect(within(right).queryByText(en['split.dropHint'])).toBeNull()
+    expect(useDnd.getState().over).toBe(`split:${activeTab().paneId}:left`)
+
+    fireEvent.dragOver(right, { dataTransfer: zoneDt() })
+    expect(within(right).getByText(en['split.dropHint'])).toBeTruthy()
+    expect(within(left).queryByText(en['split.dropHint'])).toBeNull()
+    expect(useDnd.getState().over).toBe(`split:${activeTab().paneId}:right`)
   })
 })
 
@@ -504,6 +694,52 @@ describe('Explorer — remote tabs and the connection', () => {
     expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([])
     expect(screen.getByText(en['explorer.notConnected'])).toBeTruthy()
     expect(screen.getByRole('button', { name: /Studio/ })).toBeTruthy()
+  })
+
+  it('gates a remote tab by its own server session instead of the current connection', async () => {
+    // covers: Test-915
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    const primary = server()
+    const other = 'bob@nas:21'
+    // 그 서버의 세션이 열려 있으면 투영(primary)이 아니어도 live다 — 칸마다 자기 세션을 쓴다
+    act(() => {
+      useFtpStore.setState({
+        sessions: { [other]: { status: 'connected', host: 'nas', port: 21 } }
+      })
+    })
+    await renderExplorer({ side: 'remote', path: DIR, server: other })
+    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([[DIR, other]])
+    expect(screen.getByRole('listbox')).toBeTruthy()
+    expect(screen.queryByText(/This tab is a location/)).toBeNull()
+
+    // 다른 세션의 연결·해제는 이 탭의 게이트를 바꾸지 않는다
+    act(() => {
+      useFtpStore.setState({
+        sessions: {
+          [other]: { status: 'connected', host: 'nas', port: 21 },
+          [primary]: { status: 'connected' }
+        }
+      })
+    })
+    await flush()
+    expect(screen.getByRole('listbox')).toBeTruthy()
+
+    act(() => {
+      useFtpStore.setState({
+        sessions: { [other]: { status: 'connected', host: 'nas', port: 21 } }
+      })
+    })
+    await flush()
+    expect(screen.getByRole('listbox')).toBeTruthy()
+    expect(invokeCalls(h.invoke, 'ftp:list')).toEqual([[DIR, other]])
+
+    // 이 탭의 세션만 끊기면 live가 아니다(primary는 여전히 연결돼 있으므로 '다른 서버' 패널)
+    act(() => {
+      useFtpStore.setState({ sessions: { [other]: { status: 'disconnected' } } })
+    })
+    await flush()
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(screen.getByText(/This tab is a location/)).toBeTruthy()
   })
 
   it('restores the scroll position of a tab after switching away and back', async () => {
@@ -704,7 +940,9 @@ describe('Explorer — remote rename (migrated)', () => {
   it('renames through ftp:rename with the old and the new path', async () => {
     // covers: Test-89
     await renameTo('b.txt')
-    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([[`${DIR}/a.txt`, `${DIR}/b.txt`]])
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([
+      [`${DIR}/a.txt`, `${DIR}/b.txt`, server()]
+    ])
   })
 
   it('rejects a name with a path separator before IPC', async () => {

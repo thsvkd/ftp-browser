@@ -15,6 +15,10 @@ interface SettingsStore {
   language: LanguageSetting
   /** 앱 테마(D33). 바뀌면 useThemeSource가 main에 알린다 */
   theme: ThemeSetting
+  /** 왼쪽 사이드바를 그릴지(S3). 기본 true. */
+  showSidebar: boolean
+  /** 오른쪽 레일을 그릴지(S3). 기본 true. 선반 이동(6번) 이후에도 이 값은 유효하다. */
+  showRail: boolean
 
   setViewMode: (mode: 'grid' | 'list') => void
   setTileSize: (size: number) => void
@@ -23,6 +27,10 @@ interface SettingsStore {
   setConfirmBeforeDelete: (confirm: boolean) => void
   setLanguage: (language: LanguageSetting) => void
   setTheme: (theme: ThemeSetting) => void
+  setShowSidebar: (show: boolean) => void
+  setShowRail: (show: boolean) => void
+  /** 모든 설정을 초기값으로(S7). 열려 있는 탭의 보기는 그대로다(함정 D). */
+  reset: () => void
 }
 
 /** v1에만 있던 필드. 두 패널의 보기와 갤러리 썸네일 크기다. */
@@ -55,6 +63,8 @@ export const useSettingsStore = create<SettingsStore>()(
       confirmBeforeDelete: true,
       language: 'system',
       theme: 'system',
+      showSidebar: true,
+      showRail: true,
 
       setViewMode: (mode) => set({ viewMode: mode }),
       setTileSize: (size) => set({ tileSize: clampTileSize(size) }),
@@ -62,7 +72,21 @@ export const useSettingsStore = create<SettingsStore>()(
       setShowHidden: (show) => set({ showHidden: show }),
       setConfirmBeforeDelete: (confirm) => set({ confirmBeforeDelete: confirm }),
       setLanguage: (language) => set({ language }),
-      setTheme: (theme) => set({ theme })
+      setTheme: (theme) => set({ theme }),
+      setShowSidebar: (show) => set({ showSidebar: show }),
+      setShowRail: (show) => set({ showRail: show }),
+      // persist 옵션(name·version·migrate)은 건드리지 않는다(함정 E).
+      reset: () =>
+        set({
+          viewMode: 'grid',
+          tileSize: TILE_DEFAULT,
+          showHidden: false,
+          confirmBeforeDelete: true,
+          language: 'system',
+          theme: 'system',
+          showSidebar: true,
+          showRail: true
+        })
     }),
     {
       name: 'ftp-browser-settings',

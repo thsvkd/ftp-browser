@@ -129,26 +129,27 @@ app.whenReady().then(() => {
 
   // Register IPC handlers
   const operationManager = registerOperationHandlers(win)
-  const { manager, fileOps } = registerFtpHandlers(win, operationManager, passwords)
+  const { registry, fileOps } = registerFtpHandlers(win, operationManager, passwords)
   const localFs = registerLocalFsHandlers(win, operationManager)
-  const transferQueue = registerTransferHandlers(win, fileOps, manager, localFs)
-  const { cacheManager, generator } = registerThumbnailHandlers(win, db, manager)
-  registerPreviewHandlers(db, manager)
-  registerDragHandlers(manager)
-  registerGalleryHandlers(win, db, manager)
+  const transferQueue = registerTransferHandlers(win, fileOps, registry, localFs)
+  const { cacheManager, generator } = registerThumbnailHandlers(win, db, registry)
+  registerPreviewHandlers(db, registry)
+  registerDragHandlers(registry)
+  registerGalleryHandlers(win, db, registry)
   registerAppHandlers()
 
   // 에이전트(내장 MCP 서버, ftpb)는 GUI와 같은 연결·전송 큐·파일 작업·썸네일 캐시를 쓴다(기본 꺼짐).
+  // 에이전트는 세션 인자를 안 주므로 레지스트리의 primary 경로를 그대로 쓴다(M3·M9).
   const agentDeps: McpToolDeps = {
     version: app.getVersion(),
     db,
-    ftp: manager,
+    ftp: registry,
     fileOps,
     queue: transferQueue,
     operations: operationManager,
     localFs,
     passwords,
-    previews: createThumbnailPreviewer(manager, generator, cacheManager),
+    previews: createThumbnailPreviewer(registry, generator, cacheManager),
     jobs: createJobTracker(transferQueue, operationManager),
     onSession: (event) => {
       if (!win.isDestroyed()) win.webContents.send('agent:session', event)

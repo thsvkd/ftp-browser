@@ -25,7 +25,7 @@ import { SPRING_MS } from '@renderer/lib/explorerLayout'
 import { sourceLabel } from '@renderer/lib/sendItems'
 import { cn } from '@renderer/lib/utils'
 import { useListingStore } from '@renderer/stores/useListingStore'
-import { useShelfStore } from '@renderer/stores/useShelfStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
 import { SourceBadge } from '@renderer/components/common/SourceBadge'
 import { useDropTarget } from './dnd'
@@ -264,7 +264,8 @@ export function PathBar({
   onReload
 }: PathBarProps): React.JSX.Element {
   const t = useT()
-  const railTab = useShelfStore((s) => s.railTab)
+  // 정보 레일 켜기/끄기(F8): 선반은 아래 도크로 옮겼고 레일은 정보만 남았다.
+  const showRail = useSettingsStore((s) => s.showRail)
   const barRef = useRef<HTMLDivElement>(null)
   const [compact, setCompact] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -507,9 +508,9 @@ export function PathBar({
         <FolderPlus className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
       </button>
       <button
-        className={cn(iconBtn, railTab === 'info' && 'bg-[var(--acw)] text-[var(--ac)]')}
-        aria-pressed={railTab === 'info'}
-        onClick={() => useShelfStore.getState().setRailTab(railTab === 'info' ? 'shelf' : 'info')}
+        className={cn(iconBtn, showRail && 'bg-[var(--acw)] text-[var(--ac)]')}
+        aria-pressed={showRail}
+        onClick={() => useSettingsStore.getState().setShowRail(!showRail)}
         title={t('explorer.detailsTooltip')}
         aria-label={t('explorer.details')}
       >

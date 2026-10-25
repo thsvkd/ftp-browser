@@ -1,9 +1,18 @@
+/** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, render } from '@testing-library/react'
+import { createElement } from 'react'
+import { toast } from 'sonner'
 import { fallbackBatchMeta, useTransferStore } from './useTransferStore'
 import { useListingStore } from './useListingStore'
 import { useSettingsStore } from './useSettingsStore'
+import { useThumbnailStore } from '@renderer/stores/useThumbnailStore'
+import { ThumbnailImage } from '@renderer/components/thumbnail/ThumbnailImage'
+import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import type { Loc } from '@renderer/lib/explorerEntry'
-import type { TransferJob } from '@shared/types/transfer'
+import type { TransferJob, TransferSendResult } from '@shared/types/transfer'
+
+vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }))
 
 function job(id: string, overrides: Partial<TransferJob> = {}): TransferJob {
   return {
@@ -226,6 +235,282 @@ describe('useTransferStore download completion', () => {
       ['local', undefined, 'C:\\dl\\photos\\2024'],
       ['local', undefined, 'C:\\dl\\photos'],
       ['local', undefined, 'C:\\dl']
+    ])
+  })
+})
+
+describe('useTransferStore move cleanup', () => {
+  const invoke = vi.fn()
+  const invalidate = vi.fn()
+
+  beforeEach(() => {
+    invoke.mockReset()
+    invalidate.mockReset()
+    vi.mocked(toast).mockClear()
+    vi.stubGlobal('window', { api: { invoke } })
+    useListingStore.setState({ invalidate })
+    useSettingsStore.setState({ language: 'en' })
+    useTransferStore.setState({ jobs: [], batchMeta: {}, pendingSends: [], conflictQueue: [] })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** `transfer:send`는 충돌 없이 바로 큐에 넣었다고 답하게 한다. 그 외 채널은 성공. */
+  function queueSend(result: Partial<TransferSendResult>): void {
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'transfer:send')
+        return { success: true, data: { skipped: [], conflicts: [], totalBytes: 0, ...result } }
+      return { success: true }
+    })
+  }
+
+  /** 이동으로 업로드를 보낸다(verbRef를 넘기면 충돌 없이도 이동으로 등록된다). */
+  function sendMoveUpload(
+    ids: string[],
+    sources: string[],
+    skipped: Array<{ path: string; reason: string }> = []
+  ): Promise<TransferSendResult | null> {
+    queueSend({ batchId: `batch-${ids[0]}`, ids, skipped })
+    return useTransferStore
+      .getState()
+      .send(
+        { direction: 'upload', sources, destDir: '/photos' },
+        { label: 'photos', to: { side: 'remote', path: '/photos' } },
+        { verb: 'move' }
+      )
+  }
+
+  /** 원본 삭제 비동기 처리가 끝날 때까지 기다린다. */
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it('deletes upload sources via local:deleteBatch and invalidates the local source folder when every job completes', async () => {
+    // covers: Test-862
+    await sendMoveUpload(['u862a', 'u862b'], ['C:\\src\\a.jpg', 'C:\\src\\b.jpg'])
+
+    useTransferStore.getState().applyUpdate({
+      upserts: [job('u862a', { status: 'completed' }), job('u862b', { status: 'completed' })],
+      removedIds: []
+    })
+    await settle()
+
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([
+      [['C:\\src\\a.jpg', 'C:\\src\\b.jpg']]
+    ])
+    expect(invalidate).toHaveBeenCalledWith('local', undefined, 'C:\\src')
+  })
+
+  it('deletes download sources via ftp:deleteBatch and invalidates the remote source folder', async () => {
+    // covers: Test-863
+    queueSend({ batchId: 'b863', ids: ['d863'], skipped: [] })
+    await useTransferStore
+      .getState()
+      .send(
+        { direction: 'download', sources: ['/photos/a.jpg'], destDir: 'C:\\dl' },
+        { label: 'a.jpg', to: { side: 'local', path: 'C:\\dl' } },
+        { verb: 'move' }
+      )
+
+    useTransferStore
+      .getState()
+      .applyUpdate(
+        { upserts: [job('d863', { direction: 'download', status: 'completed' })], removedIds: [] },
+        'me@h:21'
+      )
+    await settle()
+
+    expect(invokeCalls(invoke, 'ftp:deleteBatch')).toEqual([[['/photos/a.jpg'], 'me@h:21']])
+    expect(invalidate).toHaveBeenCalledWith('remote', 'me@h:21', '/photos')
+    // 완료된 다운로드의 디바운스 무효화가 뒤의 테스트로 새지 않게 비운다.
+    await new Promise((resolve) => setTimeout(resolve, 350))
+  })
+
+  it('deletes nothing when a job failed or was cancelled, and nothing when a single item was skipped', async () => {
+    // covers: Test-864
+    // (1) 하나라도 실패하면: 두 작업 중 하나가 completed여도 지우지 않는다.
+    await sendMoveUpload(['f864a', 'f864b'], ['C:\\src\\a.jpg', 'C:\\src\\b.jpg'])
+    useTransferStore.getState().applyUpdate({
+      upserts: [job('f864a', { status: 'completed' }), job('f864b', { status: 'failed' })],
+      removedIds: []
+    })
+
+    // (2) 전부 completed여도 skipped가 하나라도 있으면 지우지 않는다.
+    await sendMoveUpload(
+      ['s864a'],
+      ['C:\\src\\a.jpg', 'C:\\src\\b.jpg'],
+      [{ path: 'C:\\src\\b.jpg', reason: 'skip' }]
+    )
+    useTransferStore.getState().applyUpdate({
+      upserts: [job('s864a', { status: 'completed' })],
+      removedIds: []
+    })
+    await settle()
+
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([])
+    expect(invokeCalls(invoke, 'ftp:deleteBatch')).toEqual([])
+  })
+
+  it('never calls a delete channel for a plain copy send without a verb', async () => {
+    // covers: Test-865
+    queueSend({ batchId: 'b865', ids: ['c865'], skipped: [] })
+    await useTransferStore
+      .getState()
+      .send(
+        { direction: 'upload', sources: ['C:\\src\\a.jpg'], destDir: '/photos' },
+        { label: 'a.jpg', to: { side: 'remote', path: '/photos' } }
+      )
+
+    useTransferStore.getState().applyUpdate({
+      upserts: [job('c865', { status: 'completed' })],
+      removedIds: []
+    })
+    await settle()
+
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([])
+    expect(invokeCalls(invoke, 'ftp:deleteBatch')).toEqual([])
+  })
+
+  it('deletes only once even when the processed batch is removed by removedIds and retried later', async () => {
+    // covers: Test-866
+    await sendMoveUpload(['r866'], ['C:\\src\\a.jpg'])
+    const { applyUpdate } = useTransferStore.getState()
+
+    applyUpdate({ upserts: [job('r866', { status: 'completed' })], removedIds: [] })
+    await settle()
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toHaveLength(1)
+
+    applyUpdate({ upserts: [], removedIds: ['r866'] })
+    applyUpdate({ upserts: [job('r866', { status: 'active' })], removedIds: [] })
+    applyUpdate({ upserts: [job('r866', { status: 'completed' })], removedIds: [] })
+    await settle()
+
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toHaveLength(1)
+  })
+
+  it('toasts moveCleanupFailed when the delete IPC fails and never retries it', async () => {
+    // covers: Test-867
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'transfer:send')
+        return {
+          success: true,
+          data: { batchId: 'b867', ids: ['e867'], skipped: [], conflicts: [], totalBytes: 0 }
+        }
+      if (channel === 'local:deleteBatch') return { success: false, error: 'denied' }
+      return { success: true }
+    })
+    await useTransferStore
+      .getState()
+      .send(
+        { direction: 'upload', sources: ['C:\\src\\a.jpg'], destDir: '/photos' },
+        { label: 'a.jpg', to: { side: 'remote', path: '/photos' } },
+        { verb: 'move' }
+      )
+
+    const { applyUpdate } = useTransferStore.getState()
+    applyUpdate({ upserts: [job('e867', { status: 'completed' })], removedIds: [] })
+    await settle()
+
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toHaveLength(1)
+    expect(vi.mocked(toast)).toHaveBeenCalledWith('Moved, but the originals could not be removed', {
+      description: 'denied'
+    })
+
+    // 같은 작업을 다시 완료시켜 봐도 등록부에서 빠졌으므로 재시도하지 않는다.
+    applyUpdate({ upserts: [job('e867', { status: 'completed' })], removedIds: [] })
+    await settle()
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toHaveLength(1)
+  })
+})
+
+describe('useTransferStore session keys', () => {
+  const invoke = vi.fn()
+  const invalidate = vi.fn()
+
+  beforeEach(() => {
+    invoke.mockReset()
+    invalidate.mockReset()
+    vi.mocked(toast).mockClear()
+    vi.stubGlobal('window', { api: { invoke } })
+    useListingStore.setState({ invalidate })
+    useSettingsStore.setState({ language: 'en' })
+    useTransferStore.setState({ jobs: [], batchMeta: {}, pendingSends: [], conflictQueue: [] })
+    useThumbnailStore.setState({ thumbnails: {}, errors: {} })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** 원본 삭제 비동기 처리가 끝날 때까지 기다린다. */
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it('sends the session key with transfer:send, the move-cleanup remote delete and thumbnail requests', async () => {
+    // covers: Test-933
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'transfer:send')
+        return {
+          success: true,
+          data: { batchId: 'b933', ids: ['j933'], skipped: [], conflicts: [], totalBytes: 1 }
+        }
+      return { success: true }
+    })
+
+    // (1) 전송: 목적지(meta.to)의 server를 보낸다(A′3 — 활성 세션이 아니라 목적지 기준).
+    const request = {
+      direction: 'upload' as const,
+      sources: ['C:\\src\\a.jpg'],
+      destDir: '/photos'
+    }
+    await useTransferStore.getState().send(request, {
+      label: 'a.jpg',
+      to: { side: 'remote', path: '/photos', server: 'other@h2:21' }
+    })
+    expect(invokeCalls(invoke, 'transfer:send')).toEqual([[request, 'other@h2:21']])
+
+    // (2) 이동으로 받은 뒤의 원격 원본 삭제: 그 작업을 처리한 세션의 server를 보낸다.
+    await useTransferStore
+      .getState()
+      .send(
+        { direction: 'download', sources: ['/photos/a.jpg'], destDir: 'C:\\dl' },
+        { label: 'a.jpg', to: { side: 'local', path: 'C:\\dl' } },
+        { verb: 'move' }
+      )
+    useTransferStore
+      .getState()
+      .applyUpdate(
+        { upserts: [job('j933', { direction: 'download', status: 'completed' })], removedIds: [] },
+        'other@h2:21'
+      )
+    await settle()
+    expect(invokeCalls(invoke, 'ftp:deleteBatch')).toEqual([[['/photos/a.jpg'], 'other@h2:21']])
+
+    // (3) 썸네일: 항목(entry)의 server를 보낸다.
+    await act(async () => {
+      render(
+        createElement(ThumbnailImage, {
+          entry: {
+            name: 'a.jpg',
+            size: 1024,
+            modifiedAt: '2024-05-01T10:20:30.000Z',
+            server: 'other@h2:21'
+          },
+          remotePath: '/photos/a.jpg',
+          request: true
+        })
+      )
+    })
+    expect(invokeCalls(invoke, 'thumbnail:request')).toEqual([
+      [
+        {
+          remotePath: '/photos/a.jpg',
+          fileName: 'a.jpg',
+          fileSize: 1024,
+          modifiedAt: '2024-05-01T10:20:30.000Z',
+          priority: 1
+        },
+        'other@h2:21'
+      ]
     ])
   })
 })

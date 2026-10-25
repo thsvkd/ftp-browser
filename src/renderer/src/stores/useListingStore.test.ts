@@ -99,4 +99,18 @@ describe('useListingStore', () => {
       code: 'FTP_PERMISSION_DENIED'
     })
   })
+
+  it('sends the tab session key with the remote listing so a non-primary tab never reads the primary list', async () => {
+    // covers: Test-932
+    const { load } = useListingStore.getState()
+    const other: Loc = { side: 'remote', server: 'other@h2:21', path: '/p' }
+
+    const listing = load(other)
+
+    expect(invoke).toHaveBeenCalledWith('ftp:list', '/p', 'other@h2:21')
+    pending[0].resolve({ success: true, data: { path: '/p', entries: [ftp('a')] } })
+    await listing
+    expect(get(other)).toMatchObject({ status: 'ready' })
+    expect(get(other).entries[0]).toMatchObject({ server: 'other@h2:21' })
+  })
 })

@@ -1,9 +1,12 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { en } from '@renderer/i18n/locales/en'
+import { fromLocalEntry } from '@renderer/lib/explorerEntry'
 import { useServerStore } from '@renderer/stores/useServerStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { emptyDraft } from '@renderer/lib/serverAddress'
 import {
@@ -80,10 +83,11 @@ describe('AppShell — start and connect', () => {
 })
 
 describe('AppShell — regions', () => {
-  it('cycles focus sidebar → tabs → list → rail with F6 and back with Shift+F6', async () => {
+  it('cycles focus sidebar → tabs → list → shelf dock with F6 and back with Shift+F6', async () => {
     // covers: Test-834
     render(<AppShell />)
     await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
+    act(() => useShelfStore.getState().add([fromLocalEntry(local(HOME, 'a.txt'))]))
     const key = (shiftKey = false): void => {
       fireEvent.keyDown(document.activeElement ?? document.body, { key: 'F6', shiftKey })
     }
@@ -91,12 +95,12 @@ describe('AppShell — regions', () => {
       screen.getByRole('navigation', { name: en['sidebar.label'] })
     ).getByRole('button', { name: 'Downloads' })
     expect(sidebarCurrent.getAttribute('aria-current')).toBe('location')
-    const shelfTab = screen.getByRole('tab', { name: new RegExp(`^${en['shelf.title']}`) })
+    const dockRow = screen.getByRole('listitem', { name: /^a\.txt,/ })
 
     // 처음에는 다른 것이 포커스를 갖고 있지 않으니 목록이 받는다(함정 13).
     expect(document.activeElement).toBe(screen.getByRole('listbox'))
     key()
-    expect(document.activeElement).toBe(shelfTab)
+    expect(document.activeElement).toBe(dockRow)
     key()
     expect(document.activeElement).toBe(sidebarCurrent)
     key()
@@ -108,6 +112,31 @@ describe('AppShell — regions', () => {
     key(true)
     expect(document.activeElement).toBe(sidebarCurrent)
     key(true)
-    expect(document.activeElement).toBe(shelfTab)
+    expect(document.activeElement).toBe(dockRow)
+  })
+})
+
+describe('AppShell — display toggles', () => {
+  afterEach(() => {
+    useSettingsStore.setState({ showSidebar: true, showRail: true })
+  })
+
+  it('does not draw the sidebar when it is turned off and the content takes its place', async () => {
+    // covers: Test-892
+    useSettingsStore.setState({ showSidebar: false })
+    render(<AppShell />)
+    await waitFor(() => expect(useTabsStore.getState().tabs).toHaveLength(1))
+
+    expect(screen.queryByRole('navigation', { name: en['sidebar.label'] })).toBeNull()
+    expect(screen.getByRole('main')).not.toBeNull()
+  })
+
+  it('does not draw the right rail when it is turned off', async () => {
+    // covers: Test-893
+    useSettingsStore.setState({ showRail: false })
+    render(<AppShell />)
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
+
+    expect(screen.queryByRole('tab', { name: new RegExp(`^${en['shelf.title']}`) })).toBeNull()
   })
 })

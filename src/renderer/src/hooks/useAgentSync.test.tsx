@@ -98,7 +98,7 @@ describe('useAgentSync — remote changes', () => {
     expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([])
 
     await vi.advanceTimersByTimeAsync(1)
-    expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([['/photos']])
+    expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([['/photos', SERVER]])
 
     // 읽은 적 없는 폴더는 다시 읽지 않는다. 같은 이름으로 시작하는 형제 폴더도 다른 폴더다.
     emit('ftp:remoteChanged', { kind: 'upload', remotePath: '/photos-old/x.jpg' })
@@ -113,7 +113,11 @@ describe('useAgentSync — remote changes', () => {
       newPath: '/photos/b.jpg'
     })
     await vi.advanceTimersByTimeAsync(300)
-    expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([['/photos'], ['/other'], ['/photos']])
+    expect(invokeCalls(mockInvoke, 'ftp:list')).toEqual([
+      ['/photos', SERVER],
+      ['/other', SERVER],
+      ['/photos', SERVER]
+    ])
   })
 
   it('moves a tab up when its folder (or one above it) is deleted or renamed', async () => {

@@ -7,7 +7,11 @@ import path from 'path'
 const state = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   db: undefined as unknown as import('better-sqlite3').Database,
-  connect: undefined as unknown as import('vitest').Mock
+  connect: undefined as unknown as import('vitest').Mock,
+  /** 만들어진 매니저 순서(placeholder 포함). 세션별 매니저를 테스트가 구분해 쓴다. */
+  instances: [] as import('events').EventEmitter[],
+  send: undefined as unknown as import('vitest').Mock,
+  registry: undefined as unknown as import('../ftp/FtpSessionRegistry').FtpSessionRegistry
 }))
 
 vi.mock('electron', () => ({
@@ -26,6 +30,14 @@ vi.mock('../ftp/FtpConnectionManager', async () => {
   return {
     FtpConnectionManager: class extends EventEmitter {
       connect = state.connect
+      isConnected = (): boolean => false
+      getHost = (): string => ''
+      getPort = (): number => 21
+      getMaxTransfers = (): number => 16
+      constructor() {
+        super()
+        state.instances.push(this)
+      }
     }
   }
 })
@@ -34,16 +46,26 @@ vi.mock('../ftp/FtpFileOperations', () => ({ FtpFileOperations: class {} }))
 
 import type { BrowserWindow } from 'electron'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
-import type { FtpServer, FtpServerInput } from '@shared/types/ftp'
+import type {
+  FtpConnectPayload,
+  FtpFileEntry,
+  FtpListResult,
+  FtpServer,
+  FtpServerInput
+} from '@shared/types/ftp'
 import { registerFtpHandlers } from './ftpHandlers'
+import { registerTransferHandlers } from './transferHandlers'
+import { LocalFileSystem } from '../local/LocalFileSystem'
 import { createPasswordVault } from '../db/passwordVault'
 import { FakeCipher, fakeCipherOf } from '../db/__fixtures__/fakeCipher'
 import type { OperationManager } from '../operation/OperationManager'
+import type { FtpFileOperations } from '../ftp/FtpFileOperations'
 
 let cipher: FakeCipher
 
 beforeEach(() => {
   state.handlers.clear()
+  state.instances.length = 0
   state.db = new Database(':memory:')
   const migrations = path.join(__dirname, '../db/migrations')
   for (const file of [
@@ -55,12 +77,16 @@ beforeEach(() => {
   }
   state.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_servers_host_port ON servers(host, port)')
   state.connect = vi.fn(async () => ({ success: true }))
+  state.send = vi.fn()
   cipher = new FakeCipher({ backend: 'basic_text' })
-  registerFtpHandlers(
-    { isDestroyed: () => false, webContents: { send: vi.fn() } } as unknown as BrowserWindow,
+  state.registry = registerFtpHandlers(
+    {
+      isDestroyed: () => false,
+      webContents: { send: state.send }
+    } as unknown as BrowserWindow,
     {} as OperationManager,
     createPasswordVault(state.db, cipher)
-  )
+  ).registry
 })
 
 afterEach(() => {
@@ -445,5 +471,95 @@ describe('ftp:connect — quick connect', () => {
         )
         .get()
     ).toEqual({ username: 'mallory', password_cipher: fakeCipherOf('typed-Secret-745') })
+  })
+})
+
+describe('ftp:connect — session routing (M2·M4)', () => {
+  const LOGIN_A: FtpConnectPayload = {
+    host: 'a.example',
+    port: 21,
+    user: 'alice',
+    password: 'x',
+    secure: false
+  }
+  const LOGIN_B: FtpConnectPayload = { ...LOGIN_A, host: 'b.example', user: 'bob' }
+
+  const entry = (name: string): FtpFileEntry => ({
+    name,
+    type: 'file',
+    size: 1,
+    modifiedAt: '',
+    rawModifiedAt: '',
+    isImage: false
+  })
+
+  it('reads each session through its own manager', async () => {
+    // covers: Test-909
+    await invoke('ftp:connect', LOGIN_A)
+    await invoke('ftp:connect', LOGIN_B)
+    // placeholder 뒤에 A·B 세션 매니저가 차례로 생겼다
+    expect(state.instances).toHaveLength(3)
+    const managerA = Object.assign(state.instances[1], {
+      list: vi.fn(
+        async (p: string): Promise<FtpListResult> => ({
+          path: p,
+          entries: [entry('from-a')]
+        })
+      )
+    })
+    const managerB = Object.assign(state.instances[2], {
+      list: vi.fn(
+        async (p: string): Promise<FtpListResult> => ({
+          path: p,
+          entries: [entry('from-b')]
+        })
+      )
+    })
+
+    const listedA = await invoke<FtpListResult>('ftp:list', '/dir', 'alice@a.example:21')
+    expect(listedA).toEqual({ success: true, data: { path: '/dir', entries: [entry('from-a')] } })
+    expect(managerA.list).toHaveBeenCalledWith('/dir')
+    expect(managerB.list).not.toHaveBeenCalled()
+
+    const listedB = await invoke<FtpListResult>('ftp:list', '/dir', 'bob@b.example:21')
+    expect(listedB).toEqual({ success: true, data: { path: '/dir', entries: [entry('from-b')] } })
+    expect(managerB.list).toHaveBeenCalledWith('/dir')
+    expect(managerA.list).toHaveBeenCalledTimes(1)
+  })
+
+  it('tags ftp:connectionStatus, ftp:remoteChanged and transfer:updated with their session', async () => {
+    // covers: Test-913
+    await invoke('ftp:connect', LOGIN_A)
+    const key = 'alice@a.example:21'
+    const manager = state.instances[1]
+    expect(manager).toBeDefined()
+
+    manager.emit('connectionStatus', { status: 'connected', host: 'a.example' })
+    expect(state.send).toHaveBeenCalledWith('ftp:connectionStatus', {
+      status: 'connected',
+      host: 'a.example',
+      server: key
+    })
+
+    manager.emit('mutation', { kind: 'delete', remotePath: '/gone' })
+    expect(state.send).toHaveBeenCalledWith('ftp:remoteChanged', {
+      kind: 'delete',
+      remotePath: '/gone',
+      server: key
+    })
+
+    // 같은 레지스트리 위의 전송 큐 변경분도 세션 태그를 단다(primary가 이 세션이다)
+    const queue = registerTransferHandlers(
+      { isDestroyed: () => false, webContents: { send: state.send } } as unknown as BrowserWindow,
+      {} as FtpFileOperations,
+      state.registry,
+      new LocalFileSystem()
+    )
+    queue.emit('queue:updated', { upserts: [], removedIds: [] })
+    expect(state.send).toHaveBeenCalledWith('transfer:updated', {
+      upserts: [],
+      removedIds: [],
+      server: key
+    })
   })
 })

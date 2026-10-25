@@ -3,11 +3,11 @@ import { Writable } from 'stream'
 import path from 'path'
 import Database from 'better-sqlite3'
 import { Client } from 'basic-ftp'
-import { FtpConnectionManager } from '../ftp/FtpConnectionManager'
+import { FtpSessionRegistry } from '../ftp/FtpSessionRegistry'
 import { PreviewCacheManager } from '../preview/PreviewCacheManager'
 import { generateCacheKey } from '../utils/cacheKey'
 import { ipcError } from '../utils/errorClassifier'
-import { MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
+import { isVideoFile, MAX_IMAGE_SIZE_BYTES, MAX_VIDEO_SIZE_BYTES } from '@shared/constants'
 import type { IpcResult } from '@shared/types/ipc'
 
 async function downloadToBuffer(client: Client, remotePath: string): Promise<Buffer> {
@@ -30,7 +30,11 @@ export const MIME_MAP: Record<string, string> = {
   '.bmp': 'image/bmp',
   '.webp': 'image/webp',
   '.tiff': 'image/tiff',
-  '.tif': 'image/tiff'
+  '.tif': 'image/tiff',
+  '.webm': 'video/webm',
+  '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.m4v': 'video/mp4'
 }
 
 interface PreviewRequest {
@@ -39,17 +43,18 @@ interface PreviewRequest {
   modifiedAt: string
 }
 
-export function registerPreviewHandlers(
-  db: Database.Database,
-  ftpManager: FtpConnectionManager
-): void {
+export function registerPreviewHandlers(db: Database.Database, registry: FtpSessionRegistry): void {
   const cacheManager = new PreviewCacheManager(db)
 
   ipcMain.handle(
     'ftp:downloadPreview',
-    async (_event, req: PreviewRequest): Promise<IpcResult<string>> => {
+    async (_event, req: PreviewRequest, server?: string): Promise<IpcResult<string>> => {
       try {
-        if (req.fileSize > MAX_IMAGE_SIZE_BYTES) {
+        // M4: 그 세션의 매니저로 읽고, 캐시 키도 그 세션의 host·port로 만든다(함정 A).
+        const session = registry.get(server)
+        // data URL은 파일 전체를 메모리에 올려야 하므로 상한을 종류별로 나눈다(P5).
+        const cap = isVideoFile(req.remotePath) ? MAX_VIDEO_SIZE_BYTES : MAX_IMAGE_SIZE_BYTES
+        if (req.fileSize > cap) {
           return { success: false, error: 'File too large for preview' }
         }
 
@@ -58,8 +63,8 @@ export function registerPreviewHandlers(
 
         // 캐시 키 생성
         const cacheKey = generateCacheKey(
-          ftpManager.getHost(),
-          ftpManager.getPort(),
+          session.getHost(),
+          session.getPort(),
           req.remotePath,
           req.fileSize,
           req.modifiedAt
@@ -76,7 +81,7 @@ export function registerPreviewHandlers(
         // FTP에서 다운로드 (보조 클라이언트 시도 → 실패 시 메인 클라이언트로 직렬화 fallback)
         let secondaryClient: Client | null = null
         try {
-          secondaryClient = await ftpManager.createSecondaryClient()
+          secondaryClient = await session.createSecondaryClient()
         } catch {
           // 보조 클라이언트 생성 실패 → 메인 클라이언트 사용
         }
@@ -90,7 +95,7 @@ export function registerPreviewHandlers(
           }
         } else {
           // runOnMainClient를 통해 list/transfer/delete 등과 직렬화하여 충돌 방지
-          buffer = await ftpManager.runOnMainClient((client) =>
+          buffer = await session.runOnMainClient((client) =>
             downloadToBuffer(client, req.remotePath)
           )
         }

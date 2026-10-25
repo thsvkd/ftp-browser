@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { en } from '@renderer/i18n/locales/en'
 import { fromLocalEntry } from '@renderer/lib/explorerEntry'
 import { useListingStore } from '@renderer/stores/useListingStore'
+import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import {
@@ -77,16 +78,23 @@ describe('InfoPanel', () => {
     ])
   })
 
-  it('switches the rail between shelf and info with Alt+Shift+P', async () => {
-    // covers: Test-835
+  it('toggles the info rail with the PathBar details button and Alt+Shift+P', async () => {
+    // covers: Test-904
+    useSettingsStore.setState({ showRail: true })
     render(<AppShell />)
     await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
-    expect(useShelfStore.getState().railTab).toBe('shelf')
-    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'P', altKey: true, shiftKey: true })
-    expect(useShelfStore.getState().railTab).toBe('info')
     expect(screen.getByRole('region', { name: en['rail.info'] })).toBeTruthy()
+
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'P', altKey: true, shiftKey: true })
+    expect(useSettingsStore.getState().showRail).toBe(false)
+    expect(screen.queryByRole('region', { name: en['rail.info'] })).toBeNull()
+
     fireEvent.keyDown(document.body, { key: 'P', altKey: true, shiftKey: true })
-    expect(useShelfStore.getState().railTab).toBe('shelf')
-    expect(screen.getByRole('region', { name: en['shelf.title'] })).toBeTruthy()
+    expect(useSettingsStore.getState().showRail).toBe(true)
+    expect(screen.getByRole('region', { name: en['rail.info'] })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: en['explorer.details'] }))
+    expect(useSettingsStore.getState().showRail).toBe(false)
+    expect(screen.queryByRole('region', { name: en['rail.info'] })).toBeNull()
   })
 })

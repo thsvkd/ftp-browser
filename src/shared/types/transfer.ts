@@ -32,6 +32,8 @@ export interface TransferJob {
 export interface TransferUpdate {
   upserts: TransferJob[]
   removedIds: string[]
+  /** 어느 세션의 전송인지(M5·M1). 없으면 primary의 전송이다. */
+  server?: string
 }
 
 export type ConflictDecision = 'overwrite' | 'skip' | 'rename' | 'newer'

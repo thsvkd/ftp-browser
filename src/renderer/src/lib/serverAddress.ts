@@ -152,9 +152,27 @@ export function draftFields(p: ParsedServerAddress): Partial<ServerDraft> {
 
 const isAnonymous = (user: string): boolean => !user.trim() || /^anonymous$/i.test(user.trim())
 
+/** Whether a username is present — exactly the rule ConnectBar uses to draw the password field (D6). */
+export const hasUser = (username: string): boolean => !isAnonymous(username)
+
+/**
+ * Whether a saved server can connect right away (D1): it has a saved password, or it logs in
+ * anonymously (no username, or `anonymous`). A username without a saved password returns false so
+ * the caller fills the address and focuses the password field instead of trying a blank one (D2).
+ */
+export const canConnectSaved = (server: Pick<FtpServer, 'username' | 'hasPassword'>): boolean =>
+  server.hasPassword || !hasUser(server.username)
+
 /** Primary label: alias, else host. */
 export const serverLabel = (s: { name: string; host: string }): string =>
   s.name.trim() || s.host.trim()
+
+/**
+ * 세션 키(M1) `"user@host:port"` — 익명 로그인은 `anonymous`로 채워 main의 `FtpSessionRegistry`·
+ * `useFtpStore.serverKeyOf`와 같은 값을 만든다. 저장 서버·툴바 초안(draft) 어디에 써도 같은 키다.
+ */
+export const serverKey = (s: { username: string; host: string; port: number | string }): string =>
+  `${s.username || 'anonymous'}@${s.host}:${s.port}`
 
 /** `user@host:port`; anonymous logins leave the user out. IPv6 hosts are bracketed. */
 export function serverAddress(s: {

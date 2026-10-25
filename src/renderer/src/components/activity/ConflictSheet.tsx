@@ -6,7 +6,11 @@ import { cn, formatBytes, formatDate } from '@renderer/lib/utils'
 import { categoryOf, parentPath, type ExplorerEntry } from '@renderer/lib/explorerEntry'
 import { EntryThumb } from '@renderer/components/thumbnail/EntryThumb'
 import { isImageFile } from '@shared/constants'
-import { useTransferStore, type ConflictPrompt } from '@renderer/stores/useTransferStore'
+import {
+  useTransferStore,
+  type ConflictPrompt,
+  type SendVerb
+} from '@renderer/stores/useTransferStore'
 import type { ConflictDecision, TransferConflict } from '@shared/types/transfer'
 
 const BTN =
@@ -36,6 +40,10 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
   const [index, setIndex] = useState(0)
   const [decisions, setDecisions] = useState<Record<string, ConflictDecision>>({})
   const [applyAll, setApplyAll] = useState(true)
+  // 전송 작업 토글(V1). `askConflicts`가 기본값(원격↔원격은 이동, 그 외는 복사)을 정해 넣었다(V2).
+  const [verb, setVerb] = useState<SendVerb>(prompt.verb)
+  // 원격↔원격: 원본 복사는 지원하지 않으므로 복사 칸을 막는다(V2).
+  const verbLocked = prompt.direction === 'move'
   const dialog = useRef<HTMLDivElement>(null)
   const firstButton = useRef<HTMLButtonElement>(null)
   const conflict = conflicts[index]
@@ -58,7 +66,8 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
     const chosen = applyAll ? conflicts.slice(index) : [conflict]
     const next = { ...decisions }
     for (const c of chosen) next[c.target] = d
-    if (index + chosen.length >= conflicts.length) resolve(prompt.id, next)
+    // 토글 값은 시트의 답에 함께 실려 이 보내기 전체에 적용된다(V3·V8).
+    if (index + chosen.length >= conflicts.length) resolve(prompt.id, { decisions: next, verb })
     else {
       setDecisions(next)
       setIndex(index + chosen.length)
@@ -151,6 +160,41 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
           >
             {t('common.cancel')}
           </button>
+        </div>
+        {/* 전송 작업 토글(V1): 카드 위쪽. 포커스를 요구하지 않는 요소라 Tab 가두기가 흔들리지 않는다(함정 B). */}
+        <div
+          role="radiogroup"
+          aria-label={t('conflict.verbLabel')}
+          className="mx-5 mt-3 flex w-fit items-center gap-1 rounded-[10px] border border-[var(--bd)] bg-[var(--bg)] p-1"
+        >
+          {(['copy', 'move'] as const).map((v) => {
+            const disabled = v === 'copy' && verbLocked
+            return (
+              <div
+                key={v}
+                role="radio"
+                aria-checked={verb === v}
+                aria-disabled={disabled || undefined}
+                title={
+                  disabled
+                    ? t('send.invalidRemoteCopy')
+                    : v === 'move'
+                      ? t('conflict.verbMoveHint')
+                      : undefined
+                }
+                onClick={() => !disabled && setVerb(v)}
+                className={cn(
+                  'cursor-pointer select-none rounded-[8px] px-3 py-1 text-[12.5px] font-semibold transition-colors',
+                  verb === v
+                    ? 'bg-[var(--ac)] text-[var(--acx)]'
+                    : 'text-[var(--mu)] hover:bg-[var(--hv)]',
+                  disabled && 'cursor-not-allowed opacity-40'
+                )}
+              >
+                {t(v === 'copy' ? 'conflict.verbCopy' : 'conflict.verbMove')}
+              </div>
+            )
+          })}
         </div>
         <div className="flex gap-3 px-5">
           {card('existing')}

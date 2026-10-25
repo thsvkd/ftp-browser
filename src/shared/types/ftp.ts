@@ -99,6 +99,8 @@ export interface FtpMutationEvent {
   kind: 'delete' | 'rename' | 'mkdir' | 'upload'
   remotePath: string
   newPath?: string
+  /** 어느 세션의 변경인지(M5·M1). 없으면 primary의 변경이다. */
+  server?: string
 }
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -107,4 +109,8 @@ export interface FtpConnectionState {
   status: ConnectionStatus
   host?: string
   error?: string
+  /** 이 상태가 어느 세션의 것인지(M5·M1): 없으면 primary. 세션 포트·계정은 sessions가 채워 둔다. */
+  port?: number
+  username?: string
+  server?: string
 }

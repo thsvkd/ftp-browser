@@ -8,40 +8,50 @@ import { flushSync } from 'react-dom'
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import { t } from '@renderer/i18n'
-import type { ExplorerEntry, Loc } from '@renderer/lib/explorerEntry'
+import { locKey, type ExplorerEntry, type Loc } from '@renderer/lib/explorerEntry'
 import { planSend } from '@renderer/lib/sendPlan'
+import { serverKey } from '@renderer/lib/serverAddress'
 import { dropOsFiles, planVerb, sendItems, useConnection } from '@renderer/lib/sendItems'
+import { connectIntoPane, connectNow, startShelfConnect } from '@renderer/lib/splitConnect'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
+import { useTabsStore } from '@renderer/stores/useTabsStore'
+import type { FtpServer } from '@shared/types/ftp'
 
 interface DndState {
   items: ExplorerEntry[] | null
+  /**
+   * 지금 끄는 저장 서버(M14). `items`(항목 드래그)와 한 번에 하나만 채워진다 —
+   * 둘이 섞이면 놓기 대상의 판정이 갈린다.
+   */
+  server: FtpServer | null
   /** 지금 커서 아래의 놓기 대상 키 */
   over: string | null
   /** 고스트에 겹쳐 보일 화면 속 썸네일(최대 3) */
   thumbs: string[]
+  /** 선반에서 끌어 온 드래그인지(F7): 전송이 시작에 성공하면 그 항목을 선반에서 뺀다 */
+  fromShelf: boolean
 }
 
-export const useDnd = create<DndState>(() => ({ items: null, over: null, thumbs: [] }))
+export const useDnd = create<DndState>(() => ({
+  items: null,
+  server: null,
+  over: null,
+  thumbs: [],
+  fromShelf: false
+}))
 
 /** `DragGhost`가 그리는 요소의 id. `setDragImage`가 이 요소를 찍는다. */
 export const GHOST_ID = 'explorer-drag-ghost'
 
 export function endDrag(): void {
-  useDnd.setState({ items: null, over: null, thumbs: [] })
+  useDnd.setState({ items: null, server: null, over: null, thumbs: [], fromShelf: false })
 }
 
-export function startDrag(e: DragEvent, items: ExplorerEntry[]): void {
-  const thumbs = items
-    .slice(0, 3)
-    .map(
-      (it) =>
-        document.querySelector(`[data-path="${CSS.escape(it.path)}"] img`)?.getAttribute('src') ??
-        ''
-    )
-  // 고스트가 지금 그려져 있어야 setDragImage가 찍을 수 있다.
-  flushSync(() => useDnd.setState({ items, over: null, thumbs }))
-  // 스프링으로 탭이 바뀌면 끌기 시작한 타일이 언마운트되어 dragend가 React에 오지 않는다.
-  // 끌기가 끝난 뒤(놓기·취소) 첫 마우스 이벤트에서 상태를 지운다(함정 6).
+/**
+ * 끌기가 끝난 뒤(놓기·취소) 첫 마우스 이벤트에서 상태를 지운다(함정 6).
+ * 스프링으로 탭이 바뀌면 끌기 시작한 타일이 언마운트되어 dragend가 React에 오지 않는다.
+ */
+function armDragReset(): void {
   const reset = (): void => {
     document.removeEventListener('mousemove', reset, true)
     document.removeEventListener('pointerdown', reset, true)
@@ -51,8 +61,37 @@ export function startDrag(e: DragEvent, items: ExplorerEntry[]): void {
     document.addEventListener('mousemove', reset, true)
     document.addEventListener('pointerdown', reset, true)
   })
+}
+
+export function startDrag(e: DragEvent, items: ExplorerEntry[], fromShelf = false): void {
+  const thumbs = items
+    .slice(0, 3)
+    .map(
+      (it) =>
+        document.querySelector(`[data-path="${CSS.escape(it.path)}"] img`)?.getAttribute('src') ??
+        ''
+    )
+  // 고스트가 지금 그려져 있어야 setDragImage가 찍을 수 있다.
+  flushSync(() => useDnd.setState({ items, server: null, over: null, thumbs, fromShelf }))
+  armDragReset()
   e.dataTransfer.effectAllowed = 'copyMove'
   e.dataTransfer.setData('text/plain', items.map((i) => i.path).join('\n'))
+  const ghost = document.getElementById(GHOST_ID)
+  if (ghost) e.dataTransfer.setDragImage(ghost, 22, 22)
+}
+
+/** M14: 사이드바의 저장 서버 행을 끈다 — `items` 대신 `server`에 담긴다(항목 드래그와 구분). */
+export function startServerDrag(e: DragEvent, server: FtpServer): void {
+  // 고스트가 지금 그려져 있어야 setDragImage가 찍을 수 있다.
+  flushSync(() =>
+    useDnd.setState({ server, items: null, over: null, thumbs: [], fromShelf: false })
+  )
+  armDragReset()
+  e.dataTransfer.effectAllowed = 'copyMove'
+  e.dataTransfer.setData(
+    'text/plain',
+    `${server.username || 'anonymous'}@${server.host}:${server.port}`
+  )
   const ghost = document.getElementById(GHOST_ID)
   if (ghost) e.dataTransfer.setDragImage(ghost, 22, 22)
 }
@@ -115,22 +154,88 @@ export function useDropTarget(
         if (!dest) return
         if (useDnd.getState().items)
           enter(e, valid ? (plan?.transfer.length || dest === 'shelf' ? 'copy' : 'move') : 'none')
-        else if (dest !== 'shelf' && hasFiles(e)) enter(e, 'copy')
+        else if (useDnd.getState().server) {
+          // M15: 서버를 분할 자리(콘텐츠 영역의 절반)가 아닌 곳에 놓으면 오늘의 전환 + 탭 경로로
+          // 간다 — 놓기만 받고 하이라이트는 들이지 않는다(하이라이트는 룣트가 지운다).
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'copy'
+        } else if (dest !== 'shelf' && hasFiles(e)) enter(e, 'copy')
       },
       onDrop: (e) => {
         if (!dest) return
-        const dragged = useDnd.getState().items
-        if (!dragged && (dest === 'shelf' || !hasFiles(e))) return
+        const state = useDnd.getState()
+        const dragged = state.items
+        // endDrag()가 fromShelf·server를 지우기 전에 붙잡는다(F7·M14).
+        const fromShelf = state.fromShelf
+        const server = state.server
+        if (!dragged && !server && (dest === 'shelf' || !hasFiles(e))) return
         e.preventDefault()
         e.stopPropagation()
         endDrag()
-        if (!dragged) {
+        if (server) {
+          // M15: 분할 자리가 아니면 기존대로 — 그냥 연결만 한다(패널·모달 없음).
+          if (dest !== 'shelf') connectNow(server)
+        } else if (!dragged) {
           if (dest !== 'shelf') void dropOsFiles(Array.from(e.dataTransfer.files), dest)
         } else if (dest === 'shelf') {
           if (!useShelfStore.getState().add(dragged)) toast(t('toast.alreadyOnShelf'))
+        } else if (
+          // M19: 선반에서 미연결 서버의 탭으로 — 전송하지 않고 연결(분할 + 시도)부터 시작한다.
+          // 목적 폴더를 못 보는 상태에서 보내는 것은 불가능하므로 2단계는 여기서만 존재한다.
+          fromShelf &&
+          dest.side === 'remote' &&
+          dest.server !== undefined &&
+          !conn.isConnected(dest.server)
+        ) {
+          startShelfConnect(dest)
         } else {
-          void sendItems(dragged, dest)
+          // 선반에서 끌어 전송이 시작에 성공하면 그 항목만 선반에서 뺀다(선반에 다시 놓으면 그대로).
+          void sendItems(dragged, dest).then((ok) => {
+            if (ok && fromShelf) useShelfStore.getState().remove(dragged.map(locKey))
+          })
         }
+      }
+    }
+  }
+}
+
+/**
+ * M15: 서버 드래그의 분할 놓기 대상 — 패널을 좌우 반으로 나눠 호버한 쪸만 예고한다.
+ * 놓으면(onDrop) 바로 패널을 만든다 — 스프링이 아니라 놓기에서(함정 F). `over` 키는 패널마다
+ * 따로라 두 패널의 같은 쪽이 같이 불 켜지지 않는다.
+ */
+export function useSplitDropTarget(
+  key: string,
+  paneId: string,
+  side: 'left' | 'right'
+): {
+  over: boolean
+  handlers: { onDragOver: (e: DragEvent) => void; onDrop: (e: DragEvent) => void }
+} {
+  const over = useDnd((s) => s.over === key)
+  return {
+    over,
+    handlers: {
+      onDragOver: (e) => {
+        if (!useDnd.getState().server) return
+        e.preventDefault()
+        e.stopPropagation()
+        e.dataTransfer.dropEffect = 'copy'
+        if (useDnd.getState().over !== key) useDnd.setState({ over: key })
+      },
+      onDrop: (e) => {
+        const server = useDnd.getState().server
+        if (!server) return
+        e.preventDefault()
+        e.stopPropagation()
+        endDrag()
+        // ① 여기서 만든다(함정 F): 분할 → 자리표시자 패널 → 연결 시도(실패·타임아웃이면 복귀).
+        connectIntoPane(server, () =>
+          useTabsStore.getState().split(paneId, {
+            side,
+            pending: { side: 'remote', path: '/', server: serverKey(server) }
+          })
+        )
       }
     }
   }

@@ -17,6 +17,7 @@ import {
   toDraft,
   type ServerDraft
 } from '@renderer/lib/serverAddress'
+import { connectSaved } from '@renderer/lib/sendItems'
 import { ErrorCode, type IpcResult } from '@shared/types/ipc'
 import {
   isValidMaxTransfers,
@@ -330,7 +331,9 @@ export function ServerManagerDialog({
                     onClick={() => select(s)}
                     onDoubleClick={() => {
                       select(s)
-                      if (!connecting) void connect(toDraft(s)).then((ok) => ok && onClose())
+                      if (connecting) return
+                      // 함정 A: 포커스는 자기 컨테이너 안에서 찾는다. 연결이 성공했을 때만 닫는다.
+                      void connectSaved(s, dialogRef.current!).then((ok) => ok && onClose())
                     }}
                     className={cn(
                       'flex h-12 cursor-default items-center gap-2.5 rounded-md px-2.5',

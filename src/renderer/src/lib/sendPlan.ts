@@ -25,10 +25,16 @@ export interface SendPlan {
   invalid: SendInvalid | null
 }
 
-/** 지금 연결. `server`는 연결된 서버의 `"user@host:port"`. */
+/** 지금 연결. `server`는 가장 최근에 연결한 세션의 `"user@host:port"`(primary 투영). */
 export interface SendConnection {
+  /** 열린 세션이 하나라도 있으면 계획을 이어 간다. 하나도 없으면 `send.invalidNotConnected`. */
   connected: boolean
   server: string | null
+  /**
+   * 목적지(항목·대상)의 서버 세션이 열려 있는가(M7·함정 E): "지금 active 세션과 같은가"가 아니라
+   * "그 서버가 연결돼 있는가"를 묻는다. `null`·`undefined`(로컬)는 항상 true.
+   */
+  isConnected: (server: string | null | undefined) => boolean
 }
 
 export function planSend(
@@ -66,7 +72,10 @@ export function planSend(
     ...(dest.side === 'remote' ? [dest] : [])
   ]
   if (remotes.length && !conn.connected) return refuse('send.invalidNotConnected')
-  if (remotes.some((r) => (r.server ?? null) !== conn.server))
+  // Test-917: invalidOtherServer는 "그 서버의 세션이 안 열렸을 때"만 쓴다(M7·함정 E).
+  if (
+    remotes.some((r) => r.server !== undefined && r.server !== null && !conn.isConnected(r.server))
+  )
     return refuse('send.invalidOtherServer')
   if (opts.copy && dest.side === 'remote' && plan.sameSide.length)
     return refuse('send.invalidRemoteCopy')

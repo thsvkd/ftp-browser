@@ -1,13 +1,16 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
 import { useTransferStore } from '@renderer/stores/useTransferStore'
 import { useOperationStore } from '@renderer/stores/useOperationStore'
+import { useServerStore } from '@renderer/stores/useServerStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
+import { TILE_DEFAULT } from '@renderer/lib/explorerLayout'
 import { ConfirmDialog } from '@renderer/components/common/ConfirmDialog'
+import { en } from '@renderer/i18n/locales/en'
 import type { McpState } from '@shared/types/mcp'
 import { useThemeSource } from '@renderer/hooks/useThemeSource'
 import { SettingsDialog } from './SettingsDialog'
@@ -29,6 +32,9 @@ beforeEach(() => {
         success: true,
         data: { status: 'idle', currentVersion: '1.0.5' }
       })
+    }
+    if (channel === 'ftp:getRecentServers') {
+      return Promise.resolve({ success: true, data: [] })
     }
     return Promise.resolve({ success: true, data: undefined })
   })
@@ -467,5 +473,198 @@ describe('SettingsDialog Escape', () => {
     await expect(answer).resolves.toBe(false)
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+describe('SettingsDialog content sections', () => {
+  const savedServers = [
+    { id: 1, name: 'NAS', host: 'nas.local', port: 21, username: 'me', secure: false },
+    { id: 2, name: 'Backup', host: 'backup.local', port: 21, username: 'me', secure: false }
+  ]
+
+  function restoreSettings(): void {
+    useSettingsStore.setState({
+      viewMode: 'grid',
+      tileSize: TILE_DEFAULT,
+      showHidden: false,
+      confirmBeforeDelete: true,
+      language: 'system',
+      theme: 'system',
+      showSidebar: true,
+      showRail: true
+    })
+    useServerStore.setState({ servers: [] })
+  }
+
+  beforeEach(restoreSettings)
+  afterEach(restoreSettings)
+
+  it('sets the default view for new tabs from the general segment', async () => {
+    // covers: Test-886
+    const user = userEvent.setup()
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    const listButton = await screen.findByRole('button', { name: 'List' })
+    expect(listButton.getAttribute('aria-pressed')).toBe('false')
+    await user.click(listButton)
+
+    expect(useSettingsStore.getState().viewMode).toBe('list')
+  })
+
+  it('shows the two display toggles and turns one off through the store', async () => {
+    // covers: Test-887
+    const user = userEvent.setup()
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    const sidebarToggle = await screen.findByRole('checkbox', { name: 'Show the sidebar' })
+    const railToggle = screen.getByRole('checkbox', { name: 'Show the right panel' })
+    expect((sidebarToggle as HTMLInputElement).checked).toBe(true)
+    expect((railToggle as HTMLInputElement).checked).toBe(true)
+    await user.click(sidebarToggle)
+
+    expect(useSettingsStore.getState().showSidebar).toBe(false)
+    expect(useSettingsStore.getState().showRail).toBe(true)
+  })
+
+  it('shows the saved-server count and password protection, loading servers instead of claiming zero', async () => {
+    // covers: Test-888
+    let release: () => void = () => undefined
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockInvoke.mockImplementation((channel: string) => {
+      if (channel === 'ftp:getRecentServers') {
+        return pending.then(() => ({ success: true, data: savedServers }))
+      }
+      if (channel === 'ftp:getPasswordProtection') {
+        return Promise.resolve({ success: true, data: { level: 'basic' } })
+      }
+      if (channel === 'cache:getStats') {
+        return Promise.resolve({ success: true, data: { totalBytes: 0, totalCount: 0 } })
+      }
+      if (channel === 'update:getState') {
+        return Promise.resolve({ success: true, data: { status: 'idle', currentVersion: '1.0.5' } })
+      }
+      return Promise.resolve({ success: true, data: undefined })
+    })
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    const account = (await screen.findByRole('heading', { name: 'Account & security' })).closest(
+      'section'
+    ) as HTMLElement
+    // 로드가 끝나기 전에는 "0개"로 단정하지 않고 로드를 부른다(함정 C).
+    expect(invokeCalls(mockInvoke, 'ftp:getRecentServers')).toHaveLength(1)
+    expect(within(account).getAllByText('Loading…').length).toBeGreaterThan(0)
+    expect(within(account).queryByText('0 saved servers')).toBeNull()
+
+    await act(async () => {
+      release()
+    })
+
+    expect(await within(account).findByText('2 saved servers')).not.toBeNull()
+    expect(within(account).getByText('Saved password protection')).not.toBeNull()
+    expect(within(account).getByText(en['servers.passwordProtectionBasic'])).not.toBeNull()
+  })
+
+  it('shows the cache limit next to the usage', async () => {
+    // covers: Test-889
+    mockInvoke.mockImplementation((channel: string) => {
+      if (channel === 'cache:getStats') {
+        return Promise.resolve({ success: true, data: { totalBytes: 1024, totalCount: 1 } })
+      }
+      if (channel === 'update:getState') {
+        return Promise.resolve({ success: true, data: { status: 'idle', currentVersion: '1.0.5' } })
+      }
+      return Promise.resolve({ success: true, data: undefined })
+    })
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    const cache = (await screen.findByRole('heading', { name: 'Cache' })).closest(
+      'section'
+    ) as HTMLElement
+    expect(await within(cache).findByText('1 item (1 KB)')).not.toBeNull()
+    expect(within(cache).getByText('Kept up to 500 MB')).not.toBeNull()
+  })
+
+  it('shows platform and versions and copies the one-line diagnostics without any IPC', async () => {
+    // covers: Test-890
+    vi.stubGlobal('electron', {
+      process: { platform: 'win32', versions: { electron: '43.0.0', node: '22.0.0' } }
+    })
+    const user = userEvent.setup()
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    const about = (await screen.findByRole('heading', { name: 'About' })).closest(
+      'section'
+    ) as HTMLElement
+    expect(within(about).getByText('win32')).not.toBeNull()
+    expect(within(about).getByText('1.0.5')).not.toBeNull()
+    expect(within(about).getByText('43.0.0')).not.toBeNull()
+    expect(within(about).getByText('22.0.0')).not.toBeNull()
+
+    // 정보 섹션은 기존 채널 밖의 IPC를 하나도 쓰지 않는다(새 채널 0개).
+    const known = new Set([
+      'cache:getStats',
+      'update:getState',
+      'mcp:getState',
+      'ftp:getRecentServers',
+      'ftp:getPasswordProtection'
+    ])
+    expect(mockInvoke.mock.calls.every((call) => known.has(call[0]))).toBe(true)
+    const callsBefore = mockInvoke.mock.calls.length
+    await user.click(within(about).getByRole('button', { name: 'Copy diagnostics' }))
+
+    await waitFor(async () =>
+      expect(await navigator.clipboard.readText()).toBe(
+        'FTP Browser 1.0.5 · win32 · electron 43.0.0 · node 22.0.0 · locale en'
+      )
+    )
+    expect(mockInvoke.mock.calls.length).toBe(callsBefore)
+    expect(toast.success).toHaveBeenCalledWith('Diagnostics copied')
+  })
+
+  it('resets every setting after the confirm dialog and keeps them on cancel', async () => {
+    // covers: Test-891
+    useSettingsStore.setState({
+      viewMode: 'list',
+      tileSize: 224,
+      showHidden: true,
+      confirmBeforeDelete: false,
+      theme: 'dark',
+      showSidebar: false,
+      showRail: false
+    })
+    const user = userEvent.setup()
+    render(
+      <>
+        <SettingsDialog open={true} onClose={vi.fn()} />
+        <ConfirmDialog />
+      </>
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Reset all settings' }))
+    await screen.findByRole('alertdialog')
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(useSettingsStore.getState().viewMode).toBe('list')
+    expect(useSettingsStore.getState().theme).toBe('dark')
+    expect(useSettingsStore.getState().showSidebar).toBe(false)
+
+    await user.click(screen.getByRole('button', { name: 'Reset all settings' }))
+    const confirm = await screen.findByRole('alertdialog')
+    await user.click(within(confirm).getByRole('button', { name: 'Reset all settings' }))
+
+    expect(useSettingsStore.getState()).toMatchObject({
+      viewMode: 'grid',
+      tileSize: TILE_DEFAULT,
+      showHidden: false,
+      confirmBeforeDelete: true,
+      language: 'system',
+      theme: 'system',
+      showSidebar: true,
+      showRail: true
+    })
+    expect(toast.success).toHaveBeenCalledWith('Settings reset')
   })
 })

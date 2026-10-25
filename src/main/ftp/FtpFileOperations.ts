@@ -1,6 +1,7 @@
 import { close, open } from 'fs'
 import { stat, unlink } from 'fs/promises'
 import { promisify } from 'util'
+import type { EventEmitter } from 'events'
 import type { Client } from 'basic-ftp'
 import { FtpConnectionManager } from './FtpConnectionManager'
 import { fastUpload } from './fastTransfer'
@@ -148,7 +149,10 @@ async function downloadToFile(
 }
 
 export class FtpFileOperations {
-  constructor(private manager: FtpConnectionManager) {}
+  constructor(
+    /** 위임(레지스트리)이어도 단일 매니저처럼 굴러가야 한다(M3의 primary 경로). */
+    private manager: Pick<FtpConnectionManager, 'runOnMainClient'> & Pick<EventEmitter, 'emit'>
+  ) {}
 
   /**
    * `client`를 주면 그 클라이언트에서 직접 실행한다(전송 풀의 전용 연결). 메인 클라이언트의

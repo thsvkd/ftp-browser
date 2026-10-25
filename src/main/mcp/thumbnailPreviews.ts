@@ -1,6 +1,6 @@
 import { posix } from 'path'
 import { MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
-import type { FtpConnectionManager } from '../ftp/FtpConnectionManager'
+import type { FtpManagerHandle } from '../ftp/FtpSessionRegistry'
 import type { CacheManager } from '../thumbnail/CacheManager'
 import type { ThumbnailGenerator } from '../thumbnail/ThumbnailGenerator'
 import { ThumbnailQueue } from '../thumbnail/ThumbnailQueue'
@@ -21,7 +21,7 @@ const CONNECTION_CHANGED: PreviewOutcome = {
  * `MAX_IMAGE_SIZE_BYTES`를 넘는 파일은 큐가 결과 없이 건너뛰므로 여기서 바로 실패로 돌려준다.
  */
 export function createThumbnailPreviewer(
-  ftp: FtpConnectionManager,
+  ftp: FtpManagerHandle,
   generator: ThumbnailGenerator,
   cache: CacheManager
 ): (requests: PreviewRequest[]) => Promise<PreviewOutcome[]> {

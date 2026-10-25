@@ -143,23 +143,32 @@ export function setupExplorer(
     connectionStatus: opts.connected === false ? 'disconnected' : 'connected',
     host: HOST,
     port: PORT,
-    error: null
+    error: null,
+    // 세션 상태가 테스트마다 새지 않도록 비운다(게이트가 세션을 본다 — Test-915)
+    sessions: {},
+    primaryServer: null
   })
-  useTabsStore.setState({ tabs: [], activeId: '', recent: [] })
+  useTabsStore.setState({
+    tabs: [],
+    activeId: '',
+    recent: [],
+    panes: [{ id: 'pane1', tabIds: [], activeTabId: '' }]
+  })
   useListingStore.setState({ byKey: {} })
-  useShelfStore.setState({ items: [], railTab: 'shelf' })
+  useShelfStore.setState({ items: [], dockOpen: false })
   useSettingsStore.setState({
     viewMode: 'grid',
     tileSize: 160,
     showHidden: false,
-    confirmBeforeDelete: false
+    confirmBeforeDelete: false,
+    showRail: true
   })
   useThumbnailStore.setState({ thumbnails: {}, errors: {} })
   useLocalThumbnailStore.setState({ thumbnails: {}, errors: {} })
   useGalleryStore.setState({ remoteFolderPreviews: {}, localFolderPreviews: {} })
   useTransferStore.setState({ jobs: [], batchMeta: {}, pendingSends: [], conflictQueue: [] })
   useConfirmStore.setState({ request: null })
-  useDnd.setState({ items: null, over: null, thumbs: [] })
+  useDnd.setState({ items: null, server: null, over: null, thumbs: [], fromShelf: false })
   return h
 }
 

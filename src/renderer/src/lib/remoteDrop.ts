@@ -45,8 +45,14 @@ export function planRemoteMoves(items: RemoteFileDragItem[], targetPath: string)
 }
 
 /** One RNFR/RNTO. Resolves the failure reason, or null on success. */
-async function rename(from: string, to: string): Promise<string | null> {
-  const result = await window.api.invoke<IpcResult<void>>('ftp:rename', from, to)
+async function rename(from: string, to: string, server?: string): Promise<string | null> {
+  // A′1: 원격 이름 바꾸기는 그 항목의 세션 키를 보낸다(없으면 primary, M3·A′4).
+  const result = await window.api.invoke<IpcResult<void>>(
+    'ftp:rename',
+    from,
+    to,
+    ...(server ? [server] : [])
+  )
   return result.success ? null : result.error
 }
 
@@ -55,22 +61,24 @@ async function rename(from: string, to: string): Promise<string | null> {
  * some servers and fails on others (K4), so park the target under a hidden name, move, then
  * delete the parked file. If the move fails, the target goes back.
  */
-async function replaceRemote(move: RemoteMove): Promise<string | null> {
+async function replaceRemote(move: RemoteMove, server?: string): Promise<string | null> {
   const name = move.newPath.slice(move.newPath.lastIndexOf('/') + 1)
   const aside = joinRemotePath(
     remoteDirname(move.newPath),
     `.${name}.${Math.random().toString(36).slice(2, 10)}.old`
   )
-  const parked = await rename(move.newPath, aside)
+  const parked = await rename(move.newPath, aside, server)
   if (parked) return parked
-  const moved = await rename(move.oldPath, move.newPath)
+  const moved = await rename(move.oldPath, move.newPath, server)
   if (moved) {
-    const back = await rename(aside, move.newPath)
+    const back = await rename(aside, move.newPath, server)
     return back ? `${moved} (${aside}: ${back})` : moved
   }
-  const result = await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', [
-    { path: aside, isDirectory: false }
-  ])
+  const result = await window.api.invoke<IpcResult<void>>(
+    'ftp:deleteBatch',
+    [{ path: aside, isDirectory: false }],
+    ...(server ? [server] : [])
+  )
   return result.success ? null : result.error
 }
 
@@ -82,7 +90,9 @@ async function replaceRemote(move: RemoteMove): Promise<string | null> {
 export async function moveRemoteFiles(
   items: RemoteFileDragItem[],
   targetPath: string,
-  replace: ReadonlySet<string> = new Set()
+  replace: ReadonlySet<string> = new Set(),
+  /** 그 항목들의 세션 키(A′1·A′3). 없으면(투영 탭) primary로 간다(M3·A′4). */
+  server?: string
 ): Promise<boolean> {
   const moves = planRemoteMoves(items, targetPath)
   if (moves.length === 0) return true
@@ -91,8 +101,8 @@ export async function moveRemoteFiles(
   const errors: string[] = []
   for (const move of moves) {
     const error = replace.has(move.newPath)
-      ? await replaceRemote(move)
-      : await rename(move.oldPath, move.newPath)
+      ? await replaceRemote(move, server)
+      : await rename(move.oldPath, move.newPath, server)
     if (error === null) moved++
     else errors.push(`${move.newPath}: ${error}`)
   }
@@ -103,9 +113,9 @@ export async function moveRemoteFiles(
   }
   if (moved > 0) {
     // 옮긴 쪽과 받은 쪽 폴더의 목록을 다시 읽는다(읽은 적이 있는 것만).
-    const server = connectedServer(useFtpStore.getState()) ?? undefined
+    const key = server ?? connectedServer(useFtpStore.getState()) ?? undefined
     const dirs = new Set([targetPath, ...moves.map((m) => remoteDirname(m.oldPath))])
-    for (const dir of dirs) useListingStore.getState().invalidate('remote', server, dir)
+    for (const dir of dirs) useListingStore.getState().invalidate('remote', key, dir)
   }
   return errors.length === 0
 }

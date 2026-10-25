@@ -156,8 +156,9 @@ export const useServerStore = create<ServerStore>((set, get) => ({
       error: ''
     })
     const ftp = useFtpStore.getState()
-    // 연결된 채로 다른 서버를 고르면 먼저 끊는다.
-    if (ftp.connectionStatus === 'connected') await ftp.disconnect()
+    // 세션화(M8·함정 C): 다른 서버에 연결해도 기존 세션은 끊지 않는다. 같은 키의 재연결은
+    // main의 FtpSessionRegistry가 같은 매니저를 이어 쓰므로 중복 매니저도 생기지 않는다.
+    // 연결 시도 자체는 여전히 하나씩이다: connect 가드·connectAttempt 취소 규칙은 그대로다.
     if (attempt !== connectAttempt) return false
 
     // 시작 폴더를 따로 정하지 않았으면 이 서버에서 마지막으로 있던 폴더로 연다.

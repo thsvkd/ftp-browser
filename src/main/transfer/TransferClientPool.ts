@@ -1,4 +1,5 @@
 import { FTPError, type Client } from 'basic-ftp'
+import type { EventEmitter } from 'events'
 import { DEFAULT_MAX_TRANSFERS } from '@shared/types/ftp'
 import type { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 
@@ -44,10 +45,12 @@ const REFUSED_LOGIN_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'])
 const UNEXPECTED_CLOSE_RE =
   /closed connection unexpectedly|sent FIN packet unexpectedly|transmission error|^Timeout \(control socket\)/
 
+/** 이벤트(on/off)는 단일 매니저든 세션 레지스트리 위임이든 같으므로 EventEmitter로 받는다. */
 type PoolManager = Pick<
   FtpConnectionManager,
-  'createSecondaryClient' | 'runOnMainClient' | 'getMaxTransfers' | 'isConnected' | 'on' | 'off'
->
+  'createSecondaryClient' | 'runOnMainClient' | 'getMaxTransfers' | 'isConnected'
+> &
+  Pick<EventEmitter, 'on' | 'off'>
 
 /**
  * 보조 로그인이 서버에 닿지 못했는지 판단 (거부, 리셋, 시간 초과, 예기치 않은 종료). 메인 세션이 같은

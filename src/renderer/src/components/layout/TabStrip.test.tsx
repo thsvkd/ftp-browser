@@ -144,3 +144,94 @@ describe('TabStrip — spring while dragging', () => {
     expect(activeTab().loc.path).toBe('/photos/sub')
   })
 })
+
+describe('TabStrip — one strip per pane', () => {
+  it('shows only its own pane’s tabs and selects that pane’s own active tab', () => {
+    // covers: Test-920
+    h = setupExplorer()
+    useTabsStore.setState({
+      tabs: [],
+      activeId: '',
+      recent: [],
+      panes: [{ id: 'pane1', tabIds: [], activeTabId: '' }]
+    })
+    const s = useTabsStore.getState()
+    const workId = s.openTab(localLoc('C:\\work'))
+    const musicId = s.openTab(localLoc('C:\\music'), false)
+    const pane2Id = s.split('pane1')
+    const placeholder = useTabsStore.getState().panes[1].activeTabId
+    // split() 뒤에는 pane2가 포커스라 새 탭도 그 패널에 연다(M11).
+    const photosId = useTabsStore.getState().openTab(remoteLoc('/photos'))
+    expect(useTabsStore.getState().activeId).toBe(photosId)
+
+    render(
+      <>
+        <TabStrip paneId="pane1" />
+        <TabStrip paneId={pane2Id} />
+      </>
+    )
+    const strips = (): HTMLElement[] => screen.getAllByRole('tablist')
+    const ids = (list: HTMLElement): string[] =>
+      within(list)
+        .getAllByRole('tab')
+        .map((t) => t.dataset.tab as string)
+    const selected = (list: HTMLElement): string | undefined =>
+      within(list)
+        .getAllByRole('tab')
+        .find((t) => t.getAttribute('aria-selected') === 'true')?.dataset.tab
+
+    // 각 스트립은 자기 패널의 탭만 보여준다.
+    expect(ids(strips()[0])).toEqual([workId, musicId])
+    expect(ids(strips()[1])).toEqual([placeholder, photosId])
+    // 활성 탭 선택도 패널마다 다르다.
+    expect(selected(strips()[0])).toBe(workId)
+    expect(selected(strips()[1])).toBe(photosId)
+
+    // 한 패널의 활성 탭을 바꿔도 다른 패널의 선택은 그대로다.
+    act(() => useTabsStore.getState().activate(musicId))
+    expect(selected(strips()[0])).toBe(musicId)
+    expect(selected(strips()[1])).toBe(photosId)
+    act(() => useTabsStore.getState().activate(placeholder))
+    expect(selected(strips()[0])).toBe(musicId)
+    expect(selected(strips()[1])).toBe(placeholder)
+  })
+})
+
+describe('TabStrip — closing the split', () => {
+  it('closes the second pane from its strip control and keeps the remaining pane’s tabs', () => {
+    // covers: Test-937
+    h = setupExplorer()
+    useTabsStore.setState({
+      tabs: [],
+      activeId: '',
+      recent: [],
+      panes: [{ id: 'pane1', tabIds: [], activeTabId: '' }]
+    })
+    const workId = useTabsStore.getState().openTab(localLoc('C:\\work'))
+    const pane2Id = useTabsStore.getState().split('pane1')
+    const placeholder = useTabsStore.getState().panes[1].activeTabId
+    // split() 직후라 새 패널이 포커스다 — 새 탭도 그 패널에 연다(M11).
+    const musicId = useTabsStore.getState().openTab(localLoc('C:\\music'))
+
+    render(
+      <>
+        <TabStrip paneId="pane1" />
+        <TabStrip paneId={pane2Id} />
+      </>
+    )
+    const strips = screen.getAllByRole('tablist')
+    const close = screen.getAllByRole('button', { name: en['split.closePane'] })
+    // M21: 두 패널일 때 두 번째 패널의 스트립에 닫기控件이 하나만 뜬다.
+    expect(close).toHaveLength(1)
+    expect(strips[1].parentElement?.contains(close[0])).toBe(true)
+
+    fireEvent.click(close[0])
+    // 한 패널로 돌아오고 남은 패널의 탭은 그대로다(M12·Test-919의 제품 트리거).
+    const s = useTabsStore.getState()
+    expect(s.panes).toHaveLength(1)
+    expect(s.panes[0].id).toBe('pane1')
+    expect(s.tabs.map((t) => t.id)).toEqual([workId, placeholder, musicId])
+    expect(s.tabs.every((t) => t.paneId === 'pane1')).toBe(true)
+    expect(s.activeId).toBe(workId)
+  })
+})

@@ -97,7 +97,10 @@ export class PreviewCacheManager {
       'image/gif': '.gif',
       'image/bmp': '.bmp',
       'image/webp': '.webp',
-      'image/tiff': '.tif'
+      'image/tiff': '.tif',
+      'video/webm': '.webm',
+      'video/mp4': '.mp4',
+      'video/quicktime': '.mov'
     }
     return map[mime] || '.bin'
   }

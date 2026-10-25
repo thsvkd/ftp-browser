@@ -15,7 +15,13 @@ import { cn, formatBytes } from '@renderer/lib/utils'
 import { useShelfStore, type ShelfItem } from '@renderer/stores/useShelfStore'
 import { useActiveTab } from '@renderer/stores/useTabsStore'
 import { SourceBadge } from '@renderer/components/common/SourceBadge'
-import { useDnd, useDropTarget, type DropState } from '@renderer/components/explorer/dnd'
+import {
+  endDrag,
+  startDrag,
+  useDnd,
+  useDropTarget,
+  type DropState
+} from '@renderer/components/explorer/dnd'
 import { EntryThumb } from '@renderer/components/thumbnail/EntryThumb'
 
 const fileBytes = (sum: number, e: ExplorerEntry): number => sum + (e.type === 'file' ? e.size : 0)
@@ -58,6 +64,11 @@ function ItemRow({
   return (
     <li
       tabIndex={0}
+      // 선반 항목도 기존 startDrag로 끈다(F6). data-path는 고스트의 썸네일 조회 키다(함정 C).
+      data-path={entry.path}
+      draggable
+      onDragStart={(e) => startDrag(e, [entry], true)}
+      onDragEnd={endDrag}
       aria-label={t('shelf.itemLabel', { name: entry.name, source: sourceLabel(entry), size })}
       onKeyDown={(e) => {
         const li = e.currentTarget
@@ -146,7 +157,7 @@ function EmptyShelf({ drop }: { drop: DropState }): React.JSX.Element {
 }
 
 /**
- * 선반(레일 몸통). 담은 항목과, 활성 탭으로 내려놓는 버튼. 방향은 항목과 탭의 쪽이 정한다(D15).
+ * 선반 본체(하단 도크 카드의 몸통). 담은 항목과, 활성 탭으로 내려놓는 버튼. 방향은 항목과 탭의 쪽이 정한다(D15).
  * 선반 안에서 Enter, 창 어디서나 Ctrl+Enter(AppShell)로도 내려놓는다.
  */
 export function Shelf(): React.JSX.Element {

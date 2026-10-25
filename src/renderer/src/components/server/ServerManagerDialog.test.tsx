@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, waitFor, within } from '@testing-library/react'
+import { act, render, screen, cleanup, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { emptyDraft, toDraft } from '@renderer/lib/serverAddress'
@@ -303,5 +303,84 @@ describe('ServerManagerDialog — saved password', () => {
     expect(alert.textContent).toContain(MOVED_HINT)
     expect(alert.textContent).not.toContain('refused by main')
     expect(invokeCalls(mockInvoke, 'ftp:saveServer')).toHaveLength(1)
+  })
+})
+
+describe('ServerManagerDialog — activation on double-click', () => {
+  /** 아이디는 있고 저장된 비밀번호는 없는 서버. */
+  const BOB: FtpServer = {
+    ...NAS,
+    id: 2,
+    name: 'Bob',
+    host: 'bob.local',
+    username: 'bob',
+    hasPassword: false
+  }
+  const passwordField = (): HTMLInputElement =>
+    screen.getByLabelText('Password', { selector: 'input' }) as HTMLInputElement
+  /** ftp:connect까지 이르는 비동기 흐름(마이크로태스크·타이머)을 모두 비운다. */
+  const drain = async (): Promise<void> => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+  beforeEach(() => {
+    // 이 파일의 기본 목은 ftp:list를 답하지 않는다. 연결이 성공하면 main이 시작 폴더를 읽으러
+    // 가므로, 성공 케이스가 목록 응답 없이 크래시하지 않도록 답을 둔다.
+    const fallback = mockInvoke.getMockImplementation()!
+    mockInvoke.mockImplementation((channel: string, ...args: unknown[]) =>
+      channel === 'ftp:list'
+        ? Promise.resolve({ success: true, data: { path: args[0], entries: [] } })
+        : fallback(channel, ...args)
+    )
+  })
+
+  it('focuses the password inside the dialog instead of connecting a username-only server', async () => {
+    // covers: Test-855
+    useServerStore.setState({ servers: [BOB] })
+    const user = userEvent.setup()
+    // 함정 A: 문서 앞의 툴바 비밀번호 칸이 포커스를 가로채면 안 된다.
+    render(
+      <>
+        <input type="password" aria-label="toolbar password" />
+        <ServerManagerDialog initial={toDraft(BOB)} onClose={vi.fn()} />
+      </>
+    )
+
+    await user.dblClick(within(screen.getByRole('listbox')).getByText('Bob'))
+    await drain()
+
+    expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(0)
+    await waitFor(() => expect(document.activeElement).toBe(passwordField()))
+    expect(document.activeElement).not.toBe(screen.getByLabelText('toolbar password'))
+  })
+
+  it('closes the dialog only when the double-click starts a connect that succeeds', async () => {
+    // covers: Test-856
+    const user = userEvent.setup()
+    const closed = vi.fn()
+    const first = render(<ServerManagerDialog initial={toDraft(NAS)} onClose={closed} />)
+
+    await user.dblClick(within(screen.getByRole('listbox')).getByText('Home NAS'))
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    await waitFor(() => expect(closed).toHaveBeenCalledTimes(1))
+    first.unmount()
+
+    // 연결에 실패하면 닫지 않는다(Promise<boolean> 계약).
+    const fallback = mockInvoke.getMockImplementation()!
+    mockInvoke.mockImplementation((channel: string, ...args: unknown[]) =>
+      channel === 'ftp:connect'
+        ? Promise.resolve({ success: false, error: 'Authentication failed.' })
+        : fallback(channel, ...args)
+    )
+    mockInvoke.mockClear()
+    const keptOpen = vi.fn()
+    render(<ServerManagerDialog initial={toDraft(NAS)} onClose={keptOpen} />)
+
+    await user.dblClick(within(screen.getByRole('listbox')).getByText('Home NAS'))
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    await drain()
+    expect(keptOpen).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog')).toBeTruthy()
   })
 })

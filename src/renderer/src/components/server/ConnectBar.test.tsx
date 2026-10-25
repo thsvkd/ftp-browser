@@ -278,6 +278,8 @@ describe('ServerManagerDialog', () => {
 
 const ALICE: FtpServer = { ...NAS, username: 'alice', hasPassword: true }
 const PHONE: FtpServer = { ...NAS, id: 2, name: 'Phone', host: 'phone.local' }
+/** 아이디는 있고 저장된 비밀번호는 없는 서버(D2의 포커스 대상). */
+const BOB: FtpServer = { ...NAS, id: 3, name: 'Bob', host: 'bob.local', username: 'bob' }
 const connectPayload = (): unknown => invokeCalls(mockInvoke, 'ftp:connect')[0]?.[0]
 const savedButton = (): Promise<HTMLElement> =>
   screen.findByRole('button', { name: /Home NAS/, expanded: false })
@@ -748,5 +750,63 @@ describe('reconnecting — start folder', () => {
 
     await waitFor(() => expect(listedPaths()[0]).toBe('/'))
     expect(invokeCalls(mockInvoke, 'ftp:getRecentPaths')).toHaveLength(1)
+  })
+})
+
+describe('activation — click selects, double-click connects', () => {
+  const passwordField = (): HTMLInputElement =>
+    screen.getByLabelText(/^(Saved password|Password)$/, { selector: 'input' }) as HTMLInputElement
+  const savedList = (): HTMLElement => screen.getByRole('listbox', { name: 'Saved servers' })
+  /** ftp:connect까지 이르는 비동기 흐름(마이크로태스크·타이머)을 모두 비운다. */
+  const drain = async (): Promise<void> => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+
+  it('fills the address and focuses the password instead of connecting a server with no saved password', async () => {
+    // covers: Test-852
+    mockIpc([BOB])
+    const user = userEvent.setup()
+    renderToolbar()
+
+    await user.click(await screen.findByRole('button', { name: /Bob/, expanded: false }))
+    await user.dblClick(within(savedList()).getByText('Bob'))
+    await drain()
+
+    expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(0)
+    expect(addressInput().value).toBe('bob@bob.local:21')
+    await waitFor(() => expect(document.activeElement).toBe(passwordField()))
+  })
+
+  it('connects an anonymous saved server picked from the dropdown', async () => {
+    // covers: Test-853
+    mockIpc([NAS])
+    const user = userEvent.setup()
+    renderToolbar()
+
+    await user.click(await screen.findByRole('button', { name: /Home NAS/, expanded: false }))
+    await user.dblClick(within(savedList()).getByText('Home NAS'))
+
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    expect(connectPayload()).toMatchObject({ host: 'nas.local', user: 'anonymous' })
+  })
+
+  it('routes a recent chip through the same activation for both kinds of server', async () => {
+    // covers: Test-854
+    mockIpc([NAS, BOB])
+    const user = userEvent.setup()
+    renderToolbar(true)
+
+    // 아이디만 있는 서버: 주소는 채워지고 비밀번호 칸에 포커스가 간다(연결하지 않는다).
+    await user.dblClick(await screen.findByTitle(/^bob@bob\.local:21 ·/))
+    await drain()
+    expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(0)
+    expect(addressInput().value).toBe('bob@bob.local:21')
+    await waitFor(() => expect(document.activeElement).toBe(passwordField()))
+
+    // 익명 서버: 바로 연결한다.
+    await user.dblClick(screen.getByTitle(/^nas\.local:21 ·/))
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
   })
 })

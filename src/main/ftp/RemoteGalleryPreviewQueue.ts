@@ -1,5 +1,5 @@
 import { Client } from 'basic-ftp'
-import { FtpConnectionManager } from './FtpConnectionManager'
+import type { FtpManagerHandle } from './FtpSessionRegistry'
 import { RemoteFolderPreviewCache } from './RemoteFolderPreviewCache'
 import { normalizeRemotePath } from '../utils/remotePath'
 import { isImageFile } from '@shared/constants'
@@ -34,7 +34,7 @@ export class RemoteGalleryPreviewQueue {
   private inFlight = new Map<string, Promise<RemoteFolderPreview | null>>()
 
   constructor(
-    private ftpManager: FtpConnectionManager,
+    private ftpManager: FtpManagerHandle,
     private cache: RemoteFolderPreviewCache
   ) {}
 

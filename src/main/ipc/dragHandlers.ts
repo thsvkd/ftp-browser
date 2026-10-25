@@ -21,7 +21,9 @@ function cannotSave(file: DragFile): IpcResult<void> {
   return { success: false, error: `Cannot save "${file.fileName}" as a local file.` }
 }
 
-export function registerDragHandlers(manager: FtpConnectionManager): void {
+export function registerDragHandlers(
+  manager: Pick<FtpConnectionManager, 'isConnected' | 'createSecondaryClient'>
+): void {
   const tempDir = join(app.getPath('temp'), 'ftp-browser-drag')
 
   // 이전 임시 파일 정리

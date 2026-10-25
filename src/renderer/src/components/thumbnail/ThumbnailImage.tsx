@@ -10,7 +10,10 @@ import type { FtpFileEntry } from '@shared/types/ftp'
 const SLOW_MS = 3000
 
 interface ThumbnailImageProps {
-  entry: Pick<FtpFileEntry, 'name' | 'size' | 'modifiedAt'>
+  entry: Pick<FtpFileEntry, 'name' | 'size' | 'modifiedAt'> & {
+    /** 항목의 세션 키(A′1·A′3). 없으면 primary로 보낸다(M3). */
+    server?: string
+  }
   /** 항목의 원격 경로(D30) */
   remotePath: string
   /** 그리드 밖(선반·정보·라이트박스): 스토어에 없으면 마운트 때 단건 요청(priority 1)을 보낸다. */
@@ -79,8 +82,14 @@ export function ThumbnailImage({
   request = false,
   showSlow = true
 }: ThumbnailImageProps): React.JSX.Element {
-  const host = useFtpStore((s) => s.host)
-  const port = useFtpStore((s) => s.port)
+  // A′5: 캐시 키는 항목(entry)의 세션 host·port로 만든다(FileGrid와 같은 기준, primary 투영 아님).
+  // 세션 기록이 없으면 예전처럼 primary를 쓴다.
+  const host = useFtpStore((s) =>
+    entry.server ? (s.sessions[entry.server]?.host ?? s.host) : s.host
+  )
+  const port = useFtpStore((s) =>
+    entry.server ? (s.sessions[entry.server]?.port ?? s.port) : s.port
+  )
   const cacheKey = generateCacheKeyRenderer(host, port, remotePath, entry.size, entry.modifiedAt)
 
   const thumbnailData = useThumbnailStore((s) => s.thumbnails[cacheKey])
@@ -88,13 +97,18 @@ export function ThumbnailImage({
   const clearError = useThumbnailStore((s) => s.clearError)
 
   const send = (priority: number): void => {
-    window.api.invoke('thumbnail:request', {
-      remotePath,
-      fileName: entry.name,
-      fileSize: entry.size,
-      modifiedAt: entry.modifiedAt,
-      priority
-    })
+    // A′1: 항목(entry)의 세션 키를 보낸다.
+    window.api.invoke(
+      'thumbnail:request',
+      {
+        remotePath,
+        fileName: entry.name,
+        fileSize: entry.size,
+        modifiedAt: entry.modifiedAt,
+        priority
+      },
+      ...(entry.server ? [entry.server] : [])
+    )
   }
 
   // 그리드 안은 그리드가 보이는 행 단위 배치로 요청한다. 그리드 밖은 여기서 한 건만(D30).
@@ -102,14 +116,18 @@ export function ThumbnailImage({
     if (!request) return
     const { thumbnails, errors } = useThumbnailStore.getState()
     if (thumbnails[cacheKey] || errors[cacheKey]) return
-    window.api.invoke('thumbnail:request', {
-      remotePath,
-      fileName: entry.name,
-      fileSize: entry.size,
-      modifiedAt: entry.modifiedAt,
-      priority: 1
-    })
-  }, [request, cacheKey, remotePath, entry.name, entry.size, entry.modifiedAt])
+    window.api.invoke(
+      'thumbnail:request',
+      {
+        remotePath,
+        fileName: entry.name,
+        fileSize: entry.size,
+        modifiedAt: entry.modifiedAt,
+        priority: 1
+      },
+      ...(entry.server ? [entry.server] : [])
+    )
+  }, [request, cacheKey, remotePath, entry.name, entry.size, entry.modifiedAt, entry.server])
 
   // ↻ 재시도는 직접 요청한다.
   const retry = (): void => {
