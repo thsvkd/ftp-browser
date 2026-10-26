@@ -9,6 +9,7 @@ import { Explorer } from '@renderer/components/explorer/Explorer'
 import { useDnd } from '@renderer/components/explorer/dnd'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
 import { TransferPanel } from '@renderer/components/activity/TransferPanel'
+import { ShelfDock } from '@renderer/components/shelf/ShelfDock'
 import { SettingsDialog } from '@renderer/components/settings/SettingsDialog'
 import { useThumbnailListener } from '@renderer/hooks/useThumbnailListener'
 import { useLocalThumbnailListener } from '@renderer/hooks/useLocalThumbnailListener'
@@ -17,7 +18,6 @@ import { useElementWidth } from '@renderer/hooks/useElementWidth'
 import { useAgentSync } from '@renderer/hooks/useAgentSync'
 import { useConnectionStatus } from '@renderer/hooks/useConnectionStatus'
 import { dropShelf, reloadActiveTab } from '@renderer/lib/sendItems'
-import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { useLayoutStore } from '@renderer/stores/useLayoutStore'
 import { currentPlatform } from '@renderer/lib/platform'
@@ -33,11 +33,7 @@ const REGIONS = [
   ['[data-region="tabs"] [role="tab"][aria-selected="true"]'],
   ['[data-region="content"] [data-pane="left"] [id^="explorer-list-"]'],
   ['[data-region="content"] [data-pane="right"] [id^="explorer-list-"]'],
-  [
-    '[data-region="shelf"] li[tabindex]',
-    '[data-region="shelf"] [role="tab"][aria-selected="true"]',
-    '[data-region="shelf"] button'
-  ]
+  ['[data-region="shelf-dock"] li[tabindex]', '[data-region="shelf-dock"] button']
 ]
 
 const isTyping = (target: EventTarget | null): boolean =>
@@ -114,11 +110,9 @@ export function AppShell(): React.JSX.Element {
         run = () => useTabsStore.getState().toggleSplit()
       else if (ctrl && e.key === 'Enter') run = () => tab && void dropShelf(tab.loc)
       else if (e.key === 'F5' || (ctrl && key === 'r')) run = reloadActiveTab
+      // 선반이 레일을 떠난 뒤(F8): 이 단축키와 툴바 details 버튼은 오른쪽 정보 패널을 켜고 끈다.
       else if (e.altKey && e.shiftKey && key === 'p')
-        run = () => {
-          const shelf = useShelfStore.getState()
-          shelf.setRailTab(shelf.railTab === 'info' ? 'shelf' : 'info')
-        }
+        run = () => useLayoutStore.getState().toggle('right')
       else if (ctrl && (key === 'l' || key === 'f') && tab) {
         // 목록이 가진 동작(경로 입력, 찾기 칸)을 목록에 넘긴다.
         const list = document.getElementById(`explorer-list-${tab.id}`)
@@ -162,6 +156,7 @@ export function AppShell(): React.JSX.Element {
       <StatusBar />
       <TransferPanel />
       <ConflictSheet />
+      <ShelfDock />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )

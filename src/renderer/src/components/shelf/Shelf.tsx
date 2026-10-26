@@ -16,7 +16,13 @@ import { cn, formatBytes } from '@renderer/lib/utils'
 import { useShelfStore, type ShelfItem } from '@renderer/stores/useShelfStore'
 import { useActiveTab } from '@renderer/stores/useTabsStore'
 import { SourceBadge } from '@renderer/components/common/SourceBadge'
-import { useDnd, useDropTarget, type DropState } from '@renderer/components/explorer/dnd'
+import {
+  endDrag,
+  startDrag,
+  useDnd,
+  useDropTarget,
+  type DropState
+} from '@renderer/components/explorer/dnd'
 import { EntryThumb } from '@renderer/components/thumbnail/EntryThumb'
 
 const fileBytes = (sum: number, e: ExplorerEntry): number => sum + (e.type === 'file' ? e.size : 0)
@@ -59,6 +65,11 @@ function ItemRow({
   return (
     <li
       tabIndex={0}
+      // 선반 항목도 기존 startDrag로 끈다(F6). data-path는 고스트의 썸네일 조회에 쓰인다(함정 C).
+      data-path={entry.path}
+      draggable
+      onDragStart={(e) => startDrag(e, [entry], true)}
+      onDragEnd={endDrag}
       aria-label={t('shelf.itemLabel', { name: entry.name, source: sourceLabel(entry), size })}
       onKeyDown={(e) => {
         const li = e.currentTarget

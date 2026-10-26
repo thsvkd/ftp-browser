@@ -54,7 +54,7 @@ beforeEach(() => {
   paths = {}
   api.getPathForFile.mockImplementation((f: File) => paths[f.name] ?? '')
   vi.stubGlobal('api', api)
-  useShelfStore.setState({ items: [], railTab: 'info' })
+  useShelfStore.setState({ items: [], dockOpen: false })
 })
 
 afterEach(() => {
@@ -81,7 +81,7 @@ describe('shelveOsFiles', () => {
       fromLocalEntry(entry('C:\\in\\docs', 'directory'))
     ])
     expect(useShelfStore.getState().items[1].entry.type).toBe('directory')
-    expect(useShelfStore.getState().railTab).toBe('shelf')
+    expect(useShelfStore.getState().dockOpen).toBe(true)
 
     invoke.mockClear()
     expect(await shelveOsFiles([])).toBe(0)
@@ -93,7 +93,7 @@ describe('shelveOsFiles', () => {
     // covers: Test-875
     paths = { 'a.jpg': 'C:\\in\\a.jpg', 'b.jpg': 'C:\\in\\b.jpg', 'c.jpg': 'C:\\in\\c.jpg' }
     useShelfStore.getState().add([fromLocalEntry(entry('C:\\in\\a.jpg'))])
-    useShelfStore.setState({ railTab: 'info' })
+    useShelfStore.setState({ dockOpen: false })
 
     // 전부 중복: 이미 있는 것 + 같은 드롭 안의 같은 경로 둘
     invoke.mockResolvedValue(ok([entry('C:\\in\\a.jpg'), entry('C:\\in\\a.jpg')]))
@@ -101,7 +101,7 @@ describe('shelveOsFiles', () => {
     expect(shelfNames()).toEqual(['a.jpg'])
     expect(toast).toHaveBeenCalledTimes(1)
     expect(toast).toHaveBeenCalledWith(en['toast.alreadyOnShelf'])
-    expect(useShelfStore.getState().railTab).toBe('info')
+    expect(useShelfStore.getState().dockOpen).toBe(false)
 
     // 일부만 중복: 새것만 담고 토스트는 없다. 같은 드롭 안의 같은 경로 둘은 하나만
     vi.mocked(toast).mockClear()
@@ -111,7 +111,7 @@ describe('shelveOsFiles', () => {
     expect(await shelveOsFiles([file('a.jpg'), file('b.jpg'), file('b.jpg')])).toBe(1)
     expect(shelfNames()).toEqual(['a.jpg', 'b.jpg'])
     expect(toast).not.toHaveBeenCalled()
-    expect(useShelfStore.getState().railTab).toBe('shelf')
+    expect(useShelfStore.getState().dockOpen).toBe(true)
   })
 
   it('reports what could not be read without throwing', async () => {
@@ -123,7 +123,7 @@ describe('shelveOsFiles', () => {
     expect(await shelveOsFiles([file('a.jpg'), file('virtual.txt')])).toBe(1)
     expect(invokeCalls(invoke, 'local:stat')).toEqual([[['C:\\in\\a.jpg']]])
     invoke.mockClear()
-    useShelfStore.setState({ items: [], railTab: 'info' })
+    useShelfStore.setState({ items: [], dockOpen: false })
     vi.mocked(toast).mockClear()
     expect(await shelveOsFiles([file('v1'), file('v2')])).toBe(0)
     expect(invoke).not.toHaveBeenCalled()
@@ -142,7 +142,7 @@ describe('shelveOsFiles', () => {
     expect(toast.error).not.toHaveBeenCalled()
 
     // (c) success:false는 아무것도 담지 않고 toast.error
-    useShelfStore.setState({ items: [], railTab: 'info' })
+    useShelfStore.setState({ items: [], dockOpen: false })
     vi.mocked(toast).mockClear()
     invoke.mockResolvedValue({ success: false, error: 'boom' })
     expect(await shelveOsFiles([file('a.jpg'), file('b.jpg')])).toBe(0)

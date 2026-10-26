@@ -8,7 +8,7 @@ import { flushSync } from 'react-dom'
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import { t } from '@renderer/i18n'
-import type { ExplorerEntry, Loc } from '@renderer/lib/explorerEntry'
+import { locKey, type ExplorerEntry, type Loc } from '@renderer/lib/explorerEntry'
 import { planSend } from '@renderer/lib/sendPlan'
 import { useConnectedKeys } from '@renderer/lib/connections'
 import { dropOsFiles, planVerb, sendItems, shelveOsFiles } from '@renderer/lib/sendItems'
@@ -20,18 +20,25 @@ interface DndState {
   over: string | null
   /** 고스트에 겹쳐 보일 화면 속 썸네일(최대 3) */
   thumbs: string[]
+  /** 선반에서 끌어 온 드래그인지(F7): 전송 시작에 성공하면 그 항목을 선반에서 뺀다 */
+  fromShelf: boolean
 }
 
-export const useDnd = create<DndState>(() => ({ items: null, over: null, thumbs: [] }))
+export const useDnd = create<DndState>(() => ({
+  items: null,
+  over: null,
+  thumbs: [],
+  fromShelf: false
+}))
 
 /** `DragGhost`가 그리는 요소의 id. `setDragImage`가 이 요소를 찍는다. */
 export const GHOST_ID = 'explorer-drag-ghost'
 
 export function endDrag(): void {
-  useDnd.setState({ items: null, over: null, thumbs: [] })
+  useDnd.setState({ items: null, over: null, thumbs: [], fromShelf: false })
 }
 
-export function startDrag(e: DragEvent, items: ExplorerEntry[]): void {
+export function startDrag(e: DragEvent, items: ExplorerEntry[], fromShelf = false): void {
   // 같은 폴더를 연 다른 패널이 아니라 끌기 시작한 패널에서 썸네일을 찾는다(split-view P9).
   const root =
     (e.currentTarget instanceof Element && e.currentTarget.closest('[data-tab-pane]')) || document
@@ -42,7 +49,7 @@ export function startDrag(e: DragEvent, items: ExplorerEntry[]): void {
         root.querySelector(`[data-path="${CSS.escape(it.path)}"] img`)?.getAttribute('src') ?? ''
     )
   // 고스트가 지금 그려져 있어야 setDragImage가 찍을 수 있다.
-  flushSync(() => useDnd.setState({ items, over: null, thumbs }))
+  flushSync(() => useDnd.setState({ items, over: null, thumbs, fromShelf }))
   // 스프링으로 탭이 바뀌면 끌기 시작한 타일이 언마운트되어 dragend가 React에 오지 않는다.
   // 끌기가 끝난 뒤(놓기·취소) 첫 마우스 이벤트에서 상태를 지운다(함정 6).
   const reset = (): void => {
@@ -123,7 +130,10 @@ export function useDropTarget(
       },
       onDrop: (e) => {
         if (!dest) return
-        const dragged = useDnd.getState().items
+        const state = useDnd.getState()
+        const dragged = state.items
+        // endDrag()가 fromShelf를 지우기 전에 붙잡아 둔다(F7).
+        const fromShelf = state.fromShelf
         if (!dragged && !hasFiles(e)) return
         e.preventDefault()
         e.stopPropagation()
@@ -134,7 +144,10 @@ export function useDropTarget(
         } else if (dest === 'shelf') {
           if (!useShelfStore.getState().add(dragged)) toast(t('toast.alreadyOnShelf'))
         } else {
-          void sendItems(dragged, dest)
+          // 선반에서 끌어 온 전송이 시작에 성공하면 그 항목만 선반에서 뺀다(자기 자신에 놓으면 남는다).
+          void sendItems(dragged, dest).then((ok) => {
+            if (ok && fromShelf) useShelfStore.getState().remove(dragged.map(locKey))
+          })
         }
       }
     }

@@ -110,7 +110,8 @@ describe('Shelf — dropping into the active tab', () => {
     // covers: Test-807
     setup()
     render(<AppShell />)
-    await screen.findByRole('region', { name: en['shelf.title'] })
+    // 선반 카드는 담은 뒤에야 뜬다(F3): 빈 폴더엔 listbox가 없어 경로 막대로 셸을 기다린다.
+    await screen.findByRole('navigation', { name: en['path.label'] })
 
     useShelfStore.getState().add([remoteItem('a.jpg')])
     fireEvent.click(
@@ -418,13 +419,17 @@ describe('Shelf — OS drops', () => {
     cleanup()
     h.restore()
 
-    // 문서 가드를 켠 채로: 대상이 전파를 멈춰 가드가 'none'으로 덮지 않는다(함정 6)
+    // 문서 가드를 켠 채로: 대상이 전파를 멈춰 가드가 'none'으로 덮지 않는다(함정 6).
+    // 선반의 놓기 대상은 이제 도크의 담기 띠다: OS 드래그가 앱 안에 들어오면 띠가 뜬다.
     h = setupExplorer({ local: { 'C:\\dl': [] } })
     useTabsStore.getState().openTab(localLoc('C:\\dl'))
     const uninstall = installDropGuard(document)
     try {
       render(<AppShell />)
-      await screen.findByRole('region', { name: en['shelf.title'] })
+      // 빈 폴더엔 listbox가 없어 경로 막대로 셸을 기다린다.
+      await screen.findByRole('navigation', { name: en['path.label'] })
+      fireEvent.dragEnter(document.body, { dataTransfer: dt(['Files']) })
+      await screen.findByText(en['shelf.dockHint'])
       const over = dt(['Files'])
       fireEvent.dragOver(target(), { dataTransfer: over })
       expect(over.dropEffect).toBe('copy')

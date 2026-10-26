@@ -32,7 +32,7 @@ import {
 import { sourceLabel } from '@renderer/lib/sendItems'
 import { cn } from '@renderer/lib/utils'
 import { useListingStore } from '@renderer/stores/useListingStore'
-import { useShelfStore } from '@renderer/stores/useShelfStore'
+import { useLayoutStore } from '@renderer/stores/useLayoutStore'
 import { useTabsStore, type Tab } from '@renderer/stores/useTabsStore'
 import { SourceBadge } from '@renderer/components/common/SourceBadge'
 import { useDropTarget } from './dnd'
@@ -305,7 +305,7 @@ export function PathBar({
 }: PathBarProps): React.JSX.Element {
   const t = useT()
   const locale = useLocale()
-  const railTab = useShelfStore((s) => s.railTab)
+  const infoOpen = useLayoutStore((s) => !s.right.collapsed)
   const barRef = useRef<HTMLDivElement>(null)
   const measureRef = useRef<HTMLDivElement>(null)
   // ⋯ 버튼. 접힌 필터 팝오버의 기준 요소다.
@@ -436,8 +436,7 @@ export function PathBar({
     key: t(SORT_LABEL[sort.key]),
     direction: t(sort.dir === 'asc' ? 'sort.ascending' : 'sort.descending')
   })
-  const toggleInfo = (): void =>
-    useShelfStore.getState().setRailTab(railTab === 'info' ? 'shelf' : 'info')
+  const toggleInfo = (): void => useLayoutStore.getState().toggle('right')
 
   // ⋯ 메뉴: 접힌 도구만, 막대에 놓이는 순서로(X8)
   const moreItems = (): MenuItem[] =>
@@ -497,7 +496,7 @@ export function PathBar({
           return [
             {
               label: t('explorer.details'),
-              icon: railTab === 'info' ? Check : undefined,
+              icon: infoOpen ? Check : undefined,
               shortcut: 'Alt+Shift+P',
               onSelect: toggleInfo
             }
@@ -726,8 +725,8 @@ export function PathBar({
         )}
         {shown('info') && (
           <button
-            className={cn(iconBtn, railTab === 'info' && 'bg-[var(--acw)] text-[var(--ac)]')}
-            aria-pressed={railTab === 'info'}
+            className={cn(iconBtn, infoOpen && 'bg-[var(--acw)] text-[var(--ac)]')}
+            aria-pressed={infoOpen}
             onClick={toggleInfo}
             title={t('explorer.detailsTooltip')}
             aria-label={t('explorer.details')}

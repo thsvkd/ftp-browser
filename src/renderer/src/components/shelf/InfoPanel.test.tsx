@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { en } from '@renderer/i18n/locales/en'
 import { fromLocalEntry } from '@renderer/lib/explorerEntry'
+import { useLayoutStore } from '@renderer/stores/useLayoutStore'
 import { useListingStore } from '@renderer/stores/useListingStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
@@ -41,6 +42,7 @@ const select = (...names: string[]): void =>
   act(() =>
     useTabsStore.getState().patchTab(activeTab().id, { sel: names.map((n) => `${DIR}\\${n}`) })
   )
+const layout = (): ReturnType<typeof useLayoutStore.getState> => useLayoutStore.getState()
 
 describe('InfoPanel', () => {
   it('summarizes the folder, one item or several items', () => {
@@ -77,16 +79,25 @@ describe('InfoPanel', () => {
     ])
   })
 
-  it('switches the rail between shelf and info with Alt+Shift+P', async () => {
-    // covers: Test-835
+  it('toggles the info rail with the PathBar details button and Alt+Shift+P', async () => {
+    // covers: Test-1255
+    useLayoutStore.setState({ right: { width: 288, collapsed: false }, priority: null })
     render(<AppShell />)
     await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
-    expect(useShelfStore.getState().railTab).toBe('shelf')
-    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'P', altKey: true, shiftKey: true })
-    expect(useShelfStore.getState().railTab).toBe('info')
+    expect(layout().right.collapsed).toBe(false)
     expect(screen.getByRole('region', { name: en['rail.info'] })).toBeTruthy()
+
+    // 선반이 레일을 떠난 뒤에도 두 제어는 오른쪽 정보 패널을 켜고 끈다(F8).
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'P', altKey: true, shiftKey: true })
+    expect(layout().right.collapsed).toBe(true)
+    expect(screen.queryByRole('region', { name: en['rail.info'] })).toBeNull()
+
     fireEvent.keyDown(document.body, { key: 'P', altKey: true, shiftKey: true })
-    expect(useShelfStore.getState().railTab).toBe('shelf')
-    expect(screen.getByRole('region', { name: en['shelf.title'] })).toBeTruthy()
+    expect(layout().right.collapsed).toBe(false)
+    expect(screen.getByRole('region', { name: en['rail.info'] })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: en['explorer.details'] }))
+    expect(layout().right.collapsed).toBe(true)
+    expect(screen.queryByRole('region', { name: en['rail.info'] })).toBeNull()
   })
 })

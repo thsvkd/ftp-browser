@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
 import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
-import { useShelfStore } from '@renderer/stores/useShelfStore'
+import { useLayoutStore } from '@renderer/stores/useLayoutStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { fromFtpEntry } from '@renderer/lib/explorerEntry'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
@@ -154,8 +154,9 @@ describe('PathBar — find, type filter, sort and view', () => {
       'true'
     )
 
+    const railWasOpen = !useLayoutStore.getState().right.collapsed
     fireEvent.click(screen.getByRole('button', { name: en['explorer.details'] }))
-    expect(useShelfStore.getState().railTab).toBe('info')
+    expect(useLayoutStore.getState().right.collapsed).toBe(railWasOpen)
 
     // A narrow bar shows only the magnifier: Ctrl+F opens the field and focuses it as well.
     cleanup()
@@ -285,8 +286,9 @@ describe('PathBar — one line with a ⋯ menu', () => {
     fireEvent.click(moreButton(), { detail: 1 })
     expect(moreItem(en['view.list']).querySelector('.lucide-check')).toBeTruthy()
     expect(moreItem(en['view.grid']).querySelector('.lucide-check')).toBeNull()
+    const railWasOpen = !useLayoutStore.getState().right.collapsed
     fireEvent.click(moreItem(en['explorer.details']))
-    expect(useShelfStore.getState().railTab).toBe('info')
+    expect(useLayoutStore.getState().right.collapsed).toBe(railWasOpen)
 
     pickMore(en['explorer.newFolder'])
     await flush()

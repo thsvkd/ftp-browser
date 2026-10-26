@@ -33,6 +33,7 @@ import { connKey, MAIN_VIEWER } from '@shared/connKey'
 import type { FtpServer } from '@shared/types/ftp'
 import type { TransferJob } from '@shared/types/transfer'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
+import { AppShell } from '@renderer/components/layout/AppShell'
 import { useDnd } from './dnd'
 import {
   activeTab,
@@ -668,6 +669,35 @@ describe('Explorer — drag and drop', () => {
     const folder = await screen.findByRole('alertdialog')
     expect(within(folder).queryByRole('radio', { name: 'Overwrite' })).toBeNull()
     expect(within(folder).getByRole('radio', { name: 'Skip' })).toBeTruthy()
+  })
+
+  it('shows the transfer pill and the shelf drop strip together, and shelves on the strip', async () => {
+    // covers: Test-1256
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    useTabsStore.getState().openTab(remoteLoc(DIR))
+    render(<AppShell />)
+    await screen.findByRole('listbox')
+
+    // 다른 폴더에서 끌던 중: 탐색기의 기존 전송 안내 알약과 새 담기 띠가 함께 뜬다(함정 B).
+    act(() =>
+      useDnd.setState({
+        items: [fromFtpEntry(ftp('x.jpg'), '/elsewhere', server())],
+        over: null,
+        thumbs: [],
+        fromShelf: false
+      })
+    )
+    fireEvent.dragOver(listbox(), { dataTransfer: dt() })
+    expect(screen.getByText('Move 1 to photos')).toBeTruthy()
+    const bar = document.querySelector<HTMLElement>('[data-region="shelf-dock"][data-shelf-target]')
+    expect(bar).toBeTruthy()
+    expect(screen.getByText(en['shelf.dockHint'])).toBeTruthy()
+
+    const over = dt()
+    fireEvent.dragOver(bar as HTMLElement, { dataTransfer: over })
+    expect(over.dropEffect).toBe('copy')
+    fireEvent.drop(bar as HTMLElement, { dataTransfer: dt() })
+    expect(useShelfStore.getState().items.map((i) => i.entry.name)).toEqual(['x.jpg'])
   })
 })
 

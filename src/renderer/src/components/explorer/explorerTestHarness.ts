@@ -178,7 +178,7 @@ export function setupExplorer(
   useTabsStore.setState({ tabs: [], activeId: '', recent: [], split: null })
   useFileCategoryStore.setState({ overrides: EMPTY_OVERRIDES })
   useListingStore.setState({ byKey: {} })
-  useShelfStore.setState({ items: [], railTab: 'shelf' })
+  useShelfStore.setState({ items: [], dockOpen: false })
   useSettingsStore.setState({
     viewMode: 'grid',
     tileSize: 160,
