@@ -279,8 +279,8 @@ export const it = {
   'sidebar.servers': 'Server',
   'sidebar.recent': 'Recenti',
   'sidebar.serverConnecting': 'Connessione in corso…',
-  'sidebar.serverLost': 'Disconnesso · clicca per riconnetterti',
-  'sidebar.serverOffline': 'Non connesso · clicca per connetterti',
+  'sidebar.serverLost': 'Disconnesso · doppio clic o Invio per riconnetterti',
+  'sidebar.serverOffline': 'Non connesso · doppio clic o Invio per connetterti',
   'sidebar.disconnect': 'Disconnetti {{name}}',
 
   'place.desktop': 'Desktop',

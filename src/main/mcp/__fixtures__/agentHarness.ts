@@ -142,6 +142,12 @@ export class FakeRemote extends EventEmitter {
     if (!this.nodes.delete(p)) throw ftpError(`550 ${p}`)
     this.emit('mutation', { kind: 'delete', remotePath: p })
   })
+  deleteEmptyDirectory = vi.fn(async (dir: string) => {
+    if ([...this.nodes.keys()].some((p) => p.startsWith(`${dir}/`)))
+      throw ftpError(`550 ${dir}: Directory not empty`)
+    if (!this.nodes.delete(dir)) throw ftpError(`550 ${dir}`)
+    this.emit('mutation', { kind: 'delete', remotePath: dir })
+  })
   deleteDirectory = vi.fn(async (dir: string, onProgress?: DeleteProgressCallback) => {
     const doomed = [...this.nodes.keys()].filter((p) => p === dir || p.startsWith(`${dir}/`))
     doomed.sort((a, b) => b.length - a.length)

@@ -52,6 +52,20 @@ describe('useTabsStore navigation', () => {
     expect(after.filter((l) => l.path === 'C:\\n58')).toHaveLength(1)
   })
 
+  it('opens a new tab in the settings default view, not in the active tab view', () => {
+    // covers: Test-1284
+    useSettingsStore.setState({ viewMode: 'grid' })
+    useTabsStore.getState().patchTab(active().id, { view: 'list' })
+    useTabsStore.getState().openTab(remote('/a'))
+    expect(active().view).toBe('grid')
+
+    useSettingsStore.setState({ viewMode: 'list' })
+    useTabsStore.getState().patchTab(active().id, { view: 'grid' })
+    useTabsStore.getState().openTab(remote('/b'))
+    expect(active().view).toBe('list')
+    useSettingsStore.setState({ viewMode: 'grid' })
+  })
+
   it('goBack to the parent and goUp select the folder left; goForward clears the selection', () => {
     // covers: Test-782
     const s = useTabsStore.getState()
@@ -84,7 +98,7 @@ describe('useTabsStore navigation', () => {
     expect(active().loc).toEqual(remote('/'))
   })
 
-  it('openTab inherits the view; closeTab keeps the last tab and picks the neighbor; cycleTab wraps', () => {
+  it('openTab uses the settings view; closeTab keeps the last tab and picks the neighbor; cycleTab wraps', () => {
     // covers: Test-783
     useSettingsStore.setState({ viewMode: 'list' })
     useTabsStore.setState({ tabs: [], activeId: '' })
@@ -93,7 +107,7 @@ describe('useTabsStore navigation', () => {
     expect(active().view).toBe('list')
     s.patchTab(first, { view: 'grid' })
     const second = s.openTab(remote('/'))
-    expect(active()).toMatchObject({ id: second, view: 'grid' })
+    expect(active()).toMatchObject({ id: second, view: 'list' })
     const third = s.openTab(remote('/x'), false)
     expect(useTabsStore.getState().activeId).toBe(second)
 

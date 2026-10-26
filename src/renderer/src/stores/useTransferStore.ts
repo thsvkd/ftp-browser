@@ -44,6 +44,29 @@ export type SendVerb = 'copy' | 'move'
 /** 한 보내기를 함께 보내는 부분들이 나눠 쓰는 참조. 값을 복사하면 토글이 갈린다(함정 C). */
 export interface VerbRef {
   verb: SendVerb
+  /**
+   * 아직 충돌 시트의 답이 끝나지 않은 부분 수(F3). 0보다 크면 어느 부분도 원본을 지우지 않는다. 시트가
+   * 뜨기 전(대상 확인 중)도 센다: 곧 뜰 시트의 답이 verb를 바꿀 수 있다.
+   */
+  open?: number
+  /** `open`이 0이 되면 부를 것들 */
+  idle?: Array<() => void>
+}
+
+/** 한 부분이 verb를 정하기 시작한다(F3). 반드시 `releaseVerb`와 짝을 이룬다. */
+export function holdVerb(ref: VerbRef): void {
+  ref.open = (ref.open ?? 0) + 1
+}
+
+/** 한 부분이 verb를 다 정했다. 마지막이면 기다리던 것들을 깨운다(F3). */
+export function releaseVerb(ref: VerbRef): void {
+  ref.open = (ref.open ?? 1) - 1
+  if (ref.open === 0) for (const wake of ref.idle?.splice(0) ?? []) wake()
+}
+
+/** 한 보내기의 모든 부분이 verb를 다 정하면 풀린다(F3). */
+export function verbSettled(ref: VerbRef): Promise<void> {
+  return ref.open ? new Promise((resolve) => (ref.idle ??= []).push(resolve)) : Promise.resolve()
 }
 
 /** 충돌 시트의 답. `decisions`는 그대로, `verb`는 이 보내기 전체에 적용된다(V3·V8). */
@@ -146,12 +169,18 @@ let sendSeq = 0
 const partialToasted = new Set<string>()
 const conflictAnswers = new Map<string, (answer: ConflictAnswer | null) => void>()
 
-/** 이동으로 보낸 배치의 원본 삭제 등록(V5·V9). 배치가 성립하면 `applyUpdate`가 한 번만 지운다. */
+/**
+ * 토글을 쓰는 보내기의 배치 등록(V5·V9). verb와 무관하게 등록하고, 배치가 끝나고 모든 시트가 닫히면
+ * 그때의 `ref.verb`로 판정한다(F3). 이동이 성립하면 한 번만 지운다.
+ */
 interface MoveCleanup {
   ids: string[]
   side: 'local' | 'remote'
   sources: string[]
   skipped: string[]
+  ref: VerbRef
+  /** 작업이 목록에 한 번이라도 보였는가. 보였던 배치가 모두 사라지면 등록을 버린다(F14). */
+  seen?: boolean
 }
 
 const moveCleanups: MoveCleanup[] = []
@@ -168,22 +197,53 @@ function refreshDownloadedDirs(): void {
 }
 
 /**
- * 등록된 이동 배치의 원본을 지운다(V5): 그 배치의 작업이 전부 `completed`이고 `skipped`가 없을 때만
- * 삭제하고, 성공·실패와 무관하게 등록을 빼 두 번 지우지 않는다(V9). 건너뛴 항목의 원본까지 재귀
- * 삭제하면 데이터 유실이라(함정 A) 어느 조건도 생략할 수 없다. 삭제한 원본 폴더는 목록에서 무효화
- * 해야 사라진 게 보인다(함정 E). 실패하면 토스트만 하고 다시 시도하지 않는다(V9·V10).
+ * 등록된 배치를 판정한다(V5·F4): 작업이 모두 끝났고 시트가 모두 닫혔을 때 등록을 빼고(두 번 지우지 않는다,
+ * V9), verb가 이동이고 전부 `completed`이고 `skipped`가 없을 때만 원본을 지운다. 실패가 섞이면 재시도를
+ * 기다려 등록을 남기고, 취소가 섞이거나 작업이 목록에서 모두 사라지면 지우지 않고 등록만 버린다(F14). 지우는 것은 옮긴 파일뿐이고, 원본 폴더는 재귀 삭제하지 않고 그 파일들이
+ * 비운 폴더만 "비었을 때만"으로 깊은 것부터 보낸다(F2). 삭제한 원본의 폴더는 목록에서 무효화해야
+ * 사라진 게 보인다(함정 E). 실패하면 토스트만 하고 다시 시도하지 않는다(V9·V10).
  */
-async function runMoveCleanup(jobs: readonly TransferJob[]): Promise<void> {
+async function runMoveCleanup(
+  jobs: readonly TransferJob[],
+  left: readonly TransferJob[] = jobs
+): Promise<void> {
   for (const move of [...moveCleanups]) {
+    // 겹친 실행이 이미 처리한 등록은 건너뛴다(F4). 확인과 제거 사이에 await가 없어야 한다.
+    const at = moveCleanups.indexOf(move)
+    if (at < 0) continue
     const found = jobs.filter((j) => move.ids.includes(j.id))
-    if (found.length === 0 || found.some((j) => j.status !== 'completed')) continue
-    moveCleanups.splice(moveCleanups.indexOf(move), 1)
-    if (move.skipped.length > 0) continue
-    // 작업은 파일마다 하나씩 생긴다: 그 경로의 작업이 없으면 원본은 폴더다(재귀 삭제가 필요하다).
-    const targets = move.sources.map((path) => ({
-      path,
-      isDirectory: !found.some((j) => (move.side === 'local' ? j.localPath : j.remotePath) === path)
-    }))
+    if (found.length) move.seen = true
+    // 한 번 보였던 배치의 작업이 목록에서 모두 사라졌다(완료 목록 지우기): 지우지 않고 등록만 버린다(F14).
+    const gone = move.seen === true && !left.some((j) => move.ids.includes(j.id))
+    if (!gone) {
+      if (move.ref.open || found.length === 0 || found.some(isLive)) continue
+      // 실패한 작업은 같은 id로 다시 시도될 수 있어 등록을 남긴다. 취소가 섞이면 버린다(F14).
+      const failed = found.some((j) => j.status === 'failed')
+      if (failed && !found.some((j) => j.status === 'cancelled')) continue
+    }
+    moveCleanups.splice(at, 1)
+    if (gone || move.ref.verb !== 'move' || move.skipped.length > 0) continue
+    if (found.some((j) => j.status !== 'completed')) continue
+    const sep = move.side === 'local' ? /[\\/]/ : /\//
+    const files = found.map((j) => (move.side === 'local' ? j.localPath : j.remotePath))
+    // 폴더 원본 안의 파일이면 그 파일의 폴더부터 원본 폴더까지가 비었을 수 있다.
+    const dirs = new Set<string>()
+    for (const file of files) {
+      const root = move.sources.find((s) => file.startsWith(s) && sep.test(file[s.length] ?? ''))
+      if (!root) continue
+      for (
+        let d = parentPath(move.side, file);
+        d && d.length >= root.length;
+        d = parentPath(move.side, d)
+      )
+        dirs.add(d)
+    }
+    const targets = [
+      ...files.map((path) => ({ path, isDirectory: false })),
+      ...[...dirs]
+        .sort((a, b) => b.length - a.length)
+        .map((path) => ({ path, isDirectory: true, onlyIfEmpty: true }))
+    ]
     // 원격 원본 삭제는 그 작업을 처리한 연결(`job.server`)로 보낸다.
     const server = found[0].server
     const r =
@@ -191,10 +251,10 @@ async function runMoveCleanup(jobs: readonly TransferJob[]): Promise<void> {
         ? await window.api.invoke<IpcResult<void>>('local:deleteBatch', targets)
         : await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', server, targets)
     if (r.success) {
-      const dirs = new Set(
-        move.sources.map((s) => parentPath(move.side, s)).filter((d): d is string => d !== null)
+      const shown = new Set(
+        targets.map((x) => parentPath(move.side, x.path)).filter((d): d is string => d !== null)
       )
-      for (const dir of dirs)
+      for (const dir of shown)
         useListingStore
           .getState()
           .invalidate(move.side, move.side === 'remote' ? server : undefined, dir)
@@ -298,10 +358,11 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
       batchMeta = { ...batchMeta, [key]: fallbackBatchMeta(list) }
     }
     for (const id of removedIds) delete rates[id]
-    // 성립한 이동 배치는 여기서 한 번만 원본을 지운다(V5·V9). 지우기 전에 본 `jobs`(삭제 전 상태)로 판정한다.
-    void runMoveCleanup(jobs)
     const removed = new Set(removedIds)
     const next = removed.size ? jobs.filter((job) => !removed.has(job.id)) : jobs
+    // 성립한 이동 배치는 여기서 한 번만 원본을 지운다(V5·V9). 지우기 전에 본 `jobs`(삭제 전 상태)로 판정하고,
+    // 목록에서 모두 사라졌는지는 지운 뒤의 `next`로 본다(F14).
+    void runMoveCleanup(jobs, next)
 
     // 패널(P2): 새로 살아난 배치가 새 보내기다. 막아 둔 배치는 작업이 처음 보일 때(상태와 상관없이)
     // 잊고, 그때 살아 있어도 열지 않는다. 답을 기다리는 보내기가 있으면 메타 없는 배치는 붙잡아 둔다.
@@ -342,9 +403,11 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
       pendingSends: [...s.pendingSends, { id, label: meta.label }],
       panel: withRow(s.panel, row)
     }))
+    // 토글을 쓰지 않는 보내기(서버 간 복사)는 혼자 쓰는 참조로 시트의 기본값만 정한다.
+    const ref: VerbRef = verbRef ?? { verb: 'copy' }
+    holdVerb(ref)
     try {
       let req = request
-      let verb: SendVerb = verbRef?.verb ?? 'copy'
       for (;;) {
         let result: IpcResult<TransferSendResult> | undefined
         set((s) => ({ panelSending: s.panelSending + 1 }))
@@ -387,15 +450,19 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
         const data = result.data
         if (data.conflicts.length === 0) {
           if (data.skipped.length) toast(t('toast.sendSkipped', { count: data.skipped.length }))
-          // 이동이면 완료 후 원본 삭제를 등록한다(V5). 성립 여부(전체 완료·건너뜀 없음)는
-          // applyUpdate가 판정한다(함정 A). 등록은 enqueue 성공 시에만 한다.
-          if (verb === 'move' && data.ids.length)
+          // 토글을 쓰는 보내기는 verb와 무관하게 등록하고, 판정 때 `ref.verb`를 읽는다(V5·F3). 성립
+          // 여부(verb·전체 완료·건너뜀 없음)는 runMoveCleanup이 판정한다(함정 A). 등록은 enqueue 성공
+          // 시에만 하고, 갱신이 답보다 먼저 왔을 수 있어 모든 부분이 정해지면 한 번 판정한다(F4).
+          if (verbRef && data.ids.length) {
             moveCleanups.push({
               ids: data.ids,
               side: request.direction === 'upload' ? 'local' : 'remote',
               sources: request.sources,
-              skipped: data.skipped.map((s) => s.path)
+              skipped: data.skipped.map((s) => s.path),
+              ref: verbRef
             })
+            void verbSettled(verbRef).then(() => runMoveCleanup(get().jobs))
+          }
           return data
         }
         // 결정을 모아 같은 요청을 다시 보낸다. 그사이 새로 생긴 충돌은 main이 다시 돌려준다.
@@ -403,13 +470,13 @@ export const useTransferStore = create<TransferStore>((set, get) => ({
         const servers = req.sourceServer
           ? { server: conn, sourceServer: req.sourceServer }
           : { server: conn }
-        const answer = await get().askConflicts(req.direction, data.conflicts, servers, verb)
+        const answer = await get().askConflicts(req.direction, data.conflicts, servers, ref.verb)
         if (!answer) return null
-        verb = answer.verb
-        if (verbRef) verbRef.verb = answer.verb // 한 보내기의 모든 부분이 같은 값을 쓴다(V3·함정 C)
+        ref.verb = answer.verb // 한 보내기의 모든 부분이 같은 값을 쓴다(V3·함정 C)
         req = { ...req, decisions: { ...req.decisions, ...answer.decisions } }
       }
     } finally {
+      releaseVerb(ref)
       // 배치 없이 끝난 보내기(실패·충돌 시트 취소·모두 건너뜀)의 준비 행은 버린다.
       set((s) => ({
         pendingSends: s.pendingSends.filter((p) => p.id !== id),

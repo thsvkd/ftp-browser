@@ -82,6 +82,10 @@ export function Lightbox({
   const shelfKeys = useShelfStore((s) => s.items.map((i) => locKey(i.entry)).join('\n'))
   const shelved = new Set(shelfKeys.split('\n'))
   const preview = usePreview(entry)
+  // 영상 디코딩 실패(코덱 미지원 등): 같은 항목에서만 유효하다.
+  const [badVideo, setBadVideo] = useState<{ path: string; reason: string } | null>(null)
+  const decodeError = badVideo && badVideo.path === entry?.path ? badVideo.reason : null
+  const reason = preview?.error || decodeError
   useEscapeKey(onClose)
   useEffect(() => ref.current?.focus(), [])
   useEffect(() => {
@@ -160,23 +164,30 @@ export function Lightbox({
         </button>
       </div>
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-16">
-        {preview?.url && video ? (
+        {preview?.url && video && !decodeError ? (
           <video
             key={entry.path}
             src={preview.url}
+            onError={(e) => {
+              const err = e.currentTarget.error
+              setBadVideo({
+                path: entry.path,
+                reason: err?.message || (err ? `MediaError ${err.code}` : 'MediaError')
+              })
+            }}
             controls
             autoPlay
             muted
             className="fade max-h-full max-w-full drop-shadow-2xl"
           />
-        ) : preview?.url ? (
+        ) : preview?.url && !video ? (
           <img
             key={entry.path}
             src={preview.url}
             alt={entry.name}
             className="fade h-full w-full object-contain drop-shadow-2xl"
           />
-        ) : entry.isImage && !preview ? (
+        ) : (entry.isImage || video) && !preview ? (
           <div className="h-[60%] w-[60%] animate-pulse rounded-lg bg-white/5" />
         ) : (
           <div className="flex w-[360px] flex-col items-center gap-4 rounded-2xl bg-white/5 p-8 text-center">
@@ -184,7 +195,7 @@ export function Lightbox({
               <EntryThumb entry={entry} glyph="h-16 w-16" request />
             </div>
             <p className="text-[13px] text-white/60">
-              {preview?.error ? t('preview.failed', { reason: preview.error }) : t('preview.none')}
+              {reason ? t('preview.failed', { reason }) : t('preview.none')}
             </p>
           </div>
         )}

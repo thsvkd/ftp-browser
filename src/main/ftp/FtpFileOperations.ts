@@ -217,6 +217,12 @@ export class FtpFileOperations {
     this.manager.emit('mutation', { kind: 'delete', remotePath })
   }
 
+  /** 빈 폴더만 지운다(RMD 하나). 비어 있으면 서버가 거부하고 아무것도 지우지 않는다. */
+  async deleteEmptyDirectory(remotePath: string): Promise<void> {
+    await this.manager.runOnMainClient((client) => client.removeEmptyDir(remotePath))
+    this.manager.emit('mutation', { kind: 'delete', remotePath })
+  }
+
   async deleteDirectory(remotePath: string, onProgress?: DeleteProgressCallback): Promise<void> {
     try {
       await this.manager.runOnMainClient((client) =>

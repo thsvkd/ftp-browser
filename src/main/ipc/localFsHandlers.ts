@@ -1,5 +1,5 @@
 import { ipcMain, dialog, app, BrowserWindow } from 'electron'
-import { stat, mkdir, access, readFile } from 'fs/promises'
+import { stat, mkdir, access, readFile, rmdir } from 'fs/promises'
 import { basename, join, dirname, extname, resolve, sep } from 'path'
 import { LocalFileSystem } from '../local/LocalFileSystem'
 import { OperationManager } from '../operation/OperationManager'
@@ -59,6 +59,24 @@ interface CopyWorkItem {
   src: string
   dest: string
   size: number
+  /** 폴더 원본에서 나온 파일이면 그 원본 폴더(`resolve`로 정규화: 파일 경로의 상위와 글자가 같다) */
+  root?: string
+}
+
+/** 빈 폴더만 지운다. 비어 있지 않거나 없거나 지울 수 없으면 그대로 두고 실패로 보지 않는다(F1·F2·F16). */
+async function removeIfEmpty(dir: string): Promise<void> {
+  await rmdir(dir).catch(() => undefined)
+}
+
+/** 옮긴 파일의 상위 폴더 가운데 비게 된 것만 원본 폴더까지, 깊은 것부터 지운다(F1). 던지지 않는다. */
+async function removeEmptiedDirs(moved: readonly CopyWorkItem[]): Promise<void> {
+  const dirs = new Set<string>()
+  for (const { src, root } of moved) {
+    if (!root) continue
+    for (let d = dirname(src); d.length >= root.length && d !== dirname(d); d = dirname(d))
+      dirs.add(d)
+  }
+  for (const dir of [...dirs].sort((a, b) => b.length - a.length)) await removeIfEmpty(dir)
 }
 
 /** 복사 대상 이름(D32). Windows는 `\`·`:`도 막고, 그 밖은 `/`·`.`·`..`·빈 이름만 막는다. */
@@ -224,30 +242,36 @@ export function registerLocalFsHandlers(
       _event,
       sourcePaths: string[],
       destDir: string,
-      names?: string[]
+      names?: string[],
+      move?: boolean
     ): Promise<IpcResult<void>> => {
       // Flatten sources (recursing into directories) into a file work list so
       // byte-based progress is uniform regardless of folder nesting.
       let work: CopyWorkItem[]
+      let emptyDirs: Array<{ src: string; dest: string }>
       try {
         // 충돌 시트의 "둘 다 두기"가 준 대상 이름(D32). 폴더 밖으로 나가는 이름은 받지 않는다.
         const unsafe = names?.find((n) => !isSafeCopyName(n, process.platform))
         if (unsafe !== undefined) throw new Error(`Invalid name: ${unsafe}`)
         work = []
+        // 이동에서 빈 폴더 원본은 파일이 없어 작업 목록에 오르지 않으므로 따로 옮긴다(F17).
+        emptyDirs = []
         for (const [i, src] of sourcePaths.entries()) {
           const st = await stat(src)
           const name = names?.[i] ?? basename(src)
           if (st.isDirectory()) {
             const inner = await localFs.collectFiles(src)
+            const root = resolve(src)
             for (const f of inner) {
-              work.push({ src: f.abs, dest: join(destDir, name, f.rel), size: f.size })
+              work.push({ src: f.abs, dest: join(destDir, name, f.rel), size: f.size, root })
             }
+            if (move && inner.length === 0) emptyDirs.push({ src, dest: join(destDir, name) })
           } else {
             work.push({ src, dest: join(destDir, name), size: st.size })
           }
         }
         // 자기 위에 복사하면 쓰기 스트림이 원본을 먼저 비운다.
-        const self = work.find((w) => samePath(w.src, w.dest))
+        const self = [...work, ...emptyDirs].find((w) => samePath(w.src, w.dest))
         if (self) throw new Error(`Source and destination are the same file: ${self.src}`)
       } catch (err) {
         return ipcError(err)
@@ -261,6 +285,8 @@ export function registerLocalFsHandlers(
       const job = operationManager.create('copy', items, 'bytes', totalBytes)
 
       let copiedBytes = 0
+      // 이동이면 파일 하나를 복사한 직후 그 원본을 지운다. 취소·실패해도 아직 복사하지 않은 원본은 남는다(F1).
+      const moved: CopyWorkItem[] = []
       try {
         for (const item of work) {
           if (operationManager.isCancelled(job.id)) {
@@ -277,6 +303,14 @@ export function registerLocalFsHandlers(
             },
             () => operationManager.isCancelled(job.id)
           )
+          if (move) {
+            await localFs.delete(item.src, false)
+            moved.push(item)
+          }
+        }
+        for (const dir of emptyDirs) {
+          await mkdir(dir.dest, { recursive: true })
+          await removeIfEmpty(dir.src)
         }
         operationManager.complete(job.id)
         return { success: true, data: undefined }
@@ -287,6 +321,8 @@ export function registerLocalFsHandlers(
         }
         operationManager.fail(job.id, err instanceof Error ? err.message : String(err))
         return ipcError(err)
+      } finally {
+        await removeEmptiedDirs(moved)
       }
     }
   )
@@ -308,7 +344,8 @@ export function registerLocalFsHandlers(
           }
           const target = targets[i]
           operationManager.progress(job.id, i, basename(target.path))
-          await localFs.delete(target.path, target.isDirectory)
+          if (target.onlyIfEmpty) await removeIfEmpty(target.path)
+          else await localFs.delete(target.path, target.isDirectory)
           operationManager.progress(job.id, i + 1, basename(target.path))
         }
         operationManager.complete(job.id)

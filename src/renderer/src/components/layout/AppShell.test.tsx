@@ -174,6 +174,19 @@ describe('AppShell — regions', () => {
     key(true)
     expect(document.activeElement).toBe(dockRow)
   })
+
+  it('reaches the collapsed shelf pill with F6', async () => {
+    // covers: Test-1290
+    render(<AppShell />)
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
+    act(() => {
+      useShelfStore.getState().add([fromLocalEntry(local(HOME, 's.txt'))])
+      useShelfStore.getState().setDockOpen(false)
+    })
+    expect(document.activeElement).toBe(screen.getByRole('listbox'))
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'F6' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /1 item/ }))
+  })
 })
 
 const layout = (): ReturnType<typeof useLayoutStore.getState> => useLayoutStore.getState()

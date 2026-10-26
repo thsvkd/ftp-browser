@@ -26,9 +26,20 @@ function useOsDrag(): boolean {
       depth += 1
       setOsDrag(true)
     }
-    const leave = (): void => {
+    const leave = (e: DragEvent): void => {
       depth = Math.max(0, depth - 1)
-      if (!depth) setOsDrag(false)
+      // 진입했던 요소가 끄는 도중 사라지면 짝이 되는 dragleave가 오지 않아 깊이가 걸린다.
+      // relatedTarget이 없고 포인터가 창 밖이면 나간 것이니 세지 않고 끝낸다. 창 안에서도
+      // relatedTarget이 비어 올 수 있어 좌표로 가린다(F20).
+      const outside =
+        e.clientX <= 0 ||
+        e.clientY <= 0 ||
+        e.clientX >= window.innerWidth ||
+        e.clientY >= window.innerHeight
+      if (!depth || (!e.relatedTarget && outside)) {
+        depth = 0
+        setOsDrag(false)
+      }
     }
     const end = (): void => {
       depth = 0
@@ -81,6 +92,7 @@ function ShelfRemoteCard({ open }: { open: boolean }): React.JSX.Element {
         role="region"
         aria-label={t('shelf.title')}
         aria-hidden={!open}
+        inert={!open}
         {...(open ? { 'data-region': 'shelf-dock' } : {})}
         className={cn(
           'absolute bottom-12 left-1/2 flex h-[420px] w-[320px] -translate-x-1/2 flex-col overflow-hidden rounded-2xl border border-[var(--bd)] bg-[var(--sb)] shadow-xl',

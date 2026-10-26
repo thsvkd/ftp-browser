@@ -41,7 +41,9 @@ export function ConnectBar(): React.JSX.Element {
       ? s.connections[activeServer]
       : undefined
   )
-  const isConnected = active !== undefined
+  // F5: 저장 비밀번호가 없는 서버를 활성화하면 연결된 탭에서도 입력 모드(주소·비밀번호)를 보인다.
+  const entering = useServerStore((s) => s.entering)
+  const isConnected = active !== undefined && !entering
   const activeSaved = useServerStore((s) =>
     activeServer ? savedServerOf(s.servers, activeServer) : undefined
   )
@@ -74,6 +76,13 @@ export function ConnectBar(): React.JSX.Element {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [connecting, cancel])
+
+  // 입력 모드는 활성 탭이 바뀌거나 그 탭의 연결 상태가 바뀌면(연결 성공 포함) 끝난다.
+  const tabId = tab?.id
+  const tabConnected = active !== undefined
+  useEffect(() => {
+    useServerStore.setState({ entering: false })
+  }, [tabId, tabConnected])
 
   // 드롭다운 바깥을 누르면 닫는다.
   useEffect(() => {
@@ -211,7 +220,21 @@ export function ConnectBar(): React.JSX.Element {
     // 비밀번호 칸을 그리는 기준은 서버 활성화 판정(D6)과 같은 식이다.
     const showPassword = hasUser(draft.username)
     return (
-      <div ref={barRef} className="relative flex min-w-0 items-center gap-2">
+      <div
+        ref={barRef}
+        // F18: 입력 모드는 포커스가 툴바 밖으로 나가면 끝난다. 여기서 연 관리자 대화상자로 가는 것과
+        // 창 전환(비밀번호 관리자에서 복사해 오는 동안, `document.hasFocus()`가 false)은 뺀다.
+        onBlur={(e) => {
+          if (
+            entering &&
+            !manager &&
+            document.hasFocus() &&
+            !barRef.current?.contains(e.relatedTarget)
+          )
+            useServerStore.setState({ entering: false })
+        }}
+        className="relative flex min-w-0 items-center gap-2"
+      >
         <div
           className={cn(
             'flex h-8 w-[560px] min-w-0 items-stretch rounded-md border bg-[var(--sf)] transition-shadow focus-within:border-[var(--ac)] focus-within:ring-2 focus-within:ring-[var(--acw)]',
@@ -228,7 +251,11 @@ export function ConnectBar(): React.JSX.Element {
               enter: () => {
                 if (!connecting && draft.host.trim()) void connect()
               },
-              esc: () => (connecting ? cancel() : setPopover(false))
+              esc: () => {
+                if (connecting) return cancel()
+                setPopover(false)
+                useServerStore.setState({ entering: false })
+              }
             })(e)
           }}
         >

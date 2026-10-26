@@ -265,8 +265,8 @@ export const ja = {
   'sidebar.servers': 'サーバー',
   'sidebar.recent': '最近の場所',
   'sidebar.serverConnecting': '接続中…',
-  'sidebar.serverLost': '切断されました · クリックして再接続',
-  'sidebar.serverOffline': '未接続 · クリックして接続',
+  'sidebar.serverLost': '切断されました · ダブルクリックまたは Enter で再接続',
+  'sidebar.serverOffline': '未接続 · ダブルクリックまたは Enter で接続',
   'sidebar.disconnect': '{{name}} から切断',
 
   'place.desktop': 'デスクトップ',

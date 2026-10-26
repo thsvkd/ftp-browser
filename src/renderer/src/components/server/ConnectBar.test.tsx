@@ -806,6 +806,88 @@ describe('activation — click selects, double-click connects', () => {
     await waitFor(() => expect(document.activeElement).toBe(passwordField()))
   })
 
+  it('shows and focuses the password field for a server picked from the dropdown of a connected tab', async () => {
+    // covers: Test-1277
+    mockIpc([NAS, BOB])
+    const user = userEvent.setup()
+    renderToolbar()
+    await screen.findByRole('button', { name: /Home NAS/, expanded: false })
+    act(() => {
+      useFtpStore.setState({
+        connections: {
+          'anonymous@nas.local:21': {
+            status: 'connected',
+            host: 'nas.local',
+            port: 21,
+            user: 'anonymous',
+            error: null
+          }
+        }
+      })
+      useTabsStore
+        .getState()
+        .openTab({ side: 'remote', path: '/', server: 'anonymous@nas.local:21' })
+    })
+
+    await user.click(await screen.findByTitle('Switch server'))
+    await user.dblClick(within(savedList()).getByText('Bob'))
+    await drain()
+
+    expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(0)
+    await waitFor(() => expect(document.activeElement).toBe(passwordField()))
+    expect(addressInput().value).toBe('bob@bob.local:21')
+  })
+
+  it('returns to the connected bar when focus leaves the toolbar in input mode', async () => {
+    // covers: Test-1306
+    mockIpc([NAS, BOB])
+    const user = userEvent.setup()
+    renderToolbar()
+    const outside = document.createElement('button')
+    document.body.append(outside)
+    await screen.findByRole('button', { name: /Home NAS/, expanded: false })
+    act(() => {
+      useFtpStore.setState({
+        connections: {
+          'anonymous@nas.local:21': {
+            status: 'connected',
+            host: 'nas.local',
+            port: 21,
+            user: 'anonymous',
+            error: null
+          }
+        }
+      })
+      useTabsStore
+        .getState()
+        .openTab({ side: 'remote', path: '/', server: 'anonymous@nas.local:21' })
+    })
+    await user.click(await screen.findByTitle('Switch server'))
+    await user.dblClick(within(savedList()).getByText('Bob'))
+    await drain()
+    await waitFor(() => expect(document.activeElement).toBe(passwordField()))
+
+    // 툴바 안에서 옮기는 포커스는 입력 모드를 끝내지 않는다
+    await user.click(addressInput())
+    expect(addressInput()).toBeTruthy()
+
+    // 창 전환(비밀번호 관리자에서 복사해 오기)으로 잃는 포커스도 입력 모드를 끝내지 않는다
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    act(() => addressInput().blur())
+    expect(addressInput()).toBeTruthy()
+
+    // jsdom은 blur 도중 hasFocus()가 false다. 창 안의 이동은 Chromium처럼 true로 둔다.
+    hasFocus.mockReturnValue(true)
+    act(() => addressInput().focus())
+    act(() => outside.focus())
+    hasFocus.mockRestore()
+    await waitFor(() =>
+      expect(screen.queryByRole('textbox', { name: 'Server address' })).toBeNull()
+    )
+    expect(screen.getByTitle('Switch server')).toBeTruthy()
+    outside.remove()
+  })
+
   it('connects an anonymous saved server picked from the dropdown', async () => {
     // covers: Test-1220
     mockIpc([NAS])

@@ -27,7 +27,7 @@ interface SettingsStore {
   setLanguage: (language: LanguageSetting) => void
   setTheme: (theme: ThemeSetting) => void
   setConflictChoice: (choice: ConflictDecision | null) => void
-  /** 모든 설정을 초기값으로(S7): 타일·기본 보기·숨김·삭제 확인·언어·테마. 열려 있는 탭의 보기는 그대로다(함정 D). */
+  /** 모든 설정을 초기값으로(S7): 타일·기본 보기·숨김·삭제 확인·언어·테마·기억한 충돌 결정. 열려 있는 탭의 보기는 그대로다(함정 D). */
   reset: () => void
 }
 
@@ -79,7 +79,8 @@ export const useSettingsStore = create<SettingsStore>()(
           showHidden: false,
           confirmBeforeDelete: true,
           language: 'system',
-          theme: 'system'
+          theme: 'system',
+          conflictChoice: null
         })
     }),
     {

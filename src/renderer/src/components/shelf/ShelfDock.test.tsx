@@ -2,8 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { toast } from 'sonner'
+import { connKey } from '@shared/connKey'
 import { en } from '@renderer/i18n/locales/en'
-import { fromFtpEntry, type ExplorerEntry } from '@renderer/lib/explorerEntry'
+import { fromFtpEntry, fromLocalEntry, type ExplorerEntry } from '@renderer/lib/explorerEntry'
 import { generateCacheKeyRenderer } from '@renderer/lib/cacheKey'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
@@ -17,6 +18,7 @@ import {
   localLoc,
   remoteLoc,
   server,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from '@renderer/components/explorer/explorerTestHarness'
@@ -59,6 +61,13 @@ const osDt = (): Record<string, unknown> => ({
   files: [new File(['x'], 'a.jpg')],
   dropEffect: ''
 })
+/** relatedTarget 없는 dragleave를 (x, y)에서 보낸다. */
+const osLeave = (x: number, y: number, target: Element = document.body): void =>
+  act(() => {
+    target.dispatchEvent(
+      new MouseEvent('dragleave', { bubbles: true, clientX: x, clientY: y, relatedTarget: null })
+    )
+  })
 const strip = (): HTMLElement | null =>
   document.querySelector<HTMLElement>('[data-region="shelf-dock"][data-shelf-target]')
 const row = (name: string): HTMLElement =>
@@ -230,5 +239,112 @@ describe('ShelfDock — the bottom floating remote', () => {
     expect(body.dropEffect).toBe('')
     fireEvent.drop(region, { dataTransfer: osDt() })
     expect(invokeCalls(h.invoke, 'local:stat')).toHaveLength(stats)
+  })
+
+  it('makes the collapsed card inert so Tab cannot enter its rows and buttons', () => {
+    // covers: Test-1289
+    useTabsStore.getState().openTab(localLoc('C:\\dl'))
+    useShelfStore.getState().add([remoteItem('a.jpg')])
+    useShelfStore.getState().setDockOpen(false)
+    render(<ShelfDock />)
+
+    const card = document.querySelector('[data-shelf-stack]')?.closest('[role="region"]')
+    expect(card?.hasAttribute('inert')).toBe(true)
+    // inert여도 노드는 남는다(내려놓기 더미가 찾는다)
+    expect(card?.querySelector('li')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /1 item/ }))
+    expect(card?.hasAttribute('inert')).toBe(false)
+  })
+
+  it('hides the strip when an OS drag leaves the window after an entered element unmounted', () => {
+    // covers: Test-1291
+    render(<ShelfDock />)
+    const entered = document.createElement('div')
+    document.body.append(entered)
+    fireEvent.dragEnter(document.body, { dataTransfer: osDt() })
+    fireEvent.dragEnter(entered, { dataTransfer: osDt() })
+    expect(strip()).toBeTruthy()
+
+    // 진입했던 요소가 끄는 도중 사라지면 짝이 되는 dragleave는 오지 않는다 — 깊이가 1에 걸린다
+    entered.remove()
+    // 창 밖으로 나가면 relatedTarget이 null이고 좌표가 창 경계 밖이다
+    osLeave(-1, 300)
+    expect(strip()).toBeNull()
+  })
+
+  it('keeps the strip on a relatedTarget-less dragleave inside the window and hides it outside', () => {
+    // covers: Test-1308
+    render(<ShelfDock />)
+    const child = document.createElement('div')
+    document.body.append(child)
+    fireEvent.dragEnter(document.body, { dataTransfer: osDt() })
+    fireEvent.dragEnter(child, { dataTransfer: osDt() })
+    expect(strip()).toBeTruthy()
+
+    // Chromium은 자식 경계를 넘을 때도 relatedTarget을 비워 보낼 수 있다
+    osLeave(200, 300, child)
+    expect(strip()).toBeTruthy()
+
+    osLeave(200, window.innerHeight)
+    expect(strip()).toBeNull()
+    child.remove()
+  })
+
+  it('removes only the items of the servers whose transfer started when a shelf drag fans out', async () => {
+    // covers: Test-1293
+    const other = connKey('other.org', 21, '')
+    setConnection(other, 'connected')
+    h.handlers['transfer:send'] = (conn) =>
+      conn === server()
+        ? {
+            success: true,
+            data: { batchId: 'b1', ids: ['t1'], skipped: [], conflicts: [], totalBytes: 1024 }
+          }
+        : { success: false, error: 'boom' }
+    useTabsStore.getState().openTab(localLoc('C:\\dl'))
+    useShelfStore.getState().add([remoteItem('a.jpg'), fromFtpEntry(ftp('b.jpg'), '/x', other)])
+    render(<AppShell />)
+    await screen.findByRole('listbox')
+
+    act(() =>
+      useDnd.setState({
+        items: useShelfStore.getState().items.map((i) => i.entry),
+        over: null,
+        thumbs: [],
+        fromShelf: true
+      })
+    )
+    fireEvent.dragOver(screen.getByRole('listbox'), { dataTransfer: dt() })
+    fireEvent.drop(screen.getByRole('listbox'), { dataTransfer: dt() })
+
+    await waitFor(() => expect(shelfNames()).toEqual(['b.jpg']))
+  })
+
+  it('also removes a shelf item that is already in the folder it is dropped on', async () => {
+    // covers: Test-1301
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['t1'], skipped: [], conflicts: [], totalBytes: 1024 }
+    })
+    useTabsStore.getState().openTab(remoteLoc('/x'))
+    // a.jpg는 이미 /x에 있고, z.txt는 업로드된다
+    useShelfStore.getState().add([remoteItem('a.jpg'), fromLocalEntry(local('C:\\dl', 'z.txt'))])
+    render(<AppShell />)
+    await screen.findByRole('listbox')
+
+    act(() =>
+      useDnd.setState({
+        items: useShelfStore.getState().items.map((i) => i.entry),
+        over: null,
+        thumbs: [],
+        fromShelf: true
+      })
+    )
+    fireEvent.dragOver(screen.getByRole('listbox'), { dataTransfer: dt() })
+    fireEvent.drop(screen.getByRole('listbox'), { dataTransfer: dt() })
+
+    await waitFor(() => expect(invokeCalls(h.invoke, 'transfer:send')).toHaveLength(1))
+    await waitFor(() => expect(shelfNames()).toEqual([]))
   })
 })

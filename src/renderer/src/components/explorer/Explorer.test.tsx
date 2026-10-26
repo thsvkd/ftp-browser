@@ -1974,3 +1974,25 @@ describe('Explorer — remote location change cancels this panel’s pending wor
     ])
   })
 })
+
+describe('Explorer — drop hint pill', () => {
+  it('lifts the transfer hint pill above the shelf strip while a drag is over the pane', async () => {
+    // covers: Test-1292
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] }, local: { [LDIR]: [] } })
+    await renderExplorer(remoteLoc(DIR))
+    act(() =>
+      useDnd.setState({
+        items: [fromFtpEntry(ftp('x.jpg'), '/elsewhere', server())],
+        over: null,
+        thumbs: []
+      })
+    )
+    fireEvent.dragOver(listbox(), {
+      dataTransfer: { dropEffect: '', types: [], files: [] }
+    })
+    // 담기 띠는 `fixed bottom-8 h-14`(상태 막대 위 3.5rem)다. 알약은 그 위에 놓인다.
+    const pill = screen.getByText('Move 1 to photos').parentElement
+    expect(pill?.className).toContain('bottom-20')
+    expect(pill?.className).not.toContain('bottom-6')
+  })
+})

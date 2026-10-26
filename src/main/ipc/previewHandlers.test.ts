@@ -150,4 +150,91 @@ describe('ftp:downloadPreview', () => {
     // 거부는 다운로드 전에 이뤄진다(보조 클라이언트는 midVideo 한 번만 쓴다).
     expect(secondary.get(A)).toHaveBeenCalledTimes(1)
   })
+
+  it('aborts and fails a download that exceeds the cap even when the listed size is 0', async () => {
+    // covers: Test-1295
+    const close = vi.fn()
+    secondary.get(A)!.mockImplementationOnce(async () => ({
+      downloadTo: (out: Writable) =>
+        new Promise<void>((resolve, reject) => {
+          out.on('error', reject)
+          out.write(Buffer.alloc(MAX_VIDEO_SIZE_BYTES + 1), (err) =>
+            err ? reject(err) : resolve()
+          )
+        }),
+      close
+    }))
+
+    const result = await previewReq(A, { remotePath: '/videos/clip.mp4', fileSize: 0 })
+
+    expect(result).toMatchObject({ success: false })
+    expect(close).toHaveBeenCalled()
+    expect(db.prepare('SELECT COUNT(*) AS n FROM preview_cache').get()).toEqual({ n: 0 })
+  })
+
+  it('aborts the in-flight preview download of a connection when a new request arrives', async () => {
+    // covers: Test-1296
+    const closeFirst = vi.fn()
+    const first = {
+      downloadTo: vi.fn(
+        (out: Writable) =>
+          new Promise<void>((_resolve, reject) => {
+            out.on('error', reject)
+            out.on('close', () => reject(new Error('closed')))
+          })
+      ),
+      close: closeFirst
+    }
+    secondary.get(A)!.mockImplementationOnce(async () => first)
+
+    const firstResult = previewReq(A, { remotePath: '/videos/a.mp4', fileSize: 10 })
+    await vi.waitFor(() => expect(first.downloadTo).toHaveBeenCalled())
+    const secondResult = await previewReq(A, { remotePath: '/videos/b.mp4', fileSize: 10 })
+
+    expect(await firstResult).toMatchObject({ success: false })
+    expect(closeFirst).toHaveBeenCalled()
+    expect(secondResult).toEqual({
+      success: true,
+      data: `data:video/mp4;base64,${Buffer.from('u1').toString('base64')}`
+    })
+  })
+
+  it('lets a preview download on the main client finish when a new request arrives', async () => {
+    // covers: Test-1298
+    secondary.get(A)!.mockRejectedValue(new Error('no secondary'))
+    let release = (): void => undefined
+    const gate = new Promise<void>((r) => (release = r))
+    const main = {
+      closed: false,
+      // basic-ftp처럼 목적지 스트림 오류에 제어 연결을 닫는다
+      downloadTo: vi.fn(async (out: Writable, remotePath: string) => {
+        out.once('error', () => (main.closed = true))
+        if (remotePath === '/videos/a.mp4') await gate
+        await new Promise<void>((resolve, reject) =>
+          out.write(Buffer.from(remotePath), (err) => (err ? reject(err) : resolve()))
+        )
+      })
+    }
+    // 메인 클라이언트 작업은 한 번에 하나씩 차례로 돈다
+    let chain: Promise<unknown> = Promise.resolve()
+    Object.assign(remoteOf(registry.get(A)), {
+      runOnMainClient: <T>(task: (c: typeof main) => Promise<T>): Promise<T> => {
+        const run = chain.then(() => task(main))
+        chain = run.catch(() => undefined)
+        return run
+      }
+    })
+
+    const firstResult = previewReq(A, { remotePath: '/videos/a.mp4', fileSize: 10 })
+    await vi.waitFor(() => expect(main.downloadTo).toHaveBeenCalled())
+    const secondResult = previewReq(A, { remotePath: '/videos/b.mp4', fileSize: 10 })
+    await new Promise((r) => setTimeout(r, 0))
+    release()
+
+    const dataOf = (p: string): string =>
+      `data:video/mp4;base64,${Buffer.from(p).toString('base64')}`
+    expect(await firstResult).toEqual({ success: true, data: dataOf('/videos/a.mp4') })
+    expect(await secondResult).toEqual({ success: true, data: dataOf('/videos/b.mp4') })
+    expect(main.closed).toBe(false)
+  })
 })

@@ -63,8 +63,8 @@ describe('SettingsDialog updates', () => {
     const user = userEvent.setup()
     render(<SettingsDialog open={true} onClose={vi.fn()} />)
 
-    expect(await screen.findByText('Version 1.0.5')).not.toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }))
+    expect(await updatesSection().findByText('Version 1.0.5')).not.toBeNull()
+    await user.click(updatesSection().getByRole('button', { name: 'Check for updates' }))
 
     await waitFor(() => {
       expect(invokeCalls(mockInvoke, 'update:check')).toHaveLength(1)
@@ -453,7 +453,7 @@ describe('SettingsDialog Escape', () => {
     const onClose = vi.fn()
     const user = userEvent.setup()
     render(<SettingsDialog open={true} onClose={onClose} />)
-    await screen.findByRole('button', { name: 'Check for updates' })
+    await updatesSection().findByRole('button', { name: 'Check for updates' })
 
     // 톱니 버튼으로 열면 포커스는 창 밖(body)에 있다.
     ;(document.activeElement as HTMLElement | null)?.blur()
@@ -471,7 +471,7 @@ describe('SettingsDialog Escape', () => {
         <ConfirmDialog />
       </>
     )
-    await screen.findByRole('button', { name: 'Check for updates' })
+    await updatesSection().findByRole('button', { name: 'Check for updates' })
     const { confirmDialog } = await import('@renderer/stores/useConfirmStore')
     let answer: Promise<boolean> | undefined
     act(() => {
@@ -676,8 +676,10 @@ describe('SettingsDialog content sections', () => {
       showHidden: false,
       confirmBeforeDelete: true,
       language: 'system',
-      theme: 'system'
+      theme: 'system',
+      conflictChoice: null
     })
+    useFileCategoryStore.setState({ overrides: EMPTY_OVERRIDES })
     useServerStore.setState({ servers: [] })
     useConfirmStore.setState({ request: null })
   }
@@ -749,6 +751,82 @@ describe('SettingsDialog content sections', () => {
     expect(await within(account).findByText('2 saved servers')).not.toBeNull()
     expect(within(account).getByText('Saved password protection')).not.toBeNull()
     expect(within(account).getByText(en['servers.passwordProtectionBasic'])).not.toBeNull()
+  })
+
+  it('does not switch the default view when its title is clicked, and names the group by it', async () => {
+    // covers: Test-1285
+    // 라벨이 첫 버튼(격자)을 대신 누르므로, 격자가 아닌 값에서 시작해야 버그가 드러난다.
+    useSettingsStore.setState({ viewMode: 'list' })
+    const user = userEvent.setup()
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    const group = await screen.findByRole('group', { name: en['settings.viewMode'] })
+    expect(within(group).getAllByRole('button')).toHaveLength(2)
+    await user.click(screen.getByText(en['settings.viewMode']))
+
+    expect(useSettingsStore.getState().viewMode).toBe('list')
+  })
+
+  it('resets the remembered conflict choice and the file category edits too', async () => {
+    // covers: Test-1286
+    useSettingsStore.setState({ conflictChoice: 'overwrite' })
+    useFileCategoryStore.getState().removeExtension('image', 'png')
+    const user = userEvent.setup()
+    render(
+      <>
+        <SettingsDialog open={true} onClose={vi.fn()} />
+        <ConfirmDialog />
+      </>
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Reset all settings' }))
+    const confirm = await screen.findByRole('alertdialog')
+    await user.click(within(confirm).getByRole('button', { name: 'Reset all settings' }))
+
+    expect(useSettingsStore.getState().conflictChoice).toBeNull()
+    expect(useFileCategoryStore.getState().overrides).toEqual(EMPTY_OVERRIDES)
+  })
+
+  it('shows a dash, not a zero count, when the saved servers could not be loaded', async () => {
+    // covers: Test-1287
+    mockInvoke.mockImplementation((channel: string) => {
+      if (channel === 'ftp:getRecentServers') {
+        return Promise.resolve({ success: false, error: 'SQLITE_BUSY' })
+      }
+      if (channel === 'ftp:getPasswordProtection') {
+        return Promise.resolve({ success: true, data: { level: 'keyring' } })
+      }
+      return Promise.resolve({ success: true, data: undefined })
+    })
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    const account = (await screen.findByRole('heading', { name: 'Account & security' })).closest(
+      'section'
+    ) as HTMLElement
+    expect(await within(account).findByText('—')).not.toBeNull()
+    expect(within(account).queryByText(/saved servers?$/)).toBeNull()
+    expect(within(account).queryByText('Loading…')).toBeNull()
+  })
+
+  it('shows a dash, not Loading…, when the password protection lookup fails', async () => {
+    // covers: Test-1288
+    mockInvoke.mockImplementation((channel: string) => {
+      if (channel === 'ftp:getRecentServers') {
+        return Promise.resolve({ success: true, data: savedServers })
+      }
+      if (channel === 'ftp:getPasswordProtection') {
+        return Promise.resolve({ success: false, error: 'no keyring' })
+      }
+      return Promise.resolve({ success: true, data: undefined })
+    })
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    const account = (await screen.findByRole('heading', { name: 'Account & security' })).closest(
+      'section'
+    ) as HTMLElement
+    expect(await within(account).findByText('2 saved servers')).not.toBeNull()
+    expect(await within(account).findByText('—')).not.toBeNull()
+    expect(within(account).queryByText('Loading…')).toBeNull()
   })
 
   it('shows the cache limit next to the usage', async () => {

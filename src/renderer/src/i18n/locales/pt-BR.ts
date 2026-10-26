@@ -278,8 +278,8 @@ export const ptBR = {
   'sidebar.servers': 'Servidores',
   'sidebar.recent': 'Recentes',
   'sidebar.serverConnecting': 'Conectando…',
-  'sidebar.serverLost': 'Desconectado · clique para reconectar',
-  'sidebar.serverOffline': 'Não conectado · clique para conectar',
+  'sidebar.serverLost': 'Desconectado · clique duas vezes ou Enter para reconectar',
+  'sidebar.serverOffline': 'Não conectado · clique duas vezes ou Enter para conectar',
   'sidebar.disconnect': 'Desconectar {{name}}',
 
   'place.desktop': 'Área de trabalho',

@@ -20,6 +20,7 @@ import { GHOST_ID, useDnd } from '@renderer/components/explorer/dnd'
 import { AppShell } from '@renderer/components/layout/AppShell'
 import type { FtpServer } from '@shared/types/ftp'
 import { act } from '@testing-library/react'
+import { ConnectBar } from '@renderer/components/server/ConnectBar'
 import { Sidebar } from './Sidebar'
 
 const HOME = 'C:\\Users\\me'
@@ -301,6 +302,95 @@ describe('Sidebar — servers', () => {
     )
     fireEvent.dragOver(office, { dataTransfer: { types: [], files: [], dropEffect: '' } })
     expect(office.getAttribute('title')).toBe('Move 1 → Office')
+  })
+
+  it('shows a password field for a server without a saved password while a connected tab is active', async () => {
+    // covers: Test-1276
+    h.handlers['ftp:getRecentServers'] = () => ({ success: true, data: [OFFICE, NAS] })
+    h.handlers['ftp:getRecentPaths'] = () => ({ success: true, data: [] })
+    setConnection('kim@ftp.office.lan:2121', 'connected')
+    useTabsStore
+      .getState()
+      .openTab({ side: 'remote', path: '/', server: 'kim@ftp.office.lan:2121' })
+    // 진짜 툴바: 연결된 탭이면 연결된 표시줄(비밀번호 칸 없음)이 그려진다.
+    render(
+      <>
+        <ConnectBar />
+        <Sidebar />
+      </>
+    )
+    await flush()
+    expect(document.querySelector('input[type="password"]')).toBeNull()
+
+    fireEvent.doubleClick(place(/^NAS/))
+    await drain()
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toEqual([])
+    await waitFor(() => {
+      const password = document.querySelector('input[type="password"]')
+      expect(password).toBeTruthy()
+      expect(document.activeElement).toBe(password)
+    })
+    expect(useServerStore.getState().address).toBe('me@nas.local:21')
+  })
+
+  it('says double-click or Enter connects in the unconnected and lost row hints', async () => {
+    // covers: Test-1278
+    setConnection('me@nas.local:21', 'error')
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
+
+    for (const key of ['sidebar.serverOffline', 'sidebar.serverLost'] as const) {
+      expect(en[key]).toMatch(/double-click/i)
+      expect(en[key]).toMatch(/Enter/)
+      expect(en[key]).not.toMatch(/(^|[^-])click to/i)
+    }
+    expect(place(/^Office/).textContent).toContain(en['sidebar.serverOffline'])
+    expect(place(/^NAS/).textContent).toContain(en['sidebar.serverLost'])
+  })
+
+  it('marks only the clicked server row as selected, and moves it with the next click', async () => {
+    // covers: Test-1279
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
+    const selected = (): string[] =>
+      within(nav())
+        .getAllByRole('button')
+        .filter((b) => b.getAttribute('aria-pressed') === 'true')
+        .map((b) => b.textContent ?? '')
+
+    fireEvent.click(place(/^Office/))
+    expect(place(/^Office/).getAttribute('aria-pressed')).toBe('true')
+    expect(selected()).toHaveLength(1)
+
+    fireEvent.click(place(/^NAS/))
+    expect(place(/^NAS/).getAttribute('aria-pressed')).toBe('true')
+    expect(place(/^Office/).getAttribute('aria-pressed')).not.toBe('true')
+    expect(selected()).toHaveLength(1)
+  })
+
+  it('selects a not-connected row on Enter and exposes the selection with a valid ARIA state', async () => {
+    // covers: Test-1307
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
+
+    const office = place(/^Office/)
+    office.focus()
+    fireEvent.keyDown(office, { key: 'Enter' })
+    await drain()
+
+    // 역할 없는 button의 aria-selected는 유효하지 않다: 버튼 역할이 지원하는 aria-pressed로 보인다
+    expect(office.tagName).toBe('BUTTON')
+    expect(office.getAttribute('role')).toBeNull()
+    expect(office.getAttribute('aria-pressed')).toBe('true')
+    expect(place(/^NAS/).getAttribute('aria-pressed')).toBe('false')
+    expect(
+      within(nav())
+        .queryAllByRole('button')
+        .some((b) => b.hasAttribute('aria-selected'))
+    ).toBe(false)
   })
 
   it('drags a saved server row with its own ghost, apart from entry drags', async () => {

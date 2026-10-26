@@ -526,6 +526,35 @@ describe('remote channels with two connections', () => {
     expect(a.nodes.has('/x/a.txt')).toBe(true)
   })
 
+  it('leaves a folder marked only-if-empty that is not empty, without reporting a failure', async () => {
+    // covers: Test-1271
+    const b = remoteOf(registry.get(B)).addDir('/y')
+
+    const result = await invoke('ftp:deleteBatch', B, [
+      { path: '/x', isDirectory: true, onlyIfEmpty: true },
+      { path: '/y', isDirectory: true, onlyIfEmpty: true }
+    ])
+
+    expect(result).toEqual({ success: true, data: undefined })
+    expect([...b.nodes.keys()].sort()).toEqual(['/', '/x', '/x/a.txt', '/x/b.txt'])
+    expect(b.deleteDirectory).not.toHaveBeenCalled()
+  })
+
+  it('does not fail the batch when an only-if-empty folder is missing or cannot be removed', async () => {
+    // covers: Test-1302
+    const b = remoteOf(registry.get(B)).addDir('/locked')
+    b.deleteEmptyDirectory.mockRejectedValueOnce(new Error('Permission denied'))
+
+    const result = await invoke('ftp:deleteBatch', B, [
+      { path: '/locked', isDirectory: true, onlyIfEmpty: true },
+      { path: '/gone', isDirectory: true, onlyIfEmpty: true },
+      { path: '/x/a.txt', isDirectory: false }
+    ])
+
+    expect(result).toEqual({ success: true, data: undefined })
+    expect([...b.nodes.keys()].sort()).toEqual(['/', '/locked', '/x', '/x/b.txt'])
+  })
+
   it('returns failure values for a key that is not connected or not a key, calling no manager', async () => {
     // covers: Test-968
     await registry.disconnect(A)

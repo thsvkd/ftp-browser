@@ -8,7 +8,13 @@ import { fetchEntries, useListingStore } from '@renderer/stores/useListingStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
-import { useTransferStore, type VerbRef } from '@renderer/stores/useTransferStore'
+import {
+  holdVerb,
+  releaseVerb,
+  useTransferStore,
+  verbSettled,
+  type VerbRef
+} from '@renderer/stores/useTransferStore'
 import {
   fromLocalEntry,
   joinPath,
@@ -128,25 +134,28 @@ async function copyLocal(
   dest: Loc,
   verbRef: VerbRef
 ): Promise<boolean> {
+  holdVerb(verbRef)
   try {
-    const ops = await sameSideOps('copy', items, dest, verbRef)
+    let ops: SameSideOp[] | null
+    try {
+      ops = await sameSideOps('copy', items, dest, verbRef)
+    } finally {
+      releaseVerb(verbRef)
+    }
     if (!ops) return false
     if (!ops.length) return true
+    // 다른 부분의 시트가 열려 있으면 verb가 바뀔 수 있어 복사를 시작하기 전에 기다린다(F3).
+    await verbSettled(verbRef)
+    // 이동이면 main이 파일마다 복사 직후 원본을 지운다: 취소해도 아직 복사하지 않은 원본은 남는다(F1).
+    // skipped는 애초에 ops에 없다(V6).
     const r = await window.api.invoke<IpcResult<void>>(
       'local:copyFiles',
       ops.map((o) => o.source),
       dest.path,
-      ops.map((o) => o.name)
+      ops.map((o) => o.name),
+      ...(verbRef.verb === 'move' ? [true] : [])
     )
     if (!r.success) toast.error(t('toast.sendFailed'), { description: r.error })
-    // 이동을 고르면 복사가 끝난 ops의 원본만 잇다(V6). skipped는 애초에 ops에 없다.
-    else if (verbRef.verb === 'move' && ops.length) {
-      const kind = new Map(items.map((i) => [i.path, i.type]))
-      await window.api.invoke<IpcResult<void>>(
-        'local:deleteBatch',
-        ops.map((o) => ({ path: o.source, isDirectory: kind.get(o.source) === 'directory' }))
-      )
-    }
     return r.success
   } catch (err) {
     toast.error(t('toast.sendFailed'), {
@@ -259,6 +268,24 @@ export async function sendItems(items: readonly ExplorerEntry[], dest: Loc): Pro
     return false
   }
   return runPlan(plan, dest)
+}
+
+/**
+ * `sendItems`와 같되 전부 시작했는지가 아니라 시작에 성공한 부분의 항목을 돌려준다(막히면 빈 배열).
+ * 모두 시작하면 이미 그 폴더에 있던 항목(`plan.here`)도 함께 돌려준다(`dropShelfOnce`와 같다, F15).
+ */
+export async function sendItemsStarted(
+  items: readonly ExplorerEntry[],
+  dest: Loc
+): Promise<ExplorerEntry[]> {
+  const plan = planSend(items, dest, new Set(connectedKeys()))
+  if (plan.invalid) {
+    toast.error(t(plan.invalid))
+    return []
+  }
+  const started = await runParts(plan, dest)
+  const ok = started.length === plan.transfer.length + plan.sameSide.length + plan.relay.length
+  return ok ? [...items] : started
 }
 
 /**
@@ -429,8 +456,10 @@ export function connectSaved(saved: FtpServer, scope?: ParentNode): Promise<bool
 
 // 비밀번호 칸은 사용자 이름이 있을 때만 그려진다. 다음 프레임에 찾는다.
 // 범위를 넘기면 그 안에서만 찾는다: 관리창은 포커스를 가두므로 문서에서 찾으면 툴바로 빠진다(함정 A).
-function focusPassword(scope: ParentNode = document): void {
+// 툴바는 연결된 탭이면 비밀번호 칸이 없는 표시줄이므로 입력 모드로 바꾼 뒤 찾는다(F5).
+function focusPassword(scope?: ParentNode): void {
+  if (!scope) useServerStore.setState({ entering: true })
   requestAnimationFrame(() =>
-    scope.querySelector<HTMLInputElement>('input[type="password"]')?.focus()
+    (scope ?? document).querySelector<HTMLInputElement>('input[type="password"]')?.focus()
   )
 }

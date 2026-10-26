@@ -50,6 +50,16 @@ describe('focus model contract', () => {
     // ④ 고대비에서는 [aria-selected='true'] 윤곽선이 선택의 유일한 표시라 남는다.
     const forced = css.slice(css.indexOf('@media (forced-colors: active)'))
     expect(css).toContain('@media (forced-colors: active)')
-    expect(forced).toMatch(/\[aria-selected='true'\]\s*\{\s*outline: 2px solid Highlight;/)
+    expect(forced).toMatch(/\[aria-selected='true'\],?[^{]*\{\s*outline: 2px solid Highlight;/)
+  })
+
+  it('outlines the selected sidebar server row in forced colors too', () => {
+    // covers: Test-1307
+    // 사이드바 서버 행은 선택을 aria-pressed로 보인다(F19). 고대비에서는 배경이 지워지므로 윤곽선이 필요하다.
+    const css = readRepoFile('src/renderer/src/styles/globals.css')
+    const forced = css.slice(css.indexOf('@media (forced-colors: active)'))
+    expect(forced).toMatch(
+      /\[data-region='sidebar'\] \[aria-pressed='true'\]\s*\{\s*outline: 2px solid Highlight;/
+    )
   })
 })
