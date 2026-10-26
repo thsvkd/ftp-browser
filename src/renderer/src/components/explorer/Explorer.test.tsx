@@ -216,6 +216,105 @@ describe('Explorer — lightbox', () => {
       expect(listbox().getAttribute('aria-activedescendant')).toBe(optId(pathOf('b.jpg')))
     }
   )
+
+  it.each([
+    ['remote', 'ftp:downloadPreview'],
+    ['local', 'local:preview']
+  ] as const)(
+    'draws the %s video lightbox as a <video> of the preview data URL',
+    async (side, channel) => {
+      // covers: Test-1208
+      if (side === 'remote') {
+        h = setupExplorer({ remote: { [DIR]: [ftp('a.webm'), ftp('b.webm')] } })
+        await renderExplorer(remoteLoc(DIR))
+      } else {
+        h = setupExplorer({ local: { [LDIR]: [local(LDIR, 'a.webm'), local(LDIR, 'b.webm')] } })
+        await renderExplorer(localLoc(LDIR))
+      }
+      h.handlers[channel] = () => ({ success: true, data: 'data:video/webm;base64,AA==' })
+      listbox().focus()
+      key('Home')
+      key(' ')
+      await flush()
+
+      const dialog = screen.getByRole('dialog', { name: 'Preview: a.webm' })
+      const video = dialog.querySelector('video')
+      expect(invokeCalls(h.invoke, channel)).toHaveLength(1)
+      expect(video).not.toBeNull()
+      expect(video?.hasAttribute('controls')).toBe(true)
+      expect(video?.getAttribute('src')).toBe('data:video/webm;base64,AA==')
+    }
+  )
+
+  it('keeps the GIF lightbox on <img> with the image/gif data URL', async () => {
+    // covers: Test-1209
+    h = setupExplorer({ remote: { [DIR]: [ftp('anim.gif', { isImage: true })] } })
+    await renderExplorer(remoteLoc(DIR))
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: true,
+      data: 'data:image/gif;base64,R0lGOD'
+    })
+    listbox().focus()
+    key('Home')
+    key(' ')
+    await flush()
+
+    const dialog = screen.getByRole('dialog', { name: 'Preview: anim.gif' })
+    expect(dialog.querySelector('video')).toBeNull()
+    const img = dialog.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute('src')).toBe('data:image/gif;base64,R0lGOD')
+  })
+
+  it('gives Space, Enter and arrows to the video controls, and closes and pages outside them', async () => {
+    // covers: Test-1210
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.webm'), ftp('b.webm')] } })
+    await renderExplorer(remoteLoc(DIR))
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: true,
+      data: 'data:video/webm;base64,AA=='
+    })
+    listbox().focus()
+    key('Home')
+    key(' ')
+    await flush()
+    const dialog = screen.getByRole('dialog', { name: 'Preview: a.webm' })
+    const video = dialog.querySelector('video')
+    expect(video).not.toBeNull()
+
+    // 영상 컨트롤에 포커스가 있으면 키는 라이트박스로 새지 않는다: 목록도 안 넘기고 닫히지도 않는다.
+    for (const k of [' ', 'Enter', 'ArrowRight', 'ArrowLeft']) {
+      fireEvent.keyDown(video as HTMLElement, { key: k })
+    }
+    await flush()
+    expect(screen.getByRole('dialog', { name: 'Preview: a.webm' })).toBeTruthy()
+
+    // 영상 바깥에서는 기존 동작이 그대로여야 한다: 화살표는 넘기고 Space는 닫는다.
+    fireEvent.keyDown(dialog, { key: 'ArrowRight' })
+    await flush()
+    expect(screen.getByRole('dialog', { name: 'Preview: b.webm' })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: ' ' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('shows the existing preview.failed notice when the preview is refused as too large', async () => {
+    // covers: Test-1211
+    h = setupExplorer({ remote: { [DIR]: [ftp('huge.webm')] } })
+    await renderExplorer(remoteLoc(DIR))
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: false,
+      error: 'File too large for preview'
+    })
+    listbox().focus()
+    key('Home')
+    key(' ')
+    await flush()
+
+    // 기존 안내 문구가 그대로 나온다: 새 오류 문구를 만들지 않았다(P7).
+    const reason = 'File too large for preview'
+    expect(screen.getByText(en['preview.failed'].replace('{{reason}}', reason))).toBeTruthy()
+    expect(screen.queryByText(en['preview.none'])).toBeNull()
+  })
 })
 
 describe('Explorer — shelf and type-ahead', () => {

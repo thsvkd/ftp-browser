@@ -5,7 +5,12 @@ import { LocalFileSystem } from '../local/LocalFileSystem'
 import { OperationManager } from '../operation/OperationManager'
 import { ipcError } from '../utils/errorClassifier'
 import { MIME_MAP } from './previewHandlers'
-import { isImageFile, MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
+import {
+  isImageFile,
+  isVideoFile,
+  MAX_IMAGE_SIZE_BYTES,
+  MAX_VIDEO_SIZE_BYTES
+} from '@shared/constants'
 import { isSafeLocalName } from '@shared/entryName'
 import type {
   LocalFileEntry,
@@ -118,8 +123,12 @@ export function registerLocalFsHandlers(
   // 렌더러 CSP(img-src 'self' data:)는 file: 이미지를 막으므로 data URL로 준다. MIME은 원격 미리 보기와 같다.
   ipcMain.handle('local:preview', async (_event, filePath: string): Promise<IpcResult<string>> => {
     try {
-      if (!isImageFile(filePath)) return { success: false, error: 'Not an image file' }
-      if ((await stat(filePath)).size > MAX_IMAGE_SIZE_BYTES) {
+      // 영상도 같은 data URL 경로로 준다(P3). 게이트는 이미지·영상 둘 다 연다(P5).
+      if (!isImageFile(filePath) && !isVideoFile(filePath))
+        return { success: false, error: 'Not an image file' }
+      // data URL은 파일 전체를 메모리에 올려야 하므로 종류별 상한을 나눈다(P5·함정 D).
+      const cap = isVideoFile(filePath) ? MAX_VIDEO_SIZE_BYTES : MAX_IMAGE_SIZE_BYTES
+      if ((await stat(filePath)).size > cap) {
         return { success: false, error: 'File too large for preview' }
       }
       const mime = MIME_MAP[extname(filePath).toLowerCase()] || 'image/jpeg'

@@ -19,6 +19,7 @@ import { registerPreviewHandlers } from './previewHandlers'
 import { ConnectionRegistry } from '../ftp/ConnectionRegistry'
 import { fakeSession, payloadOf, remoteOf } from '../ftp/__fixtures__/fakeSessions'
 import { generateCacheKey } from '../utils/cacheKey'
+import { MAX_IMAGE_SIZE_BYTES, MAX_VIDEO_SIZE_BYTES } from '@shared/constants'
 import type { IpcResult } from '@shared/types/ipc'
 
 // 같은 호스트·포트의 두 사용자: 같은 경로라도 홈(chroot)이 달라 다른 파일이다.
@@ -71,6 +72,16 @@ describe('ftp:downloadPreview', () => {
   const preview = async (conn: string): Promise<IpcResult<string>> =>
     (await handlers.get('ftp:downloadPreview')!({}, conn, REQ)) as IpcResult<string>
 
+  /** 임의의 요청(경로·크기)으로 호출한다. 핸들러는 `(event, conn, req)` 순서다. */
+  const previewReq = async (
+    conn: string,
+    req: { remotePath: string; fileSize: number }
+  ): Promise<IpcResult<string>> =>
+    (await handlers.get('ftp:downloadPreview')!({}, conn, {
+      ...req,
+      modifiedAt: REQ.modifiedAt
+    })) as IpcResult<string>
+
   it('downloads through that connection and caches under its key, not another user’s row', async () => {
     // covers: Test-973
     expect(await preview(A)).toEqual({
@@ -95,5 +106,48 @@ describe('ftp:downloadPreview', () => {
     expect(keys).toEqual(
       [A, B].map((conn) => generateCacheKey(conn, REQ.remotePath, REQ.fileSize, REQ.modifiedAt))
     )
+  })
+
+  it('returns a webm preview as a data:video/webm URL through the secondary client', async () => {
+    // covers: Test-1205
+    const result = await previewReq(A, { remotePath: '/videos/clip.webm', fileSize: 1024 })
+
+    expect(result).toEqual({
+      success: true,
+      data: `data:video/webm;base64,${Buffer.from('u1').toString('base64')}`
+    })
+    expect(secondary.get(A)).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps gif previews as data:image/gif URLs', async () => {
+    // covers: Test-1206
+    const result = await previewReq(A, { remotePath: '/photos/anim.gif', fileSize: 2048 })
+
+    expect(result).toEqual({
+      success: true,
+      data: `data:image/gif;base64,${Buffer.from('u1').toString('base64')}`
+    })
+  })
+
+  it('caps videos at MAX_VIDEO_SIZE_BYTES and keeps the 50MB image cap', async () => {
+    // covers: Test-1207
+    // 이미지 상한(50MB)을 넘지만 영상 상한(100MB) 안이다. 두 상한을 하나로 합치면 거부된다.
+    const midVideo = await previewReq(A, {
+      remotePath: '/videos/clip.mp4',
+      fileSize: MAX_IMAGE_SIZE_BYTES + 1
+    })
+    expect(midVideo).toMatchObject({
+      success: true,
+      data: expect.stringContaining('data:video/mp4;base64,')
+    })
+
+    await expect(
+      previewReq(A, { remotePath: '/videos/clip.webm', fileSize: MAX_VIDEO_SIZE_BYTES + 1 })
+    ).resolves.toEqual({ success: false, error: 'File too large for preview' })
+    await expect(
+      previewReq(A, { remotePath: '/photos/big.jpg', fileSize: MAX_IMAGE_SIZE_BYTES + 1 })
+    ).resolves.toEqual({ success: false, error: 'File too large for preview' })
+    // 거부는 다운로드 전에 이뤄진다(보조 클라이언트는 midVideo 한 번만 쓴다).
+    expect(secondary.get(A)).toHaveBeenCalledTimes(1)
   })
 })
