@@ -275,7 +275,12 @@ export function registerFtpHandlers(
           const target = targets[i]
           const rest = targets.length - i - 1
           operationManager.progress(job.id, done, remoteBasename(target.path), done + 1 + rest)
-          if (target.isDirectory) {
+          if (target.onlyIfEmpty) {
+            // RMD는 비어 있지 않은 폴더를 지우지 않는다. 550은 "비어 있지 않음"과 다른 실패를 가리지
+            // 못해 모두 남은 폴더로 본다(F2·F16): 지울 것을 잘못 남길 뿐 잃는 것은 없다.
+            await fileOps.deleteEmptyDirectory(target.path).catch(() => undefined)
+            done += 1
+          } else if (target.isDirectory) {
             let removed = 0
             await fileOps.deleteDirectory(target.path, (n, total, path) => {
               removed = n

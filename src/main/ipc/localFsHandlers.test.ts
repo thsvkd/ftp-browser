@@ -13,12 +13,13 @@ vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => os.tmpdir()) }
 }))
 // 드라이브 루트 확인은 fs/promises의 access만 쓴다. 테스트가 드라이브마다 응답을 고른다.
+// rmdir은 지울 수 없는 폴더(EPERM)를 흉내 내려고 감싼다.
 vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs/promises')>()
-  return { ...actual, access: vi.fn(actual.access) }
+  return { ...actual, access: vi.fn(actual.access), rmdir: vi.fn(actual.rmdir) }
 })
 
-import { access } from 'fs/promises'
+import { access, rmdir } from 'fs/promises'
 import { app, ipcMain } from 'electron'
 import type { BrowserWindow } from 'electron'
 import { isSafeCopyName, registerLocalFsHandlers } from './localFsHandlers'
@@ -37,6 +38,7 @@ describe('localFsHandlers', () => {
     vi.clearAllMocks()
     const real = await vi.importActual<typeof import('fs/promises')>('fs/promises')
     vi.mocked(access).mockImplementation(real.access)
+    vi.mocked(rmdir).mockImplementation(real.rmdir)
     vi.mocked(app.getPath).mockImplementation(() => os.tmpdir())
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lfs-ipc-test-'))
 
@@ -309,6 +311,207 @@ describe('localFsHandlers', () => {
       for (const name of ['', '.', '..', 'a/b'])
         for (const platform of ['win32', 'linux', 'darwin'])
           expect(isSafeCopyName(name, platform)).toBe(false)
+    })
+
+    /** 진행률을 처음 받은 뒤로 취소된 것으로 답하는 작업 관리자(`cancelAfterFirst`가 false면 취소 없음). */
+    function operations(cancelAfterFirst: boolean): OperationManager {
+      let cancelled = false
+      return {
+        create: vi.fn(() => ({ id: 'op1' })),
+        isCancelled: vi.fn(() => cancelled),
+        progress: vi.fn(() => {
+          cancelled = cancelAfterFirst
+        }),
+        complete: vi.fn(),
+        fail: vi.fn(),
+        markCancelled: vi.fn()
+      } as unknown as OperationManager
+    }
+
+    const exists = (p: string): Promise<boolean> =>
+      fs.access(p).then(
+        () => true,
+        () => false
+      )
+
+    it('keeps every source file not yet copied when a move is cancelled mid-way', async () => {
+      // covers: Test-1267
+      registerLocalFsHandlers({} as BrowserWindow, operations(true))
+      const folder = path.join(tmpDir, 'src', 'folder')
+      const dest = path.join(tmpDir, 'dest')
+      await fs.mkdir(folder, { recursive: true })
+      await fs.mkdir(dest)
+      await fs.writeFile(path.join(folder, 'a.txt'), 'A')
+      await fs.writeFile(path.join(folder, 'b.txt'), 'B')
+
+      const r = await handler('local:copyFiles')(null, [folder], dest, ['folder'], true)
+
+      expect(r.success).toBe(true)
+      const moved: string[] = []
+      const kept: string[] = []
+      for (const name of ['a.txt', 'b.txt']) {
+        const atSource = await exists(path.join(folder, name))
+        const atDest = await exists(path.join(dest, 'folder', name))
+        // 한 파일은 옮겨졌고(원본 없음·대상 있음), 다른 파일은 원본에 그대로다(대상 없음).
+        expect(atSource).not.toBe(atDest)
+        ;(atSource ? kept : moved).push(name)
+      }
+      expect(moved).toHaveLength(1)
+      expect(kept).toHaveLength(1)
+      expect(await fs.readFile(path.join(folder, kept[0]), 'utf8')).toBe(kept[0][0].toUpperCase())
+    })
+
+    it('removes moved source files and the folders they emptied, keeping folders with other entries', async () => {
+      // covers: Test-1268
+      registerLocalFsHandlers({} as BrowserWindow, operations(false))
+      const src = path.join(tmpDir, 'src')
+      const dest = path.join(tmpDir, 'dest')
+      const kept = path.join(src, 'kept')
+      const gone = path.join(src, 'gone')
+      await fs.mkdir(path.join(kept, 'sub'), { recursive: true })
+      await fs.mkdir(path.join(kept, 'empty'))
+      await fs.mkdir(path.join(gone, 'deep'), { recursive: true })
+      await fs.mkdir(dest)
+      await fs.writeFile(path.join(kept, 'a.txt'), 'A')
+      await fs.writeFile(path.join(kept, 'sub', 'b.txt'), 'B')
+      await fs.writeFile(path.join(gone, 'deep', 'c.txt'), 'C')
+      await fs.writeFile(path.join(src, 'f.txt'), 'F')
+
+      const r = await handler('local:copyFiles')(
+        null,
+        [kept, gone, path.join(src, 'f.txt')],
+        dest,
+        ['kept', 'gone', 'f.txt'],
+        true
+      )
+
+      expect(r).toEqual({ success: true, data: undefined })
+      expect(await fs.readFile(path.join(dest, 'kept', 'sub', 'b.txt'), 'utf8')).toBe('B')
+      expect(await fs.readFile(path.join(dest, 'gone', 'deep', 'c.txt'), 'utf8')).toBe('C')
+      expect(await fs.readFile(path.join(dest, 'f.txt'), 'utf8')).toBe('F')
+      // 옮긴 파일과 비게 된 폴더는 사라진다
+      for (const p of [
+        path.join(kept, 'a.txt'),
+        path.join(kept, 'sub'),
+        gone,
+        path.join(src, 'f.txt')
+      ])
+        expect(await exists(p), p).toBe(false)
+      // 복사 대상이 아니던 빈 하위 폴더와 그 상위 폴더는 남는다
+      expect(await fs.readdir(kept)).toEqual(['empty'])
+      expect(await fs.readdir(src)).toEqual(['kept'])
+    })
+
+    it('moves an empty source folder as an empty folder of the same name', async () => {
+      // covers: Test-1303
+      registerLocalFsHandlers({} as BrowserWindow, operations(false))
+      const empty = path.join(tmpDir, 'src', 'empty')
+      const dest = path.join(tmpDir, 'dest')
+      await fs.mkdir(empty, { recursive: true })
+      await fs.mkdir(dest)
+
+      const r = await handler('local:copyFiles')(null, [empty], dest, ['moved'], true)
+
+      expect(r).toEqual({ success: true, data: undefined })
+      expect(await fs.readdir(path.join(dest, 'moved'))).toEqual([])
+      expect(await exists(empty)).toBe(false)
+    })
+
+    it('copies (not moves) an empty source folder exactly as before', async () => {
+      // covers: Test-1303
+      registerLocalFsHandlers({} as BrowserWindow, operations(false))
+      const empty = path.join(tmpDir, 'src', 'empty')
+      const dest = path.join(tmpDir, 'dest')
+      await fs.mkdir(empty, { recursive: true })
+      await fs.mkdir(dest)
+
+      const r = await handler('local:copyFiles')(null, [empty], dest, ['moved'])
+
+      expect(r).toEqual({ success: true, data: undefined })
+      expect(await exists(empty)).toBe(true)
+      expect(await fs.readdir(dest)).toEqual([])
+    })
+
+    it('removes emptied nested folders deepest first up to the source folder, not its parent', async () => {
+      // covers: Test-1304
+      registerLocalFsHandlers({} as BrowserWindow, operations(false))
+      const parent = path.join(tmpDir, 'src')
+      const a = path.join(parent, 'a')
+      const dest = path.join(tmpDir, 'dest')
+      await fs.mkdir(path.join(a, 'b', 'c'), { recursive: true })
+      await fs.mkdir(dest)
+      // a/b의 파일이 a/b/c의 파일보다 먼저 옮겨지므로 얕은 폴더가 먼저 후보에 오른다
+      await fs.writeFile(path.join(a, 'b', '0.txt'), '0')
+      await fs.writeFile(path.join(a, 'b', 'c', 'x.txt'), 'X')
+
+      const r = await handler('local:copyFiles')(null, [a], dest, ['a'], true)
+
+      expect(r).toEqual({ success: true, data: undefined })
+      expect(await fs.readFile(path.join(dest, 'a', 'b', '0.txt'), 'utf8')).toBe('0')
+      expect(await fs.readFile(path.join(dest, 'a', 'b', 'c', 'x.txt'), 'utf8')).toBe('X')
+      expect(await exists(a)).toBe(false)
+      expect(await fs.readdir(parent)).toEqual([])
+    })
+  })
+
+  describe('local:deleteBatch', () => {
+    it('leaves a folder marked only-if-empty that is not empty, without reporting a failure', async () => {
+      // covers: Test-1271
+      const ops = {
+        create: vi.fn(() => ({ id: 'op1' })),
+        isCancelled: vi.fn(() => false),
+        progress: vi.fn(),
+        complete: vi.fn(),
+        fail: vi.fn(),
+        markCancelled: vi.fn()
+      }
+      registerLocalFsHandlers({} as BrowserWindow, ops as unknown as OperationManager)
+      const full = path.join(tmpDir, 'full')
+      const empty = path.join(tmpDir, 'empty')
+      await fs.mkdir(full)
+      await fs.mkdir(empty)
+      await fs.writeFile(path.join(full, 'keep.txt'), 'keep')
+
+      const r = await handler('local:deleteBatch')(null, [
+        { path: full, isDirectory: true, onlyIfEmpty: true },
+        { path: empty, isDirectory: true, onlyIfEmpty: true }
+      ])
+
+      expect(r).toEqual({ success: true, data: undefined })
+      expect(await fs.readFile(path.join(full, 'keep.txt'), 'utf8')).toBe('keep')
+      expect(await fs.readdir(tmpDir)).toEqual(['full'])
+      expect(ops.fail).not.toHaveBeenCalled()
+    })
+
+    it('does not fail the batch when an only-if-empty folder is missing or cannot be removed', async () => {
+      // covers: Test-1302
+      const ops = {
+        create: vi.fn(() => ({ id: 'op1' })),
+        isCancelled: vi.fn(() => false),
+        progress: vi.fn(),
+        complete: vi.fn(),
+        fail: vi.fn(),
+        markCancelled: vi.fn()
+      }
+      registerLocalFsHandlers({} as BrowserWindow, ops as unknown as OperationManager)
+      const locked = path.join(tmpDir, 'locked')
+      const file = path.join(tmpDir, 'f.txt')
+      await fs.mkdir(locked)
+      await fs.writeFile(file, 'F')
+      vi.mocked(rmdir).mockRejectedValueOnce(
+        Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' })
+      )
+
+      const r = await handler('local:deleteBatch')(null, [
+        { path: locked, isDirectory: true, onlyIfEmpty: true },
+        { path: path.join(tmpDir, 'gone'), isDirectory: true, onlyIfEmpty: true },
+        { path: file, isDirectory: false }
+      ])
+
+      expect(r).toEqual({ success: true, data: undefined })
+      expect(await fs.readdir(tmpDir)).toEqual(['locked'])
+      expect(ops.fail).not.toHaveBeenCalled()
+      expect(ops.complete).toHaveBeenCalled()
     })
   })
 

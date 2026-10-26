@@ -729,4 +729,263 @@ describe('useTransferStore move cleanup', () => {
     await settle()
     expect(invokeCalls(invoke, 'local:deleteBatch')).toHaveLength(1)
   })
+
+  it('deletes only the completed files and sends source folders as only-if-empty, deepest first', async () => {
+    // covers: Test-1270
+    await sendMoveUpload(['m1270a', 'm1270b', 'm1270c'], ['C:\\src\\dir', 'C:\\src\\top.jpg'])
+
+    useTransferStore.getState().applyUpdate({
+      upserts: [
+        job('m1270a', { status: 'completed', localPath: 'C:\\src\\dir\\a.jpg' }),
+        job('m1270b', { status: 'completed', localPath: 'C:\\src\\dir\\sub\\b.jpg' }),
+        job('m1270c', { status: 'completed', localPath: 'C:\\src\\top.jpg' })
+      ],
+      removedIds: []
+    })
+    await settle()
+
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([
+      [
+        [
+          { path: 'C:\\src\\dir\\a.jpg', isDirectory: false },
+          { path: 'C:\\src\\dir\\sub\\b.jpg', isDirectory: false },
+          { path: 'C:\\src\\top.jpg', isDirectory: false },
+          { path: 'C:\\src\\dir\\sub', isDirectory: true, onlyIfEmpty: true },
+          { path: 'C:\\src\\dir', isDirectory: true, onlyIfEmpty: true }
+        ]
+      ]
+    ])
+  })
+
+  it('deletes each batch exactly once and keeps other registrations when cleanup runs overlap', async () => {
+    // covers: Test-1272
+    await sendMoveUpload(['o1272a'], ['C:\\src\\a.jpg'])
+    await sendMoveUpload(['o1272b'], ['C:\\src\\b.jpg'])
+    await sendMoveUpload(['o1272c'], ['C:\\src\\c.jpg'])
+    // 원본 삭제가 바로 끝나지 않게 붙잡아 두어 두 정리 실행이 겹치게 한다.
+    const pending: Array<() => void> = []
+    invoke.mockImplementation((channel: string) =>
+      channel === 'local:deleteBatch'
+        ? new Promise((resolve) => pending.push(() => resolve({ success: true })))
+        : Promise.resolve({ success: true })
+    )
+    const { applyUpdate } = useTransferStore.getState()
+
+    applyUpdate({
+      upserts: [
+        job('o1272a', { status: 'completed', localPath: 'C:\\src\\a.jpg' }),
+        job('o1272b', { status: 'completed', localPath: 'C:\\src\\b.jpg' }),
+        job('o1272c', { status: 'active', localPath: 'C:\\src\\c.jpg' })
+      ],
+      removedIds: []
+    })
+    applyUpdate({
+      upserts: [job('o1272c', { status: 'active', localPath: 'C:\\src\\c.jpg' })],
+      removedIds: []
+    })
+    for (let i = 0; i < 5; i++) {
+      await settle()
+      pending.splice(0).forEach((resolve) => resolve())
+    }
+    applyUpdate({
+      upserts: [job('o1272c', { status: 'completed', localPath: 'C:\\src\\c.jpg' })],
+      removedIds: []
+    })
+    for (let i = 0; i < 3; i++) {
+      await settle()
+      pending.splice(0).forEach((resolve) => resolve())
+    }
+
+    const deleted = invokeCalls(invoke, 'local:deleteBatch').flatMap(
+      ([targets]) => targets as Array<{ path: string }>
+    )
+    expect(deleted.map((d) => d.path).sort()).toEqual([
+      'C:\\src\\a.jpg',
+      'C:\\src\\b.jpg',
+      'C:\\src\\c.jpg'
+    ])
+  })
+
+  it('cleans up once right after registering when the completing update arrived first', async () => {
+    // covers: Test-1273
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'transfer:send') {
+        // 답보다 먼저 완료 갱신이 온다
+        useTransferStore.getState().applyUpdate({
+          upserts: [
+            job('e1273', { batchId: 'b1273', status: 'completed', localPath: 'C:\\src\\a.jpg' })
+          ],
+          removedIds: []
+        })
+        return {
+          success: true,
+          data: { batchId: 'b1273', ids: ['e1273'], skipped: [], conflicts: [], totalBytes: 0 }
+        }
+      }
+      return { success: true }
+    })
+
+    await useTransferStore
+      .getState()
+      .send(
+        K,
+        { direction: 'upload', sources: ['C:\\src\\a.jpg'], destDir: '/photos' },
+        { label: 'a.jpg', to: { side: 'remote', path: '/photos' } },
+        { verb: 'move' }
+      )
+    await settle()
+
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([
+      [[{ path: 'C:\\src\\a.jpg', isDirectory: false }]]
+    ])
+  })
+
+  it("waits for another part's open sheet and then follows its verb", async () => {
+    // covers: Test-1274
+    for (const [verb, deletes] of [
+      ['move', 1],
+      ['copy', 0]
+    ] as const) {
+      invoke.mockReset()
+      const A = `a-${verb}@h:21`
+      const B = `b-${verb}@h:21`
+      let bSends = 0
+      invoke.mockImplementation(async (channel: string, conn: string) => {
+        if (channel !== 'transfer:send') return { success: true }
+        const conflicts =
+          conn === B && bSends++ === 0
+            ? [{ path: 'C:\\src\\b.jpg', name: 'b.jpg', existing: { size: 1 } }]
+            : []
+        const id = `${conn}-job`
+        return {
+          success: true,
+          data: { batchId: `${conn}-batch`, ids: [id], skipped: [], conflicts, totalBytes: 0 }
+        }
+      })
+      const ref = { verb: 'copy' as const } as { verb: 'copy' | 'move' }
+      const meta = { label: 'x', to: { side: 'remote' as const, path: '/photos' } }
+      const send = useTransferStore.getState().send
+      const partA = send(
+        A,
+        { direction: 'upload', sources: ['C:\\src\\a.jpg'], destDir: '/photos' },
+        meta,
+        ref
+      )
+      const partB = send(
+        B,
+        { direction: 'upload', sources: ['C:\\src\\b.jpg'], destDir: '/photos' },
+        meta,
+        ref
+      )
+      await partA
+      await settle()
+      const prompt = useTransferStore.getState().conflictQueue[0]
+      expect(prompt).toBeDefined()
+
+      // A가 끝났지만 B의 시트가 열려 있다: 아직 지우지 않는다
+      useTransferStore.getState().applyUpdate({
+        upserts: [job(`${A}-job`, { server: A, status: 'completed', localPath: 'C:\\src\\a.jpg' })],
+        removedIds: []
+      })
+      await settle()
+      expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([])
+
+      useTransferStore.getState().resolveConflicts(prompt.id, { decisions: {}, verb })
+      await partB
+      await settle()
+      expect(invokeCalls(invoke, 'local:deleteBatch')).toHaveLength(deletes)
+      if (deletes)
+        expect(invokeCalls(invoke, 'local:deleteBatch')[0]).toEqual([
+          [{ path: 'C:\\src\\a.jpg', isDirectory: false }]
+        ])
+    }
+  })
+
+  it('deletes nothing for a batch with a cancelled job and drops its registration once all jobs end', async () => {
+    // covers: Test-1275
+    await sendMoveUpload(['x1275a', 'x1275b'], ['C:\\src\\a.jpg', 'C:\\src\\b.jpg'])
+    const { applyUpdate } = useTransferStore.getState()
+
+    applyUpdate({
+      upserts: [
+        job('x1275a', { status: 'completed', localPath: 'C:\\src\\a.jpg' }),
+        job('x1275b', { status: 'cancelled', localPath: 'C:\\src\\b.jpg' })
+      ],
+      removedIds: []
+    })
+    await settle()
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([])
+
+    // 등록이 지워졌으므로 취소한 작업을 다시 돌려 모두 완료돼도 원본을 지우지 않는다.
+    applyUpdate({
+      upserts: [job('x1275b', { status: 'completed', localPath: 'C:\\src\\b.jpg' })],
+      removedIds: []
+    })
+    await settle()
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([])
+  })
+
+  it('keeps the registration through a failed job and deletes the sources once a retry completes it', async () => {
+    // covers: Test-1299
+    await sendMoveUpload(['y1299a', 'y1299b'], ['C:\\src\\a.jpg', 'C:\\src\\b.jpg'])
+    const { applyUpdate } = useTransferStore.getState()
+
+    applyUpdate({
+      upserts: [
+        job('y1299a', { status: 'completed', localPath: 'C:\\src\\a.jpg' }),
+        job('y1299b', { status: 'failed', localPath: 'C:\\src\\b.jpg' })
+      ],
+      removedIds: []
+    })
+    await settle()
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([])
+
+    // transfer:retry는 같은 id를 pending으로 되살린다
+    applyUpdate({
+      upserts: [job('y1299b', { status: 'pending', localPath: 'C:\\src\\b.jpg' })],
+      removedIds: []
+    })
+    applyUpdate({
+      upserts: [job('y1299b', { status: 'completed', localPath: 'C:\\src\\b.jpg' })],
+      removedIds: []
+    })
+    await settle()
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([
+      [
+        [
+          { path: 'C:\\src\\a.jpg', isDirectory: false },
+          { path: 'C:\\src\\b.jpg', isDirectory: false }
+        ]
+      ]
+    ])
+  })
+
+  it('drops the registration without deleting when clearing the list removes every job of the batch', async () => {
+    // covers: Test-1300
+    await sendMoveUpload(['z1300a', 'z1300b'], ['C:\\src\\a.jpg', 'C:\\src\\b.jpg'])
+    const { applyUpdate } = useTransferStore.getState()
+
+    applyUpdate({
+      upserts: [
+        job('z1300a', { status: 'completed', localPath: 'C:\\src\\a.jpg' }),
+        job('z1300b', { status: 'failed', localPath: 'C:\\src\\b.jpg' })
+      ],
+      removedIds: []
+    })
+    // 완료 목록 지우기
+    applyUpdate({ upserts: [], removedIds: ['z1300a', 'z1300b'] })
+    await settle()
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([])
+
+    // 등록이 지워졌으므로 같은 id가 다시 보여 모두 완료돼도 원본을 지우지 않는다.
+    applyUpdate({
+      upserts: [
+        job('z1300a', { status: 'completed', localPath: 'C:\\src\\a.jpg' }),
+        job('z1300b', { status: 'completed', localPath: 'C:\\src\\b.jpg' })
+      ],
+      removedIds: []
+    })
+    await settle()
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([])
+  })
 })

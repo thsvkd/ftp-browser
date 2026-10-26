@@ -8,7 +8,13 @@ import { fetchEntries, useListingStore } from '@renderer/stores/useListingStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
-import { useTransferStore, type VerbRef } from '@renderer/stores/useTransferStore'
+import {
+  holdVerb,
+  releaseVerb,
+  useTransferStore,
+  verbSettled,
+  type VerbRef
+} from '@renderer/stores/useTransferStore'
 import {
   fromLocalEntry,
   joinPath,
@@ -128,25 +134,28 @@ async function copyLocal(
   dest: Loc,
   verbRef: VerbRef
 ): Promise<boolean> {
+  holdVerb(verbRef)
   try {
-    const ops = await sameSideOps('copy', items, dest, verbRef)
+    let ops: SameSideOp[] | null
+    try {
+      ops = await sameSideOps('copy', items, dest, verbRef)
+    } finally {
+      releaseVerb(verbRef)
+    }
     if (!ops) return false
     if (!ops.length) return true
+    // 다른 부분의 시트가 열려 있으면 verb가 바뀔 수 있어 복사를 시작하기 전에 기다린다(F3).
+    await verbSettled(verbRef)
+    // 이동이면 main이 파일마다 복사 직후 원본을 지운다: 취소해도 아직 복사하지 않은 원본은 남는다(F1).
+    // skipped는 애초에 ops에 없다(V6).
     const r = await window.api.invoke<IpcResult<void>>(
       'local:copyFiles',
       ops.map((o) => o.source),
       dest.path,
-      ops.map((o) => o.name)
+      ops.map((o) => o.name),
+      ...(verbRef.verb === 'move' ? [true] : [])
     )
     if (!r.success) toast.error(t('toast.sendFailed'), { description: r.error })
-    // 이동을 고르면 복사가 끝난 ops의 원본만 잇다(V6). skipped는 애초에 ops에 없다.
-    else if (verbRef.verb === 'move' && ops.length) {
-      const kind = new Map(items.map((i) => [i.path, i.type]))
-      await window.api.invoke<IpcResult<void>>(
-        'local:deleteBatch',
-        ops.map((o) => ({ path: o.source, isDirectory: kind.get(o.source) === 'directory' }))
-      )
-    }
     return r.success
   } catch (err) {
     toast.error(t('toast.sendFailed'), {

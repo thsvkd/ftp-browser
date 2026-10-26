@@ -381,6 +381,19 @@ describe('FtpFileOperations', () => {
     })
   })
 
+  describe('deleteEmptyDirectory', () => {
+    it('removes only the folder itself with RMD on the main client and emits a delete', async () => {
+      // covers: Test-1305
+      await ops.deleteEmptyDirectory('/remote/dir')
+
+      expect(runOnMainClient).toHaveBeenCalledTimes(1)
+      expect(mockClient.removeEmptyDir).toHaveBeenCalledWith('/remote/dir')
+      expect(mockClient.removeEmptyDir).toHaveBeenCalledTimes(1)
+      for (const fn of [mockClient.list, mockClient.remove]) expect(fn).not.toHaveBeenCalled()
+      expect(emit).toHaveBeenCalledWith('mutation', { kind: 'delete', remotePath: '/remote/dir' })
+    })
+  })
+
   describe('rename', () => {
     it('should call rename on the client', async () => {
       await ops.rename('/remote/old.txt', '/remote/new.txt')

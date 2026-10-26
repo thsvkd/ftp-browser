@@ -272,8 +272,9 @@ describe('sendItems same-side verb', () => {
     useTransferStore.setState({ askConflicts: savedAskConflicts, conflictQueue: [] })
   })
 
-  it('deletes exactly the copied ops sources via local:deleteBatch after a successful copy when move was chosen', async () => {
+  it('moves exactly the ops sources through local:copyFiles in move mode when move was chosen', async () => {
     // covers: Test-1235
+    // v1.5.1 F1: 원본 삭제는 main의 이동 모드가 한다(렌더러는 local:deleteBatch를 부르지 않는다).
     invoke.mockImplementation(async (channel: string) => {
       if (channel === 'local:list')
         return { success: true, data: { path: 'C:\\dst', entries: [entry('C:\\dst\\a.jpg')] } }
@@ -284,10 +285,29 @@ describe('sendItems same-side verb', () => {
     const ok = await sendItems([localFile('C:\\src\\a.jpg')], dest)
 
     expect(ok).toBe(true)
-    expect(invokeCalls(invoke, 'local:copyFiles')).toHaveLength(1)
-    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([
-      [[{ path: 'C:\\src\\a.jpg', isDirectory: false }]]
+    expect(invokeCalls(invoke, 'local:copyFiles')).toEqual([
+      [['C:\\src\\a.jpg'], 'C:\\dst', ['a.jpg'], true]
     ])
+  })
+
+  it('passes move mode to local:copyFiles only for a move, and never calls local:deleteBatch', async () => {
+    // covers: Test-1269
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'local:list')
+        return { success: true, data: { path: 'C:\\dst', entries: [entry('C:\\dst\\a.jpg')] } }
+      return { success: true }
+    })
+    stubConflicts({ decisions: { 'C:\\dst\\a.jpg': 'overwrite' }, verb: 'move' })
+    expect(await sendItems([localFile('C:\\src\\a.jpg')], dest)).toBe(true)
+
+    stubConflicts({ decisions: { 'C:\\dst\\a.jpg': 'overwrite' }, verb: 'copy' })
+    expect(await sendItems([localFile('C:\\src\\a.jpg')], dest)).toBe(true)
+
+    expect(invokeCalls(invoke, 'local:copyFiles')).toEqual([
+      [['C:\\src\\a.jpg'], 'C:\\dst', ['a.jpg'], true],
+      [['C:\\src\\a.jpg'], 'C:\\dst', ['a.jpg']]
+    ])
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([])
   })
 
   it('never calls a delete channel for the default copy without conflicts', async () => {

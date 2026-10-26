@@ -34,4 +34,6 @@ export interface OperationProgress {
 export interface DeleteTarget {
   path: string
   isDirectory: boolean
+  /** Remove the folder only when it is empty; a folder that still has entries is kept, not a failure. */
+  onlyIfEmpty?: boolean
 }
