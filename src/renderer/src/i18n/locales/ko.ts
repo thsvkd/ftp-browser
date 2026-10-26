@@ -262,8 +262,8 @@ export const ko = {
   'sidebar.servers': '서버',
   'sidebar.recent': '최근 위치',
   'sidebar.serverConnecting': '연결 중…',
-  'sidebar.serverLost': '연결 끊김 · 눌러서 다시 연결',
-  'sidebar.serverOffline': '연결 안 됨 · 눌러서 연결',
+  'sidebar.serverLost': '연결 끊김 · 두 번 클릭(또는 Enter)으로 다시 연결',
+  'sidebar.serverOffline': '연결 안 됨 · 두 번 클릭(또는 Enter)으로 연결',
   'sidebar.disconnect': '{{name}} 연결 해제',
 
   'place.desktop': '바탕 화면',

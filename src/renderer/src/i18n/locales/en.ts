@@ -276,8 +276,8 @@ export const en = {
   'sidebar.servers': 'Servers',
   'sidebar.recent': 'Recent',
   'sidebar.serverConnecting': 'Connecting…',
-  'sidebar.serverLost': 'Disconnected · click to reconnect',
-  'sidebar.serverOffline': 'Not connected · click to connect',
+  'sidebar.serverLost': 'Disconnected · double-click or Enter to reconnect',
+  'sidebar.serverOffline': 'Not connected · double-click or Enter to connect',
   'sidebar.disconnect': 'Disconnect {{name}}',
 
   'place.desktop': 'Desktop',

@@ -253,8 +253,8 @@ export const zhCN = {
   'sidebar.servers': '服务器',
   'sidebar.recent': '最近',
   'sidebar.serverConnecting': '正在连接…',
-  'sidebar.serverLost': '已断开 · 点击重新连接',
-  'sidebar.serverOffline': '未连接 · 点击连接',
+  'sidebar.serverLost': '已断开 · 双击或按 Enter 重新连接',
+  'sidebar.serverOffline': '未连接 · 双击或按 Enter 连接',
   'sidebar.disconnect': '断开 {{name}}',
 
   'place.desktop': '桌面',

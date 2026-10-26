@@ -281,8 +281,8 @@ export const de = {
   'sidebar.servers': 'Server',
   'sidebar.recent': 'Zuletzt',
   'sidebar.serverConnecting': 'Verbindung wird hergestellt…',
-  'sidebar.serverLost': 'Getrennt · Klicken zum erneuten Verbinden',
-  'sidebar.serverOffline': 'Nicht verbunden · Klicken zum Verbinden',
+  'sidebar.serverLost': 'Getrennt · Doppelklick oder Eingabetaste zum erneuten Verbinden',
+  'sidebar.serverOffline': 'Nicht verbunden · Doppelklick oder Eingabetaste zum Verbinden',
   'sidebar.disconnect': '{{name}} trennen',
 
   'place.desktop': 'Desktop',

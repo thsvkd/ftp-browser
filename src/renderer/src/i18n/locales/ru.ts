@@ -304,8 +304,8 @@ export const ru = {
   'sidebar.servers': 'Серверы',
   'sidebar.recent': 'Недавние',
   'sidebar.serverConnecting': 'Подключение…',
-  'sidebar.serverLost': 'Отключено · нажмите, чтобы подключиться снова',
-  'sidebar.serverOffline': 'Нет подключения · нажмите, чтобы подключиться',
+  'sidebar.serverLost': 'Отключено · двойной щелчок или Enter — подключиться снова',
+  'sidebar.serverOffline': 'Нет подключения · двойной щелчок или Enter — подключиться',
   'sidebar.disconnect': 'Отключиться от {{name}}',
 
   'place.desktop': 'Рабочий стол',

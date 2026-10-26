@@ -438,8 +438,10 @@ export function connectSaved(saved: FtpServer, scope?: ParentNode): Promise<bool
 
 // 비밀번호 칸은 사용자 이름이 있을 때만 그려진다. 다음 프레임에 찾는다.
 // 범위를 넘기면 그 안에서만 찾는다: 관리창은 포커스를 가두므로 문서에서 찾으면 툴바로 빠진다(함정 A).
-function focusPassword(scope: ParentNode = document): void {
+// 툴바는 연결된 탭이면 비밀번호 칸이 없는 표시줄이므로 입력 모드로 바꾼 뒤 찾는다(F5).
+function focusPassword(scope?: ParentNode): void {
+  if (!scope) useServerStore.setState({ entering: true })
   requestAnimationFrame(() =>
-    scope.querySelector<HTMLInputElement>('input[type="password"]')?.focus()
+    (scope ?? document).querySelector<HTMLInputElement>('input[type="password"]')?.focus()
   )
 }

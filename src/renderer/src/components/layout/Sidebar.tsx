@@ -161,7 +161,9 @@ function ServerRow({
   saved,
   server,
   onDisconnect,
-  root
+  root,
+  selected,
+  onSelect
 }: {
   name: string
   sub: string
@@ -172,6 +174,9 @@ function ServerRow({
   server: string
   onDisconnect: () => void
   root: Loc | null
+  /** F6: 클릭으로 선택된 행(한 번에 하나). */
+  selected: boolean
+  onSelect: () => void
 }): React.JSX.Element {
   const t = useT()
   const { navigate, openTab } = useTabsStore.getState()
@@ -190,6 +195,7 @@ function ServerRow({
         }}
         onDragEnd={endDrag}
         onClick={(e) => {
+          onSelect()
           if (root) {
             if (e.ctrlKey || e.metaKey) openTab(root)
             else navigate(root)
@@ -207,10 +213,14 @@ function ServerRow({
           // D8: Enter는 더블클릭의 키보드 등가물. 연결된 행의 Enter는 기본 동작(=클릭)에 맡긴다.
           if (e.key !== 'Enter' || root) return
           e.preventDefault()
+          onSelect() // F19: Enter도 그 행을 선택한다
           if (saved) void connectSaved(saved)
           else connectToServer(server)
         }}
         onAuxClick={(e) => e.button === 1 && root && openTab(root, false)}
+        // F19: 역할 없는 button에 aria-selected는 유효하지 않다. 버튼이 지원하는 aria-pressed로 보인다
+        // (aria-current는 F6 사이드바 지역 선택자가 잡으므로 쓰지 않는다).
+        aria-pressed={selected}
         onDragOver={drop.handlers.onDragOver}
         onDrop={drop.handlers.onDrop}
         title={
@@ -226,6 +236,7 @@ function ServerRow({
         className={cn(
           'relative flex h-11 w-full shrink-0 items-center gap-2.5 rounded-[10px] px-2 text-left text-[var(--tx)] transition-colors hover:bg-[var(--hv)]',
           status === 'connected' && 'pr-9',
+          selected && 'bg-[var(--sf)] shadow-[0_1px_2px_rgba(0,0,0,.06)]',
           drop.over &&
             (drop.valid ? 'bg-[var(--acw)] ring-2 ring-[var(--ac)]' : 'ring-2 ring-[var(--dg)]')
         )}
@@ -268,7 +279,15 @@ function ServerRow({
 }
 
 /** 한 서버의 행과, 연결됐으면 그 연결의 최근 폴더 4개(`ftp:getRecentPaths(key)`). */
-function ServerEntry({ row }: { row: ServerRowData }): React.JSX.Element {
+function ServerEntry({
+  row,
+  selected,
+  onSelect
+}: {
+  row: ServerRowData
+  selected: boolean
+  onSelect: () => void
+}): React.JSX.Element {
   const status = useFtpStore((s) => s.connections[row.key]?.status ?? 'disconnected')
   const connected = status === 'connected'
   const [recent, setRecent] = useState<string[]>([])
@@ -298,6 +317,8 @@ function ServerEntry({ row }: { row: ServerRowData }): React.JSX.Element {
         saved={row.saved}
         server={row.key}
         onDisconnect={() => void useFtpStore.getState().disconnect(row.key)}
+        selected={selected}
+        onSelect={onSelect}
       />
       {root &&
         recent.map((path) => {
@@ -322,6 +343,7 @@ interface ServerRowData {
  */
 function Servers(): React.JSX.Element {
   const servers = useServerStore((s) => s.servers)
+  const [selected, setSelected] = useState<string | null>(null)
   // 저장 안 된 살아 있는 연결의 "키 호스트 포트" 줄들. 문자열 하나라 진행 중 갱신에 다시 그리지 않는다.
   const unsaved = useFtpStore((s) =>
     Object.entries(s.connections)
@@ -351,7 +373,12 @@ function Servers(): React.JSX.Element {
   return (
     <>
       {rows.map((row) => (
-        <ServerEntry key={row.key} row={row} />
+        <ServerEntry
+          key={row.key}
+          row={row}
+          selected={selected === row.key}
+          onSelect={() => setSelected(row.key)}
+        />
       ))}
     </>
   )

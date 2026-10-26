@@ -398,7 +398,8 @@ main[data-region='content']:has(+ div > #rail-pane[data-collapsed='true']) {
 }
 
 @media (forced-colors: active) {
-  [aria-selected='true'] {
+  [aria-selected='true'],
+  [data-region='sidebar'] [aria-pressed='true'] {
     outline: 2px solid Highlight;
     outline-offset: -2px;
   }

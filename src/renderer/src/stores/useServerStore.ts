@@ -33,6 +33,8 @@ interface ServerStore {
   address: string
   connecting: boolean
   error: string
+  /** The toolbar shows the address and password inputs even while the active tab is connected. */
+  entering: boolean
 
   /** `prefill` puts the most recent server into an empty toolbar (startup). Resolves false when the list could not be loaded. */
   loadServers: (prefill?: boolean) => Promise<boolean>
@@ -74,6 +76,7 @@ export const useServerStore = create<ServerStore>((set, get) => ({
   address: '',
   connecting: false,
   error: '',
+  entering: false,
 
   loadServers: async (prefill = false) => {
     try {

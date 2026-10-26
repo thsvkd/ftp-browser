@@ -253,8 +253,8 @@ export const zhTW = {
   'sidebar.servers': '伺服器',
   'sidebar.recent': '最近',
   'sidebar.serverConnecting': '連線中…',
-  'sidebar.serverLost': '已中斷連線 · 點擊以重新連線',
-  'sidebar.serverOffline': '未連線 · 點擊以連線',
+  'sidebar.serverLost': '已中斷連線 · 按兩下或按 Enter 以重新連線',
+  'sidebar.serverOffline': '未連線 · 按兩下或按 Enter 以連線',
   'sidebar.disconnect': '中斷 {{name}}',
 
   'place.desktop': '桌面',

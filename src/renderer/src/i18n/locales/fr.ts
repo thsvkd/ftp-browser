@@ -280,8 +280,8 @@ export const fr = {
   'sidebar.servers': 'Serveurs',
   'sidebar.recent': 'Récents',
   'sidebar.serverConnecting': 'Connexion en cours…',
-  'sidebar.serverLost': 'Déconnecté · cliquez pour vous reconnecter',
-  'sidebar.serverOffline': 'Non connecté · cliquez pour vous connecter',
+  'sidebar.serverLost': 'Déconnecté · double-clic ou Entrée pour vous reconnecter',
+  'sidebar.serverOffline': 'Non connecté · double-clic ou Entrée pour vous connecter',
   'sidebar.disconnect': 'Déconnecter {{name}}',
 
   'place.desktop': 'Bureau',
