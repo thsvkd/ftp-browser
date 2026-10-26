@@ -27,6 +27,8 @@ interface SettingsStore {
   setLanguage: (language: LanguageSetting) => void
   setTheme: (theme: ThemeSetting) => void
   setConflictChoice: (choice: ConflictDecision | null) => void
+  /** 모든 설정을 초기값으로(S7): 타일·기본 보기·숨김·삭제 확인·언어·테마. 열려 있는 탭의 보기는 그대로다(함정 D). */
+  reset: () => void
 }
 
 /** v1에만 있던 필드. 두 패널의 보기와 갤러리 썸네일 크기다. */
@@ -68,7 +70,17 @@ export const useSettingsStore = create<SettingsStore>()(
       setConfirmBeforeDelete: (confirm) => set({ confirmBeforeDelete: confirm }),
       setLanguage: (language) => set({ language }),
       setTheme: (theme) => set({ theme }),
-      setConflictChoice: (conflictChoice) => set({ conflictChoice })
+      setConflictChoice: (conflictChoice) => set({ conflictChoice }),
+      // persist 옵션(name·version·migrate)은 건드리지 않는다(함정 E).
+      reset: () =>
+        set({
+          viewMode: 'grid',
+          tileSize: TILE_DEFAULT,
+          showHidden: false,
+          confirmBeforeDelete: true,
+          language: 'system',
+          theme: 'system'
+        })
     }),
     {
       name: 'ftp-browser-settings',
