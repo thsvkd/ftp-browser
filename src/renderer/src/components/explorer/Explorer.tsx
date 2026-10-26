@@ -47,6 +47,7 @@ import {
   type SelectionState
 } from '@renderer/lib/selectionModel'
 import { planSend } from '@renderer/lib/sendPlan'
+import { isPendingConnect } from '@renderer/lib/splitConnect'
 import {
   connectToServer,
   dropShelf,
@@ -73,7 +74,7 @@ import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore, visiblePanes, type Split, type Tab } from '@renderer/stores/useTabsStore'
 import { isSafeLocalName, isSafeRemoteName, uniqueLocalNames } from '@shared/entryName'
 import type { IpcResult } from '@shared/types/ipc'
-import { startDrag, useDnd, useDropTarget } from './dnd'
+import { startDrag, useDnd, useDropTarget, useSplitDropTarget } from './dnd'
 import { DragGhost } from './DragGhost'
 import {
   EmptyPanel,
@@ -120,6 +121,8 @@ function useAutoConnect(tab: Tab): void {
   const server = tab.loc.side === 'remote' ? tab.loc.server : undefined
   useEffect(() => {
     if (!server) return
+    // 분할 연결이 곧 시작될 자리표시자 탭: 그 시도가 자동 연결과 겹치지 않게 한다(함정 I·P-C3).
+    if (isPendingConnect(server)) return
     const status = useFtpStore.getState().connections[server]?.status ?? 'disconnected'
     if (status !== 'disconnected') return
     const saved = savedServerOf(useServerStore.getState().servers, server)
@@ -156,6 +159,35 @@ const bySeq = (a: string, b: string): number => {
 }
 
 /**
+ * M15: 서버 행을 끌고 있는 동안 콘텐츠 영역을 반으로 나눈 놓기 자리. 호버한 쪽만 하이라이트와
+ * `split.dropHint`를 보여주고, 놓으면 그쪽 패널부터 만든다(함정 F — 놓기에서, 스프링이 아니라).
+ */
+function SplitHalf({ side }: { side: 'left' | 'right' }): React.JSX.Element {
+  const t = useT()
+  const { over, handlers } = useSplitDropTarget(`split:${side}`, side)
+  return (
+    <div
+      data-testid={`split-${side}`}
+      {...handlers}
+      className={cn('relative flex w-1/2 items-center justify-center', over && 'bg-[var(--acw)]')}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute inset-3 rounded-xl border-2 transition-colors',
+          over ? 'border-[var(--ac)]' : 'border-transparent'
+        )}
+      />
+      {over && (
+        <span className="pop pointer-events-none rounded-full border-2 border-[var(--ac)] bg-[var(--sf)] px-4 py-2 text-[13px] font-semibold text-[var(--tx)] shadow-lg">
+          {t('split.dropHint')}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
  * 탐색 영역: 보이는 패널(`visiblePanes`)마다 `TabExplorer` 하나. 분할이 보이면 두 패널 사이에 구분선을
  * 둔다(split-view §3.4). 렌더 순서는 탭 id로 고정하고 좌우는 `style.order`로만 정해, 좌우 바꾸기·분할
  * 진입에도 패널을 다시 마운트하지 않는다(P10, 함정 5). 탭이 바뀌어 다시 마운트되면(탭 id가 key) 메뉴·이름
@@ -165,6 +197,8 @@ export function Explorer(): React.JSX.Element | null {
   const tabs = useTabsStore((s) => s.tabs)
   const activeId = useTabsStore((s) => s.activeId)
   const split = useTabsStore((s) => s.split)
+  // M15: 서버 행을 끌고 있는 동안만 콘텐츠 절반의 놓기 자리가 뜬다(항목·OS 드래그와 구분된다).
+  const serverDrag = useDnd((s) => s.server !== null)
   const panes = visiblePanes({ tabs, activeId, split }).flatMap((p) => {
     const tab = tabs.find((x) => x.id === p.tabId)
     return tab ? [{ ...p, tab }] : []
@@ -212,6 +246,13 @@ export function Explorer(): React.JSX.Element | null {
           </PaneIdContext.Provider>
         ))}
       {shown && <SplitDivider ratio={ratio} rootRef={rootRef} order={1} />}
+      {/* M15: 서버 드래그 동안의 놓기 자리 — 콘텐츠 영역을 왼쪽/오른쪽 절반으로 나눈다. */}
+      {serverDrag && (
+        <div data-testid="split-zones" className="absolute inset-0 z-30 flex">
+          <SplitHalf side="left" />
+          <SplitHalf side="right" />
+        </div>
+      )}
       <SplitOverlay />
       <DragGhost />
     </div>
@@ -257,11 +298,13 @@ function TabExplorer({
   const patch = (p: Partial<Tab>): void => useTabsStore.getState().patchTab(tab.id, p)
 
   const cached = !!listing && (listing.status === 'ready' || listing.entries.length > 0)
+  // P-C3: 분할 연결 대기(시도 전·대기열)인 키는 게이트가 "연결 중"을 그린다(M16 ①).
+  const pendingConnect = isPendingConnect(remote ? loc.server : undefined)
   const gate: Gate = !remote
     ? 'live'
     : status === 'connected'
       ? 'live'
-      : status === 'connecting'
+      : status === 'connecting' || (pendingConnect && status === 'disconnected')
         ? 'connecting'
         : status === 'error'
           ? cached

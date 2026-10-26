@@ -33,6 +33,7 @@ import { connKey, MAIN_VIEWER } from '@shared/connKey'
 import type { FtpServer } from '@shared/types/ftp'
 import type { TransferJob } from '@shared/types/transfer'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
+import { AppShell } from '@renderer/components/layout/AppShell'
 import { useDnd } from './dnd'
 import {
   activeTab,
@@ -216,6 +217,105 @@ describe('Explorer — lightbox', () => {
       expect(listbox().getAttribute('aria-activedescendant')).toBe(optId(pathOf('b.jpg')))
     }
   )
+
+  it.each([
+    ['remote', 'ftp:downloadPreview'],
+    ['local', 'local:preview']
+  ] as const)(
+    'draws the %s video lightbox as a <video> of the preview data URL',
+    async (side, channel) => {
+      // covers: Test-1208
+      if (side === 'remote') {
+        h = setupExplorer({ remote: { [DIR]: [ftp('a.webm'), ftp('b.webm')] } })
+        await renderExplorer(remoteLoc(DIR))
+      } else {
+        h = setupExplorer({ local: { [LDIR]: [local(LDIR, 'a.webm'), local(LDIR, 'b.webm')] } })
+        await renderExplorer(localLoc(LDIR))
+      }
+      h.handlers[channel] = () => ({ success: true, data: 'data:video/webm;base64,AA==' })
+      listbox().focus()
+      key('Home')
+      key(' ')
+      await flush()
+
+      const dialog = screen.getByRole('dialog', { name: 'Preview: a.webm' })
+      const video = dialog.querySelector('video')
+      expect(invokeCalls(h.invoke, channel)).toHaveLength(1)
+      expect(video).not.toBeNull()
+      expect(video?.hasAttribute('controls')).toBe(true)
+      expect(video?.getAttribute('src')).toBe('data:video/webm;base64,AA==')
+    }
+  )
+
+  it('keeps the GIF lightbox on <img> with the image/gif data URL', async () => {
+    // covers: Test-1209
+    h = setupExplorer({ remote: { [DIR]: [ftp('anim.gif', { isImage: true })] } })
+    await renderExplorer(remoteLoc(DIR))
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: true,
+      data: 'data:image/gif;base64,R0lGOD'
+    })
+    listbox().focus()
+    key('Home')
+    key(' ')
+    await flush()
+
+    const dialog = screen.getByRole('dialog', { name: 'Preview: anim.gif' })
+    expect(dialog.querySelector('video')).toBeNull()
+    const img = dialog.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute('src')).toBe('data:image/gif;base64,R0lGOD')
+  })
+
+  it('gives Space, Enter and arrows to the video controls, and closes and pages outside them', async () => {
+    // covers: Test-1210
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.webm'), ftp('b.webm')] } })
+    await renderExplorer(remoteLoc(DIR))
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: true,
+      data: 'data:video/webm;base64,AA=='
+    })
+    listbox().focus()
+    key('Home')
+    key(' ')
+    await flush()
+    const dialog = screen.getByRole('dialog', { name: 'Preview: a.webm' })
+    const video = dialog.querySelector('video')
+    expect(video).not.toBeNull()
+
+    // 영상 컨트롤에 포커스가 있으면 키는 라이트박스로 새지 않는다: 목록도 안 넘기고 닫히지도 않는다.
+    for (const k of [' ', 'Enter', 'ArrowRight', 'ArrowLeft']) {
+      fireEvent.keyDown(video as HTMLElement, { key: k })
+    }
+    await flush()
+    expect(screen.getByRole('dialog', { name: 'Preview: a.webm' })).toBeTruthy()
+
+    // 영상 바깥에서는 기존 동작이 그대로여야 한다: 화살표는 넘기고 Space는 닫는다.
+    fireEvent.keyDown(dialog, { key: 'ArrowRight' })
+    await flush()
+    expect(screen.getByRole('dialog', { name: 'Preview: b.webm' })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: ' ' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('shows the existing preview.failed notice when the preview is refused as too large', async () => {
+    // covers: Test-1211
+    h = setupExplorer({ remote: { [DIR]: [ftp('huge.webm')] } })
+    await renderExplorer(remoteLoc(DIR))
+    h.handlers['ftp:downloadPreview'] = () => ({
+      success: false,
+      error: 'File too large for preview'
+    })
+    listbox().focus()
+    key('Home')
+    key(' ')
+    await flush()
+
+    // 기존 안내 문구가 그대로 나온다: 새 오류 문구를 만들지 않았다(P7).
+    const reason = 'File too large for preview'
+    expect(screen.getByText(en['preview.failed'].replace('{{reason}}', reason))).toBeTruthy()
+    expect(screen.queryByText(en['preview.none'])).toBeNull()
+  })
 })
 
 describe('Explorer — shelf and type-ahead', () => {
@@ -569,6 +669,88 @@ describe('Explorer — drag and drop', () => {
     const folder = await screen.findByRole('alertdialog')
     expect(within(folder).queryByRole('radio', { name: 'Overwrite' })).toBeNull()
     expect(within(folder).getByRole('radio', { name: 'Skip' })).toBeTruthy()
+  })
+
+  it('shows the transfer pill and the shelf drop strip together, and shelves on the strip', async () => {
+    // covers: Test-1256
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    useTabsStore.getState().openTab(remoteLoc(DIR))
+    render(<AppShell />)
+    await screen.findByRole('listbox')
+
+    // 다른 폴더에서 끌던 중: 탐색기의 기존 전송 안내 알약과 새 담기 띠가 함께 뜬다(함정 B).
+    act(() =>
+      useDnd.setState({
+        items: [fromFtpEntry(ftp('x.jpg'), '/elsewhere', server())],
+        over: null,
+        thumbs: [],
+        fromShelf: false
+      })
+    )
+    fireEvent.dragOver(listbox(), { dataTransfer: dt() })
+    expect(screen.getByText('Move 1 to photos')).toBeTruthy()
+    const bar = document.querySelector<HTMLElement>('[data-region="shelf-dock"][data-shelf-target]')
+    expect(bar).toBeTruthy()
+    expect(screen.getByText(en['shelf.dockHint'])).toBeTruthy()
+
+    const over = dt()
+    fireEvent.dragOver(bar as HTMLElement, { dataTransfer: over })
+    expect(over.dropEffect).toBe('copy')
+    fireEvent.drop(bar as HTMLElement, { dataTransfer: dt() })
+    expect(useShelfStore.getState().items.map((i) => i.entry.name)).toEqual(['x.jpg'])
+  })
+})
+
+describe('Explorer — split zones for a server drag', () => {
+  const zoneDt = (): Record<string, unknown> => ({
+    types: [],
+    files: [],
+    dropEffect: '',
+    setData: vi.fn(),
+    setDragImage: vi.fn(),
+    effectAllowed: ''
+  })
+  const OFFICE: FtpServer = {
+    id: 2,
+    name: 'Office',
+    host: 'ftp.office.lan',
+    port: 2121,
+    username: 'kim',
+    hasPassword: true,
+    secure: false
+  }
+
+  it('highlights only the hovered half with the split hint while a server is dragged', async () => {
+    // covers: Test-1258
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    await renderExplorer(remoteLoc(DIR))
+
+    // 항목을 끌 때는 분할 자리가 없다(M14·M15의 구분).
+    act(() =>
+      useDnd.setState({
+        items: [fromFtpEntry(ftp('a.jpg'), DIR, server())],
+        over: null,
+        thumbs: []
+      })
+    )
+    expect(screen.queryByTestId('split-zones')).toBeNull()
+
+    act(() =>
+      useDnd.setState({ server: OFFICE, items: null, over: null, thumbs: [], fromShelf: false })
+    )
+    const zones = screen.getByTestId('split-zones')
+    const left = within(zones).getByTestId('split-left')
+    const right = within(zones).getByTestId('split-right')
+
+    fireEvent.dragOver(left, { dataTransfer: zoneDt() })
+    expect(within(left).getByText(en['split.dropHint'])).toBeTruthy()
+    expect(within(right).queryByText(en['split.dropHint'])).toBeNull()
+    expect(useDnd.getState().over).toBe('split:left')
+
+    fireEvent.dragOver(right, { dataTransfer: zoneDt() })
+    expect(within(right).getByText(en['split.dropHint'])).toBeTruthy()
+    expect(within(left).queryByText(en['split.dropHint'])).toBeNull()
+    expect(useDnd.getState().over).toBe('split:right')
   })
 })
 

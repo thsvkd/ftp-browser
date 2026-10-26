@@ -142,10 +142,12 @@ describe('AppShell — connection status', () => {
 })
 
 describe('AppShell — regions', () => {
-  it('cycles focus sidebar → tabs → list → rail with F6 and back with Shift+F6', async () => {
+  it('cycles focus sidebar → tabs → list → the shelf dock with F6 and back with Shift+F6', async () => {
     // covers: Test-834
     render(<AppShell />)
     await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
+    // 선반이 도크로 옮긴 뒤(함정 E): 담긴 항목의 행이 F6의 네 번째 지역이다.
+    act(() => useShelfStore.getState().add([fromLocalEntry(local(HOME, 's.txt'))]))
     const key = (shiftKey = false): void => {
       fireEvent.keyDown(document.activeElement ?? document.body, { key: 'F6', shiftKey })
     }
@@ -153,12 +155,12 @@ describe('AppShell — regions', () => {
       screen.getByRole('navigation', { name: en['sidebar.label'] })
     ).getByRole('button', { name: 'Downloads' })
     expect(sidebarCurrent.getAttribute('aria-current')).toBe('location')
-    const shelfTab = screen.getByRole('tab', { name: new RegExp(`^${en['shelf.title']}`) })
+    const dockRow = screen.getByRole('listitem', { name: /^s\.txt,/ })
 
     // 처음에는 다른 것이 포커스를 갖고 있지 않으니 목록이 받는다(함정 13).
     expect(document.activeElement).toBe(screen.getByRole('listbox'))
     key()
-    expect(document.activeElement).toBe(shelfTab)
+    expect(document.activeElement).toBe(dockRow)
     key()
     expect(document.activeElement).toBe(sidebarCurrent)
     key()
@@ -170,7 +172,7 @@ describe('AppShell — regions', () => {
     key(true)
     expect(document.activeElement).toBe(sidebarCurrent)
     key(true)
-    expect(document.activeElement).toBe(shelfTab)
+    expect(document.activeElement).toBe(dockRow)
   })
 })
 
@@ -233,7 +235,6 @@ describe('AppShell — collapsed panes', () => {
     const nav = screen.getByRole('navigation', { name: en['sidebar.label'] })
     const current = within(nav).getByRole('button', { name: 'Downloads' })
     const list = screen.getByRole('listbox')
-    const shelfTab = screen.getByRole('tab', { name: new RegExp(`^${en['shelf.title']}`) })
     const tab = screen.getByRole('tab', { name: 'Downloads' })
     const f6 = (shiftKey = false): void => {
       fireEvent.keyDown(document.activeElement ?? document.body, { key: 'F6', shiftKey })
@@ -251,18 +252,18 @@ describe('AppShell — collapsed panes', () => {
     expect(layout().left.collapsed).toBe(true)
     expect(document.activeElement).toBe(tab)
 
-    // 사이드바를 접으면 탭 → 목록 → 레일 → 탭.
+    // 사이드바를 접으면 탭과 목록만 돈다(선반은 도크로 옮겨 빈 선반이면 F6 지역이 없다).
     list.focus()
-    f6()
-    expect(document.activeElement).toBe(shelfTab)
     f6()
     expect(document.activeElement).toBe(tab)
     f6()
     expect(document.activeElement).toBe(list)
-    f6(true)
+    f6()
     expect(document.activeElement).toBe(tab)
     f6(true)
-    expect(document.activeElement).toBe(shelfTab)
+    expect(document.activeElement).toBe(list)
+    f6(true)
+    expect(document.activeElement).toBe(tab)
 
     // 레일만 접으면 사이드바 → 탭 → 목록.
     act(() => layout().toggle('left'))
@@ -291,7 +292,7 @@ describe('AppShell — collapsed panes', () => {
     const nav = screen.getByRole('navigation', { name: en['sidebar.label'] })
     expect(nav.closest('#sidebar-pane')).not.toBeNull()
     expect(
-      screen.getByRole('region', { name: en['shelf.title'] }).closest('#rail-pane')
+      screen.getByRole('region', { name: en['rail.info'] }).closest('#rail-pane')
     ).not.toBeNull()
     expect(screen.getAllByRole('separator')).toHaveLength(2)
 
@@ -433,7 +434,7 @@ describe('AppShell — split view shortcuts', () => {
     expect(split()).toBeNull()
   })
 
-  it('cycles F6 sidebar, tabs, left list, right list, rail and activates the right pane on reaching it', async () => {
+  it('cycles F6 sidebar, tabs, left list, right list and activates the right pane on reaching it', async () => {
     // covers: Test-1082
     const { L, R } = await startSplit()
     const f6 = (shiftKey = false): void => {
@@ -442,7 +443,6 @@ describe('AppShell — split view shortcuts', () => {
     const sidebarCurrent = within(
       screen.getByRole('navigation', { name: en['sidebar.label'] })
     ).getByRole('button', { name: 'Downloads' })
-    const shelfTab = screen.getByRole('tab', { name: new RegExp(`^${en['shelf.title']}`) })
     const activeTabButton = (): Element | null =>
       document.querySelector('[data-region="tabs"] [role="tab"][aria-selected="true"]')
     const listOf = (id: string): HTMLElement => document.getElementById(`explorer-list-${id}`)!
@@ -451,9 +451,7 @@ describe('AppShell — split view shortcuts', () => {
     f6() // 왼쪽 목록 → (다음) 오른쪽 목록
     expect(document.activeElement).toBe(listOf(R))
     expect(useTabsStore.getState().activeId).toBe(R)
-    f6()
-    expect(document.activeElement).toBe(shelfTab)
-    f6()
+    f6() // 선반은 도크로 옮겼다(함정 E): 레일은 지역이 없다
     expect(document.activeElement).toBe(sidebarCurrent)
     f6()
     expect(document.activeElement).toBe(activeTabButton())
@@ -472,8 +470,6 @@ describe('AppShell — split view shortcuts', () => {
     expect(document.activeElement).toBe(activeTabButton())
     f6(true)
     expect(document.activeElement).toBe(sidebarCurrent)
-    f6(true)
-    expect(document.activeElement).toBe(shelfTab)
     f6(true)
     expect(document.activeElement).toBe(listOf(R))
     expect(useTabsStore.getState().activeId).toBe(R)
@@ -529,22 +525,23 @@ describe('AppShell — split view shortcuts', () => {
     await startSplit(remoteLoc('/photos'))
     act(() => {
       useShelfStore.getState().add([fromLocalEntry(local('C:\\other', 's.txt'))])
-      useShelfStore.getState().setRailTab('shelf')
     })
     const status = (): HTMLElement => screen.getByRole('contentinfo')
     const sidebar = (): HTMLElement => screen.getByRole('navigation', { name: en['sidebar.label'] })
-    const rail = (): HTMLElement => document.querySelector<HTMLElement>('[data-region="shelf"]')!
+    const rail = (): HTMLElement => document.querySelector<HTMLElement>('[data-region="info"]')!
+    const dock = (): HTMLElement =>
+      document.querySelector<HTMLElement>('[data-region="shelf-dock"]')!
     const current = (): Element | null => sidebar().querySelector('[aria-current="location"]')
 
     const expectLeft = (): void => {
       expect(within(status()).getByText('1 item')).toBeTruthy()
       expect(current()?.textContent).toContain('Downloads')
-      expect(within(rail()).getByText(/to Downloads$/)).toBeTruthy()
+      expect(within(dock()).getByText(/to Downloads$/)).toBeTruthy()
     }
     const expectRight = (): void => {
       expect(within(status()).getByText('3 items')).toBeTruthy()
       expect(current()?.textContent ?? '').not.toContain('Downloads')
-      expect(within(rail()).getByText(/to photos$/)).toBeTruthy()
+      expect(within(dock()).getByText(/to photos$/)).toBeTruthy()
     }
     expectLeft()
     fireEvent.pointerDown(paneEl('right'))
@@ -554,8 +551,7 @@ describe('AppShell — split view shortcuts', () => {
     fireEvent.pointerDown(paneEl('right'))
     expectRight()
 
-    // 정보 패널의 폴더 요약
-    act(() => useShelfStore.getState().setRailTab('info'))
+    // 정보 패널의 폴더 요약 — 레일은 정보 전용이다(F1).
     expect(within(rail()).getByRole('heading', { name: 'photos' })).toBeTruthy()
     fireEvent.pointerDown(paneEl('left'))
     expect(within(rail()).getByRole('heading', { name: 'Downloads' })).toBeTruthy()

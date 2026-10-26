@@ -8,11 +8,13 @@ import { useActiveTab } from '@renderer/stores/useTabsStore'
 import { savedServerOf } from '@renderer/lib/connections'
 import {
   emptyDraft,
+  hasUser,
   serverAddress,
   serverLabel,
   toDraft,
   type ServerDraft
 } from '@renderer/lib/serverAddress'
+import { connectSaved } from '@renderer/lib/sendItems'
 import type { FtpServer } from '@shared/types/ftp'
 import { PasswordInput } from './ServerForm'
 import { SavedServersPopover } from './SavedServersPopover'
@@ -96,10 +98,10 @@ export function ConnectBar(): React.JSX.Element {
       closePopover()
       return
     }
-    // 연결된 상태에서 고르면 그 서버를 더해 그 서버의 탭으로 간다.
+    // 더블클릭·Enter는 네 표면과 같은 활성화 경로(D1·D2). 연결된 상태에서 고르면 그 서버로 전환한다.
     if (andConnect || isConnected) {
       setPopover(false)
-      void connect(toDraft(server))
+      void connectSaved(server)
     } else {
       // 클릭은 주소창에 채우기만 하고 목록은 열어 둔다. 닫으면 이어지는 더블클릭이 갈 곳이 없다.
       select(server)
@@ -206,7 +208,8 @@ export function ConnectBar(): React.JSX.Element {
   }
 
   function addressBar(): React.JSX.Element {
-    const hasUser = draft.username.trim() !== '' && !/^anonymous$/i.test(draft.username.trim())
+    // 비밀번호 칸을 그리는 기준은 서버 활성화 판정(D6)과 같은 식이다.
+    const showPassword = hasUser(draft.username)
     return (
       <div ref={barRef} className="relative flex min-w-0 items-center gap-2">
         <div
@@ -265,7 +268,7 @@ export function ConnectBar(): React.JSX.Element {
             aria-label={t('connect.address')}
             className="min-w-0 flex-1 bg-transparent px-2.5 font-mono text-[12.5px] text-[var(--tx)] placeholder:font-sans placeholder:text-[var(--mu)] focus:outline-none disabled:text-[var(--mu)]"
           />
-          {hasUser && (
+          {showPassword && (
             <PasswordInput
               value={draft.password}
               disabled={connecting}

@@ -8,9 +8,10 @@ import { useListingStore } from '@renderer/stores/useListingStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
 import { makeApiMock, invokeCalls, type ApiMock } from '@renderer/test/rendererTestUtils'
+import { useTransferStore, type ConflictAnswer } from '@renderer/stores/useTransferStore'
 import type { LocalFileEntry } from '@shared/types/local'
-import { fromLocalEntry, type Loc } from './explorerEntry'
-import { locLabel, reloadActiveTab, shelveOsFiles, sourceLabel } from './sendItems'
+import { fromLocalEntry, type ExplorerEntry, type Loc } from './explorerEntry'
+import { locLabel, reloadActiveTab, sendItems, shelveOsFiles, sourceLabel } from './sendItems'
 
 vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }),
@@ -53,7 +54,7 @@ beforeEach(() => {
   paths = {}
   api.getPathForFile.mockImplementation((f: File) => paths[f.name] ?? '')
   vi.stubGlobal('api', api)
-  useShelfStore.setState({ items: [], railTab: 'info' })
+  useShelfStore.setState({ items: [], dockOpen: false })
 })
 
 afterEach(() => {
@@ -80,7 +81,7 @@ describe('shelveOsFiles', () => {
       fromLocalEntry(entry('C:\\in\\docs', 'directory'))
     ])
     expect(useShelfStore.getState().items[1].entry.type).toBe('directory')
-    expect(useShelfStore.getState().railTab).toBe('shelf')
+    expect(useShelfStore.getState().dockOpen).toBe(true)
 
     invoke.mockClear()
     expect(await shelveOsFiles([])).toBe(0)
@@ -92,7 +93,7 @@ describe('shelveOsFiles', () => {
     // covers: Test-875
     paths = { 'a.jpg': 'C:\\in\\a.jpg', 'b.jpg': 'C:\\in\\b.jpg', 'c.jpg': 'C:\\in\\c.jpg' }
     useShelfStore.getState().add([fromLocalEntry(entry('C:\\in\\a.jpg'))])
-    useShelfStore.setState({ railTab: 'info' })
+    useShelfStore.setState({ dockOpen: false })
 
     // 전부 중복: 이미 있는 것 + 같은 드롭 안의 같은 경로 둘
     invoke.mockResolvedValue(ok([entry('C:\\in\\a.jpg'), entry('C:\\in\\a.jpg')]))
@@ -100,7 +101,7 @@ describe('shelveOsFiles', () => {
     expect(shelfNames()).toEqual(['a.jpg'])
     expect(toast).toHaveBeenCalledTimes(1)
     expect(toast).toHaveBeenCalledWith(en['toast.alreadyOnShelf'])
-    expect(useShelfStore.getState().railTab).toBe('info')
+    expect(useShelfStore.getState().dockOpen).toBe(false)
 
     // 일부만 중복: 새것만 담고 토스트는 없다. 같은 드롭 안의 같은 경로 둘은 하나만
     vi.mocked(toast).mockClear()
@@ -110,7 +111,7 @@ describe('shelveOsFiles', () => {
     expect(await shelveOsFiles([file('a.jpg'), file('b.jpg'), file('b.jpg')])).toBe(1)
     expect(shelfNames()).toEqual(['a.jpg', 'b.jpg'])
     expect(toast).not.toHaveBeenCalled()
-    expect(useShelfStore.getState().railTab).toBe('shelf')
+    expect(useShelfStore.getState().dockOpen).toBe(true)
   })
 
   it('reports what could not be read without throwing', async () => {
@@ -122,7 +123,7 @@ describe('shelveOsFiles', () => {
     expect(await shelveOsFiles([file('a.jpg'), file('virtual.txt')])).toBe(1)
     expect(invokeCalls(invoke, 'local:stat')).toEqual([[['C:\\in\\a.jpg']]])
     invoke.mockClear()
-    useShelfStore.setState({ items: [], railTab: 'info' })
+    useShelfStore.setState({ items: [], dockOpen: false })
     vi.mocked(toast).mockClear()
     expect(await shelveOsFiles([file('v1'), file('v2')])).toBe(0)
     expect(invoke).not.toHaveBeenCalled()
@@ -141,7 +142,7 @@ describe('shelveOsFiles', () => {
     expect(toast.error).not.toHaveBeenCalled()
 
     // (c) success:false는 아무것도 담지 않고 toast.error
-    useShelfStore.setState({ items: [], railTab: 'info' })
+    useShelfStore.setState({ items: [], dockOpen: false })
     vi.mocked(toast).mockClear()
     invoke.mockResolvedValue({ success: false, error: 'boom' })
     expect(await shelveOsFiles([file('a.jpg'), file('b.jpg')])).toBe(0)
@@ -247,5 +248,109 @@ describe('sourceLabel', () => {
     expect(rootB).toBe(t('place.root', { source: RB2 }))
     expect(locLabel({ side: 'remote', path: '/photos', server: RA })).toBe('photos')
     expect(locLabel({ side: 'remote', path: '/photos', server: RB2 })).toBe('photos')
+  })
+})
+
+describe('sendItems same-side verb', () => {
+  const dest: Loc = { side: 'local', path: 'C:\\dst' }
+  const localFile = (path: string): ExplorerEntry => fromLocalEntry(entry(path))
+  /** 충돌 시트 대신 주어진 답을 돌려주게 `askConflicts`를 잠시 갈아끼운다(V3의 verbRef 확인용). */
+  const stubConflicts = (answer: ConflictAnswer): ReturnType<typeof vi.fn> => {
+    const mock = vi.fn(async () => answer)
+    useTransferStore.setState({ askConflicts: mock })
+    return mock
+  }
+
+  let savedAskConflicts: ReturnType<typeof useTransferStore.getState>['askConflicts']
+
+  beforeEach(() => {
+    savedAskConflicts = useTransferStore.getState().askConflicts
+    useTransferStore.setState({ conflictQueue: [] })
+  })
+
+  afterEach(() => {
+    useTransferStore.setState({ askConflicts: savedAskConflicts, conflictQueue: [] })
+  })
+
+  it('deletes exactly the copied ops sources via local:deleteBatch after a successful copy when move was chosen', async () => {
+    // covers: Test-1235
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'local:list')
+        return { success: true, data: { path: 'C:\\dst', entries: [entry('C:\\dst\\a.jpg')] } }
+      return { success: true }
+    })
+    stubConflicts({ decisions: { 'C:\\dst\\a.jpg': 'overwrite' }, verb: 'move' })
+
+    const ok = await sendItems([localFile('C:\\src\\a.jpg')], dest)
+
+    expect(ok).toBe(true)
+    expect(invokeCalls(invoke, 'local:copyFiles')).toHaveLength(1)
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([
+      [[{ path: 'C:\\src\\a.jpg', isDirectory: false }]]
+    ])
+  })
+
+  it('never calls a delete channel for the default copy without conflicts', async () => {
+    // covers: Test-1236
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'local:list') return { success: true, data: { path: 'C:\\dst', entries: [] } }
+      return { success: true }
+    })
+
+    const ok = await sendItems([localFile('C:\\src\\a.jpg')], dest)
+
+    expect(ok).toBe(true)
+    expect(invokeCalls(invoke, 'local:copyFiles')).toHaveLength(1)
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([])
+  })
+
+  it('deletes nothing when local:copyFiles failed although move was chosen', async () => {
+    // covers: Test-1237
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'local:list')
+        return { success: true, data: { path: 'C:\\dst', entries: [entry('C:\\dst\\a.jpg')] } }
+      if (channel === 'local:copyFiles') return { success: false, error: 'disk full' }
+      return { success: true }
+    })
+    stubConflicts({ decisions: { 'C:\\dst\\a.jpg': 'overwrite' }, verb: 'move' })
+
+    const ok = await sendItems([localFile('C:\\src\\a.jpg')], dest)
+
+    expect(ok).toBe(false)
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([])
+  })
+
+  it('calls ftp:rename only regardless of the verb, never a delete channel', async () => {
+    // covers: Test-1238
+    const server = 'me@h:21'
+    useFtpStore.setState({
+      connections: {
+        [server]: { status: 'connected', host: 'h', port: 21, user: 'me', error: null }
+      }
+    })
+    const remoteDest: Loc = { side: 'remote', path: '/dst', server }
+    const item: ExplorerEntry = {
+      side: 'remote',
+      server,
+      path: '/src/a.jpg',
+      name: 'a.jpg',
+      type: 'file',
+      size: 1024,
+      modifiedAt: MODIFIED_AT,
+      hidden: false,
+      category: 'image',
+      isImage: true
+    }
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'ftp:list') return { success: true, data: { path: '/dst', entries: [] } }
+      return { success: true }
+    })
+
+    const ok = await sendItems([item], remoteDest)
+
+    expect(ok).toBe(true)
+    expect(invokeCalls(invoke, 'ftp:rename')).toEqual([[server, '/src/a.jpg', '/dst/a.jpg']])
+    expect(invokeCalls(invoke, 'ftp:deleteBatch')).toEqual([])
+    expect(invokeCalls(invoke, 'local:deleteBatch')).toEqual([])
   })
 })

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
-import { useTransferStore } from '@renderer/stores/useTransferStore'
+import { useTransferStore, type ConflictAnswer } from '@renderer/stores/useTransferStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { formatBytes, formatDate } from '@renderer/lib/utils'
 import type {
@@ -37,6 +37,12 @@ const REQUEST: TransferSendRequest = {
   destDir: 'C:\\dl'
 }
 
+const UPLOAD: TransferSendRequest = {
+  direction: 'upload',
+  sources: ['C:\\src'],
+  destDir: '/photos'
+}
+
 const QUEUED: TransferSendResult = {
   batchId: 'b1',
   ids: ['j1'],
@@ -59,10 +65,12 @@ function answerConflicts(conflicts: TransferConflict[]): void {
 }
 
 /** 보내기를 시작하고 시트가 뜰 때까지 기다린다. async 함수가 프라미스를 풀지 않도록 감싸서 돌려준다. */
-async function startSend(): Promise<{ pending: Promise<TransferSendResult | null> }> {
+async function startSend(
+  request: TransferSendRequest = REQUEST
+): Promise<{ pending: Promise<TransferSendResult | null> }> {
   let pending!: Promise<TransferSendResult | null>
   act(() => {
-    pending = useTransferStore.getState().send(K, REQUEST, {
+    pending = useTransferStore.getState().send(K, request, {
       label: 'photos',
       to: { side: 'local', path: 'C:\\dl' }
     })
@@ -207,7 +215,7 @@ describe('ConflictSheet', () => {
     mockInvoke.mockResolvedValue({ success: true })
     render(<ConflictSheet />)
     const moved = { target: '/dst/a.jpg', source: '/src/a.jpg', folder: false }
-    let answer!: Promise<Record<string, string> | null>
+    let answer!: Promise<ConflictAnswer | null>
     act(() => {
       answer = useTransferStore
         .getState()
@@ -225,7 +233,10 @@ describe('ConflictSheet', () => {
       [K, '/src/a.jpg']
     ])
     await decide(userEvent.setup(), 'Overwrite')
-    await expect(answer).resolves.toEqual({ '/dst/a.jpg': 'overwrite' })
+    await expect(answer).resolves.toEqual({
+      decisions: { '/dst/a.jpg': 'overwrite' },
+      verb: 'move'
+    })
 
     act(() => {
       answer = useTransferStore
@@ -241,7 +252,10 @@ describe('ConflictSheet', () => {
         .map((r) => (r as HTMLInputElement).labels?.[0].textContent)
     ).toEqual(['Keep both (rename)', 'Skip'])
     await decide(userEvent.setup(), 'Skip', sheet)
-    await expect(answer).resolves.toEqual({ 'C:\\dst\\sub': 'skip' })
+    await expect(answer).resolves.toEqual({
+      decisions: { 'C:\\dst\\sub': 'skip' },
+      verb: 'copy'
+    })
   })
 
   it('shows a relay conflict as two remote cards on their own servers and resends with the decisions', async () => {
@@ -519,5 +533,156 @@ describe('ConflictSheet', () => {
     await user.tab({ shift: true })
     expect(names()).toBe('Confirm')
     expect(sheet.contains(document.activeElement)).toBe(true)
+  })
+
+  it('shows the send-verb toggle above the cards, defaulting to copy for upload, download and same-side copy', async () => {
+    // covers: Test-1224
+    const user = userEvent.setup()
+    render(<ConflictSheet />)
+    const pressed = (sheet: HTMLElement, name: string): string | null =>
+      within(sheet).getByRole('button', { name }).getAttribute('aria-pressed')
+
+    // 업로드
+    answerConflicts([conflict('a.jpg')])
+    let { pending } = await startSend(UPLOAD)
+    let sheet = screen.getByRole('alertdialog')
+    expect(pressed(sheet, 'Copy')).toBe('true')
+    expect(pressed(sheet, 'Move')).toBe('false')
+    await decide(user, 'Skip', sheet)
+    await pending
+
+    // 다운로드
+    answerConflicts([conflict('a.jpg')])
+    ;({ pending } = await startSend())
+    sheet = screen.getByRole('alertdialog')
+    expect(pressed(sheet, 'Copy')).toBe('true')
+    expect(pressed(sheet, 'Move')).toBe('false')
+    await decide(user, 'Skip', sheet)
+    await pending
+
+    // 같은 쪽 복사(로컬↔로컬)
+    mockInvoke.mockResolvedValue({ success: true })
+    let answer!: Promise<ConflictAnswer | null>
+    act(() => {
+      answer = useTransferStore.getState().askConflicts('copy', [conflict('a.jpg')])
+    })
+    sheet = await screen.findByRole('alertdialog')
+    expect(pressed(sheet, 'Copy')).toBe('true')
+    expect(pressed(sheet, 'Move')).toBe('false')
+    await decide(user, 'Skip', sheet)
+    await expect(answer).resolves.toEqual({ decisions: { 'C:\\dl\\a.jpg': 'skip' }, verb: 'copy' })
+  })
+
+  it('resolves with { decisions, verb: move } when move is chosen before deciding', async () => {
+    // covers: Test-1225
+    const user = userEvent.setup()
+    mockInvoke.mockResolvedValue({ success: true })
+    render(<ConflictSheet />)
+    let answer!: Promise<ConflictAnswer | null>
+    act(() => {
+      answer = useTransferStore.getState().askConflicts('download', [conflict('a.jpg')])
+    })
+    const sheet = await screen.findByRole('alertdialog')
+
+    await user.click(within(sheet).getByRole('button', { name: 'Move' }))
+    await decide(user, 'Overwrite', sheet)
+
+    await expect(answer).resolves.toEqual({
+      decisions: { 'C:\\dl\\a.jpg': 'overwrite' },
+      verb: 'move'
+    })
+  })
+
+  it('keeps move chosen on the first sheet when asking the next conflict', async () => {
+    // covers: Test-1226
+    const user = userEvent.setup()
+    mockInvoke.mockResolvedValue({ success: true })
+    render(<ConflictSheet />)
+    let answer!: Promise<ConflictAnswer | null>
+    act(() => {
+      answer = useTransferStore
+        .getState()
+        .askConflicts('download', [conflict('a.jpg'), conflict('b.jpg')])
+    })
+    let sheet = await screen.findByRole('alertdialog')
+
+    await user.click(within(sheet).getByRole('checkbox', { name: 'Do the same for the other 1' }))
+    await user.click(within(sheet).getByRole('button', { name: 'Move' }))
+    await decide(user, 'Overwrite', sheet)
+
+    sheet = await screen.findByRole('alertdialog')
+    expect(within(sheet).getByRole('button', { name: 'Move' }).getAttribute('aria-pressed')).toBe(
+      'true'
+    )
+    await decide(user, 'Skip', sheet)
+
+    await expect(answer).resolves.toEqual({
+      decisions: { 'C:\\dl\\a.jpg': 'overwrite', 'C:\\dl\\b.jpg': 'skip' },
+      verb: 'move'
+    })
+  })
+
+  it('locks a remote-to-remote sheet to move and disables copy with the reason', async () => {
+    // covers: Test-1227
+    const user = userEvent.setup()
+    mockInvoke.mockResolvedValue({ success: true })
+    render(<ConflictSheet />)
+    let answer!: Promise<ConflictAnswer | null>
+    act(() => {
+      answer = useTransferStore
+        .getState()
+        .askConflicts('move', [conflict('a.jpg', { target: '/dst/a.jpg', source: '/src/a.jpg' })], {
+          server: K
+        })
+    })
+    const sheet = await screen.findByRole('alertdialog')
+
+    const copy = within(sheet).getByRole('button', { name: 'Copy' })
+    expect(copy.getAttribute('aria-pressed')).toBe('false')
+    expect(copy.getAttribute('aria-disabled')).toBe('true')
+    expect(copy.title).toBe("Copying within the server isn't supported")
+    expect(within(sheet).getByRole('button', { name: 'Move' }).getAttribute('aria-pressed')).toBe(
+      'true'
+    )
+    // 비활성인 복사를 눌러도 이동이 바뀌지 않는다.
+    await user.click(copy)
+    expect(within(sheet).getByRole('button', { name: 'Move' }).getAttribute('aria-pressed')).toBe(
+      'true'
+    )
+
+    await decide(user, 'Skip', sheet)
+    await expect(answer).resolves.toEqual({ decisions: { '/dst/a.jpg': 'skip' }, verb: 'move' })
+  })
+
+  it('keeps focus on the checked decision and the Tab cycle with the toggle present', async () => {
+    // covers: Test-1228
+    answerConflicts([conflict('a.jpg'), conflict('b.jpg')])
+    render(<ConflictSheet />)
+    const { pending } = await startSend()
+    const sheet = screen.getByRole('alertdialog')
+    const user = userEvent.setup()
+    const names = (): string | null => {
+      const el = document.activeElement as HTMLInputElement
+      return el.getAttribute('aria-label') ?? el.labels?.[0]?.textContent ?? el.textContent
+    }
+    // 열릴 때 checked 결정 라디오에 포커스가 간다 — 토글이 출발점을 바꾸지 못한다(함정 B).
+    expect(names()).toBe('Newer only')
+    const seen: Array<string | null> = []
+    for (let i = 0; i < 6; i++) {
+      await user.tab()
+      seen.push(names())
+    }
+    // 토글은 카드 위(checked 라디오 앞)에 있어 기존 순서(결정→모두 적용→기억하기→확인→취소)를 밀지 않는다.
+    expect(seen).toEqual([
+      'Do the same for the other 1',
+      'Remember this decision',
+      'Confirm',
+      'Cancel',
+      'Copy',
+      'Move'
+    ])
+    expect(sheet.contains(document.activeElement)).toBe(true)
+    await user.click(within(sheet).getByRole('button', { name: 'Cancel' }))
+    await expect(pending).resolves.toBeNull()
   })
 })

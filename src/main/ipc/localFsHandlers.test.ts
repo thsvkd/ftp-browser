@@ -25,7 +25,7 @@ import { isSafeCopyName, registerLocalFsHandlers } from './localFsHandlers'
 import type { OperationManager } from '../operation/OperationManager'
 import type { IpcResult } from '@shared/types/ipc'
 import type { LocalFileEntry, LocalPlaces } from '@shared/types/local'
-import { MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
+import { MAX_IMAGE_SIZE_BYTES, MAX_VIDEO_SIZE_BYTES } from '@shared/constants'
 
 type Handler = (event: unknown, ...args: unknown[]) => Promise<IpcResult<void>>
 
@@ -197,6 +197,46 @@ describe('localFsHandlers', () => {
           error: expect.any(String)
         })
       }
+    })
+
+    it('returns a webm as a data:video/webm URL', async () => {
+      // covers: Test-1203
+      const webm = path.join(tmpDir, 'clip.webm')
+      const bytes = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 9, 8])
+      await fs.writeFile(webm, bytes)
+
+      const result = await handler('local:preview')(null, webm)
+
+      expect(result).toEqual({
+        success: true,
+        data: `data:video/webm;base64,${bytes.toString('base64')}`
+      })
+    })
+
+    it('caps videos at MAX_VIDEO_SIZE_BYTES and images at MAX_IMAGE_SIZE_BYTES', async () => {
+      // covers: Test-1204
+      const bigVideo = path.join(tmpDir, 'big.webm')
+      await fs.writeFile(bigVideo, '')
+      await fs.truncate(bigVideo, MAX_VIDEO_SIZE_BYTES + 1)
+      const bigImage = path.join(tmpDir, 'big.jpg')
+      await fs.writeFile(bigImage, '')
+      await fs.truncate(bigImage, MAX_IMAGE_SIZE_BYTES + 1)
+      // 이미지 상한(50MB)과 영상 상한(100MB)은 다르다. 두 상한을 하나로 합치면 이 중 하나가 깨진다.
+      const midVideo = path.join(tmpDir, 'mid.mp4')
+      await fs.writeFile(midVideo, '')
+      await fs.truncate(midVideo, MAX_IMAGE_SIZE_BYTES + 1)
+
+      for (const p of [bigVideo, bigImage]) {
+        expect(await handler('local:preview')(null, p)).toEqual({
+          success: false,
+          error: 'File too large for preview'
+        })
+      }
+      const mid = await handler('local:preview')(null, midVideo)
+      expect(mid).toMatchObject({
+        success: true,
+        data: expect.stringContaining('data:video/mp4;base64,')
+      })
     })
   })
 

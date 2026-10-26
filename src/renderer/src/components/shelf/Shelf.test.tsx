@@ -4,8 +4,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { toast } from 'sonner'
 import { en } from '@renderer/i18n/locales/en'
 import { fromFtpEntry, fromLocalEntry, type ExplorerEntry } from '@renderer/lib/explorerEntry'
+import { emptyDraft } from '@renderer/lib/serverAddress'
+import { useServerStore } from '@renderer/stores/useServerStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
-import { useTabsStore } from '@renderer/stores/useTabsStore'
+import { useTabsStore, visiblePanes } from '@renderer/stores/useTabsStore'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import {
   ftp,
@@ -19,8 +21,10 @@ import {
 } from '@renderer/components/explorer/explorerTestHarness'
 import { AppShell } from '@renderer/components/layout/AppShell'
 import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
+import { ConfirmDialog } from '@renderer/components/common/ConfirmDialog'
 import { useDnd } from '@renderer/components/explorer/dnd'
 import { installDropGuard } from '@renderer/lib/osDropGuard'
+import type { FtpServer } from '@shared/types/ftp'
 import type { LocalFileEntry } from '@shared/types/local'
 import { Shelf } from './Shelf'
 
@@ -110,7 +114,8 @@ describe('Shelf — dropping into the active tab', () => {
     // covers: Test-807
     setup()
     render(<AppShell />)
-    await screen.findByRole('region', { name: en['shelf.title'] })
+    // 선반 카드는 담은 뒤에야 뜬다(F3): 빈 폴더엔 listbox가 없어 경로 막대로 셸을 기다린다.
+    await screen.findByRole('navigation', { name: en['path.label'] })
 
     useShelfStore.getState().add([remoteItem('a.jpg')])
     fireEvent.click(
@@ -418,13 +423,17 @@ describe('Shelf — OS drops', () => {
     cleanup()
     h.restore()
 
-    // 문서 가드를 켠 채로: 대상이 전파를 멈춰 가드가 'none'으로 덮지 않는다(함정 6)
+    // 문서 가드를 켠 채로: 대상이 전파를 멈춰 가드가 'none'으로 덮지 않는다(함정 6).
+    // 선반의 놓기 대상은 이제 도크의 담기 띠다: OS 드래그가 앱 안에 들어오면 띠가 뜬다.
     h = setupExplorer({ local: { 'C:\\dl': [] } })
     useTabsStore.getState().openTab(localLoc('C:\\dl'))
     const uninstall = installDropGuard(document)
     try {
       render(<AppShell />)
-      await screen.findByRole('region', { name: en['shelf.title'] })
+      // 빈 폴더엔 listbox가 없어 경로 막대로 셸을 기다린다.
+      await screen.findByRole('navigation', { name: en['path.label'] })
+      fireEvent.dragEnter(document.body, { dataTransfer: dt(['Files']) })
+      await screen.findByText(en['shelf.dockHint'])
       const over = dt(['Files'])
       fireEvent.dragOver(target(), { dataTransfer: over })
       expect(over.dropEffect).toBe('copy')
@@ -504,5 +513,154 @@ describe('Shelf — OS drops', () => {
     expect(invokeCalls(h.invoke, 'local:copyFiles')).toEqual([
       [['C:\\in\\docs', 'C:\\in\\a.jpg'], 'C:\\dl', ['docs', 'a.jpg']]
     ])
+  })
+})
+
+describe('Shelf — the two-step connect of an unconnected server tab', () => {
+  /**
+   * 익명 저장 서버: 저장 비밀번호가 없어 자동 연결(MC12)이 걸리지 않고, 익명이라 바로
+   * 연결된다(`canConnectSaved`). 자리표시자 시도와 겹치는 이중 `ftp:connect`를 막는 조건이다.
+   */
+  const NAS2: FtpServer = {
+    id: 9,
+    name: 'NAS2',
+    host: 'b.lan',
+    port: 21,
+    username: '',
+    hasPassword: false,
+    secure: false
+  }
+  const NAS2_KEY = 'anonymous@b.lan:21'
+  const sends = (): unknown[][] => invokeCalls(h.invoke, 'transfer:send')
+  const dt = (): Record<string, unknown> => ({
+    types: [],
+    files: [],
+    dropEffect: '',
+    setData: vi.fn(),
+    setDragImage: vi.fn(),
+    effectAllowed: ''
+  })
+
+  /** 로컬 탭과 미연결 서버 탭, 선반 항목 하나를 앱 전체(모달 포함)에 연다. */
+  async function openUnconnectedTab(): Promise<void> {
+    h = setupExplorer({
+      local: { 'C:\\pics': [local('C:\\pics', 'a.jpg')] },
+      remote: { '/y': [ftp('sub', { dir: true }), ftp('b.jpg')], '/old': [] }
+    })
+    h.handlers['ftp:getRecentServers'] = () => ({ success: true, data: [NAS2] })
+    h.handlers['ftp:getRecentPaths'] = () => ({
+      success: true,
+      data: [{ path: '/y', lastVisited: '' }]
+    })
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['t1'], skipped: [], conflicts: [], totalBytes: 1024 }
+    })
+    useServerStore.setState({
+      servers: [NAS2],
+      draft: emptyDraft(),
+      address: '',
+      connecting: false,
+      error: ''
+    })
+    useTabsStore.getState().openTab(localLoc('C:\\pics'))
+    useTabsStore.getState().openTab({ side: 'remote', path: '/old', server: NAS2_KEY }, false)
+    useShelfStore.getState().add([localItem('a.jpg')])
+    render(
+      <>
+        <AppShell />
+        <ConfirmDialog />
+      </>
+    )
+    await screen.findByRole('region', { name: en['shelf.title'] })
+  }
+
+  it('starts a connect with a pane instead of a transfer when the shelf lands on an unconnected server tab', async () => {
+    // covers: Test-1264
+    await openUnconnectedTab()
+
+    fireEvent.dragStart(row('a.jpg'), { dataTransfer: dt() })
+    fireEvent.drop(screen.getByRole('tab', { name: 'old' }), { dataTransfer: dt() })
+
+    // 전송은 시작되지 않는다...
+    expect(sends()).toEqual([])
+    // ...분할이 먼저 생기고 그 칸에 연결 시도 안내가 뜬다...
+    const s = useTabsStore.getState()
+    expect(s.split).toBeTruthy()
+    expect(visiblePanes(s)).toHaveLength(2)
+    const right = document.querySelector('[data-region="content"] [data-pane="right"]')
+    expect(right?.textContent).toContain(en['sidebar.serverConnecting'])
+    // ...연결 시도가 시작된다.
+    await waitFor(() => expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(1))
+    expect(invokeCalls(h.invoke, 'ftp:connect')[0][0]).toMatchObject({ host: NAS2.host })
+    // 선반은 그대로다.
+    expect(shelfNames()).toEqual(['a.jpg'])
+    expect(sends()).toEqual([])
+    await waitFor(() => expect(useServerStore.getState().connecting).toBe(false))
+  })
+
+  it('drops the shelf into a folder of the pane that connect opened and sends it as before', async () => {
+    // covers: Test-1265
+    await openUnconnectedTab()
+    fireEvent.dragStart(row('a.jpg'), { dataTransfer: dt() })
+    fireEvent.drop(screen.getByRole('tab', { name: 'old' }), { dataTransfer: dt() })
+
+    // 연결이 성공해 그 서버 패널이 열린다. 선반은 그대로다.
+    await waitFor(() => {
+      const st = useTabsStore.getState()
+      expect(st.tabs.find((t) => t.id === st.split?.rightId)?.loc).toEqual({
+        side: 'remote',
+        path: '/y',
+        server: NAS2_KEY
+      })
+    })
+    expect(shelfNames()).toEqual(['a.jpg'])
+
+    // 그 패널의 목록에 다시 끌어놓으면 기존처럼 전송된다.
+    fireEvent.dragStart(row('a.jpg'), { dataTransfer: dt() })
+    const list = document.getElementById(`explorer-list-${useTabsStore.getState().split?.rightId}`)
+    expect(list).toBeTruthy()
+    fireEvent.dragOver(list as HTMLElement, { dataTransfer: dt() })
+    fireEvent.drop(list as HTMLElement, { dataTransfer: dt() })
+    await waitFor(() => expect(sends()).toHaveLength(1))
+    expect(sends()[0]).toEqual([
+      NAS2_KEY,
+      { direction: 'upload', sources: ['C:\\pics\\a.jpg'], destDir: '/y' }
+    ])
+    expect(shelfNames()).toEqual([])
+    expect(useTabsStore.getState().split).toBeTruthy()
+  })
+
+  it('sends right away on an already connected server tab, without splitting', async () => {
+    // covers: Test-1266
+    h = setupExplorer({
+      local: { 'C:\\pics': [local('C:\\pics', 'b.jpg')] },
+      remote: { '/x': [ftp('sub', { dir: true })] }
+    })
+    h.handlers['transfer:send'] = () => ({
+      success: true,
+      data: { batchId: 'b1', ids: ['t1'], skipped: [], conflicts: [], totalBytes: 1024 }
+    })
+    useTabsStore.getState().openTab(remoteLoc('/x')) // 이미 연결된 서버(기본 connected)
+    useShelfStore.getState().add([localItem('b.jpg')])
+    render(
+      <>
+        <AppShell />
+        <ConfirmDialog />
+      </>
+    )
+    await screen.findByRole('region', { name: en['shelf.title'] })
+
+    fireEvent.dragStart(row('b.jpg'), { dataTransfer: dt() })
+    fireEvent.drop(screen.getByRole('tab', { name: 'x' }), { dataTransfer: dt() })
+
+    await waitFor(() => expect(sends()).toHaveLength(1))
+    expect(sends()[0]).toEqual([
+      server(),
+      { direction: 'upload', sources: ['C:\\pics\\b.jpg'], destDir: '/x' }
+    ])
+    // 분할 없이 바로 전송한다(M19의 예외 — 회귀 방어).
+    expect(useTabsStore.getState().split).toBeNull()
+    expect(shelfNames()).toEqual([])
   })
 })

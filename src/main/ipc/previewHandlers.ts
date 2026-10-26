@@ -6,7 +6,7 @@ import { Client } from 'basic-ftp'
 import { sessionIpcError, type ConnectionRegistry } from '../ftp/ConnectionRegistry'
 import { PreviewCacheManager } from '../preview/PreviewCacheManager'
 import { generateCacheKey } from '../utils/cacheKey'
-import { MAX_IMAGE_SIZE_BYTES } from '@shared/constants'
+import { isVideoFile, MAX_IMAGE_SIZE_BYTES, MAX_VIDEO_SIZE_BYTES } from '@shared/constants'
 import type { IpcResult } from '@shared/types/ipc'
 
 async function downloadToBuffer(client: Client, remotePath: string): Promise<Buffer> {
@@ -29,7 +29,11 @@ export const MIME_MAP: Record<string, string> = {
   '.bmp': 'image/bmp',
   '.webp': 'image/webp',
   '.tiff': 'image/tiff',
-  '.tif': 'image/tiff'
+  '.tif': 'image/tiff',
+  '.webm': 'video/webm',
+  '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.m4v': 'video/mp4'
 }
 
 interface PreviewRequest {
@@ -47,7 +51,9 @@ export function registerPreviewHandlers(db: Database.Database, registry: Connect
       try {
         const session = registry.require(conn)
         const ftpManager = session.manager
-        if (req.fileSize > MAX_IMAGE_SIZE_BYTES) {
+        // data URL은 파일 전체를 메모리에 올려야 하므로 종류별 상한을 나눈다(P5·함정 D).
+        const cap = isVideoFile(req.remotePath) ? MAX_VIDEO_SIZE_BYTES : MAX_IMAGE_SIZE_BYTES
+        if (req.fileSize > cap) {
           return { success: false, error: 'File too large for preview' }
         }
 

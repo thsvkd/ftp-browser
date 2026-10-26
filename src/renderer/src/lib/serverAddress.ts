@@ -152,6 +152,17 @@ export function draftFields(p: ParsedServerAddress): Partial<ServerDraft> {
 
 const isAnonymous = (user: string): boolean => !user.trim() || /^anonymous$/i.test(user.trim())
 
+/** Whether a username is present — exactly the rule ConnectBar uses to draw the password field (D6). */
+export const hasUser = (username: string): boolean => !isAnonymous(username)
+
+/**
+ * Whether a saved server can connect right away (D1): it has a saved password, or it logs in
+ * anonymously (no username, or `anonymous`). A username without a saved password returns false so
+ * the caller fills the address and focuses the password field instead of trying a blank one (D2).
+ */
+export const canConnectSaved = (server: Pick<FtpServer, 'username' | 'hasPassword'>): boolean =>
+  server.hasPassword || !hasUser(server.username)
+
 /** Primary label: alias, else host. */
 export const serverLabel = (s: { name: string; host: string }): string =>
   s.name.trim() || s.host.trim()

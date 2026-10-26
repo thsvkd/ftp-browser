@@ -4,16 +4,20 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { en } from '@renderer/i18n/locales/en'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
+import { fromFtpEntry } from '@renderer/lib/explorerEntry'
 import { emptyDraft } from '@renderer/lib/serverAddress'
 import { invokeCalls } from '@renderer/test/rendererTestUtils'
 import {
   activeTab,
   flush,
+  ftp,
   localLoc,
   setConnection,
   setupExplorer,
   type ExplorerHarness
 } from '@renderer/components/explorer/explorerTestHarness'
+import { GHOST_ID, useDnd } from '@renderer/components/explorer/dnd'
+import { AppShell } from '@renderer/components/layout/AppShell'
 import type { FtpServer } from '@shared/types/ftp'
 import { act } from '@testing-library/react'
 import { Sidebar } from './Sidebar'
@@ -35,6 +39,16 @@ const NAS: FtpServer = {
   host: 'nas.local',
   port: 21,
   username: 'me',
+  hasPassword: false,
+  secure: false
+}
+/** 익명(빈 아이디) 저장 서버: 저장된 비밀번호가 없는 게 정상이다. */
+const ANON: FtpServer = {
+  id: 4,
+  name: 'Public',
+  host: 'files.example.com',
+  port: 21,
+  username: '',
   hasPassword: false,
   secure: false
 }
@@ -72,6 +86,13 @@ afterEach(() => {
 
 const nav = (): HTMLElement => screen.getByRole('navigation', { name: en['sidebar.label'] })
 const place = (name: string | RegExp): HTMLElement => within(nav()).getByRole('button', { name })
+
+/** ftp:connect까지 이르는 비동기 흐름(마이크로태스크·타이머)을 모두 비운다. */
+const drain = async (): Promise<void> => {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
 
 describe('Sidebar — this PC and recent', () => {
   it('lists the places that exist and the drives, navigates, opens tabs and marks the current one', async () => {
@@ -177,8 +198,49 @@ describe('Sidebar — servers', () => {
     })
   })
 
-  it('connects a saved server with a saved password, or selects it and focuses the password field', async () => {
-    // covers: Test-821
+  it('selects a saved server with a click and connects it with a double-click', async () => {
+    // covers: Test-1214
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
+    expect(place(/^NAS/).textContent).toContain(en['sidebar.serverOffline'])
+
+    // 클릭은 선택만: 툴바 주소가 그 서버로 바뀌고 연결은 걸리지 않는다.
+    fireEvent.click(place(/^Office/))
+    await drain()
+    expect(useServerStore.getState().draft.id).toBe(OFFICE.id)
+    expect(useServerStore.getState().address).toBe('kim@ftp.office.lan:2121')
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toEqual([])
+
+    // 더블클릭이 연결한다.
+    fireEvent.click(place(/^Office/))
+    fireEvent.doubleClick(place(/^Office/))
+    await waitFor(() => expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(1))
+    expect(invokeCalls(h.invoke, 'ftp:connect')[0][0]).toMatchObject({
+      host: OFFICE.host,
+      port: OFFICE.port,
+      user: 'kim'
+    })
+  })
+
+  it('connects an anonymous saved server on double-click', async () => {
+    // covers: Test-1215
+    useServerStore.setState({ servers: [ANON] })
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
+
+    fireEvent.doubleClick(place(/^Public/))
+    await waitFor(() => expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(1))
+    expect(invokeCalls(h.invoke, 'ftp:connect')[0][0]).toMatchObject({
+      host: ANON.host,
+      port: ANON.port,
+      user: 'anonymous'
+    })
+  })
+
+  it('fills the address and focuses the password field instead of connecting a server without a saved password', async () => {
+    // covers: Test-1216
     useTabsStore.getState().openTab(localLoc(HOME))
     render(
       <>
@@ -187,22 +249,89 @@ describe('Sidebar — servers', () => {
       </>
     )
     await flush()
-    expect(place(/^NAS/).textContent).toContain(en['sidebar.serverOffline'])
 
-    fireEvent.click(place(/^NAS/))
-    expect(useServerStore.getState().draft.id).toBe(NAS.id)
+    fireEvent.doubleClick(place(/^NAS/))
+    await drain()
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toEqual([])
+    expect(useServerStore.getState().address).toBe('me@nas.local:21')
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByLabelText('toolbar password'))
     )
-    expect(invokeCalls(h.invoke, 'ftp:connect')).toEqual([])
+  })
+
+  it('moves to the root on a double-click of a connected row instead of connecting', async () => {
+    // covers: Test-1217
+    setConnection('kim@ftp.office.lan:2121', 'connected')
+    h.handlers['ftp:getRecentPaths'] = () => ({ success: true, data: [] })
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
 
     fireEvent.click(place(/^Office/))
-    await waitFor(() => expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(1))
-    expect(invokeCalls(h.invoke, 'ftp:connect')[0][0]).toMatchObject({
-      host: OFFICE.host,
-      port: OFFICE.port,
-      user: 'kim'
+    fireEvent.doubleClick(place(/^Office/))
+    await drain()
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toEqual([])
+    expect(activeTab().loc).toEqual({
+      side: 'remote',
+      path: '/',
+      server: 'kim@ftp.office.lan:2121'
     })
+  })
+
+  it('shows the address with the connect hint in an unconnected row title, drop guide first', async () => {
+    // covers: Test-1218
+    setConnection('kim@ftp.office.lan:2121', 'connected')
+    h.handlers['ftp:getRecentPaths'] = () => ({ success: true, data: [] })
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<Sidebar />)
+    await flush()
+
+    const nas = place(/^NAS/)
+    expect(nas.getAttribute('title')).toBe(`me@nas.local:21 · ${en['servers.hint']}`)
+
+    // 끌어온 항목이 연결된 행 위에 있으면 주소 대신 드롭 안내가 보인다.
+    const office = place(/^Office/)
+    expect(office.getAttribute('title')).toBe('kim@ftp.office.lan:2121')
+    act(() =>
+      useDnd.setState({
+        items: [fromFtpEntry(ftp('x.jpg'), '/photos', 'kim@ftp.office.lan:2121')],
+        over: null,
+        thumbs: []
+      })
+    )
+    fireEvent.dragOver(office, { dataTransfer: { types: [], files: [], dropEffect: '' } })
+    expect(office.getAttribute('title')).toBe('Move 1 → Office')
+  })
+
+  it('drags a saved server row with its own ghost, apart from entry drags', async () => {
+    // covers: Test-1257
+    // 고스트는 화면 밖에 그려져 있고, 실제로는 앱 전체(탐색기·고스트)를 그린다.
+    h.handlers['ftp:getRecentServers'] = () => ({ success: true, data: [OFFICE, NAS] })
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<AppShell />)
+    await flush()
+
+    const dt = {
+      setData: vi.fn(),
+      setDragImage: vi.fn(),
+      effectAllowed: '',
+      dropEffect: '',
+      types: [],
+      files: []
+    }
+    fireEvent.dragStart(place(/^NAS/), { dataTransfer: dt })
+
+    // M14: useDnd.server에 서버가 담기고 항목 드래그(items)는 비어 있다.
+    const dnd = useDnd.getState()
+    expect(dnd.server).toMatchObject({ name: 'NAS', host: 'nas.local', port: 21 })
+    expect(dnd.items).toBeNull()
+
+    // 고스트가 뜨고 서버 이름과 주소를 보여 주며 setDragImage가 그것을 찍는다.
+    const ghost = document.getElementById(GHOST_ID)
+    expect(ghost).toBeTruthy()
+    expect(ghost?.textContent).toContain('NAS')
+    expect(ghost?.textContent).toContain('nas.local:21')
+    expect(dt.setDragImage).toHaveBeenCalledWith(ghost, 22, 22)
   })
 })
 

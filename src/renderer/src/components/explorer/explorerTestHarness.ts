@@ -178,7 +178,7 @@ export function setupExplorer(
   useTabsStore.setState({ tabs: [], activeId: '', recent: [], split: null })
   useFileCategoryStore.setState({ overrides: EMPTY_OVERRIDES })
   useListingStore.setState({ byKey: {} })
-  useShelfStore.setState({ items: [], railTab: 'shelf' })
+  useShelfStore.setState({ items: [], dockOpen: false })
   useSettingsStore.setState({
     viewMode: 'grid',
     tileSize: 160,
@@ -199,7 +199,7 @@ export function setupExplorer(
     panelSending: 0
   })
   useConfirmStore.setState({ request: null })
-  useDnd.setState({ items: null, over: null, thumbs: [] })
+  useDnd.setState({ items: null, server: null, over: null, thumbs: [], fromShelf: false })
   return h
 }
 

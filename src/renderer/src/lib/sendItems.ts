@@ -8,7 +8,7 @@ import { fetchEntries, useListingStore } from '@renderer/stores/useListingStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
-import { useTransferStore } from '@renderer/stores/useTransferStore'
+import { useTransferStore, type VerbRef } from '@renderer/stores/useTransferStore'
 import {
   fromLocalEntry,
   joinPath,
@@ -24,6 +24,7 @@ import { moveRemoteFiles } from './remoteDrop'
 import { planSameSide, type SameSideItem, type SameSideOp } from './sameSidePlan'
 import { connStatus, connectedKeys, savedServerOf } from './connections'
 import { planSend, type SendPlan } from './sendPlan'
+import { canConnectSaved } from './serverAddress'
 import { connLabel, parseConnKey } from '@shared/connKey'
 import type { IpcResult } from '@shared/types/ipc'
 import type { FtpServer } from '@shared/types/ftp'
@@ -79,11 +80,13 @@ const baseName = (path: string): string =>
 /**
  * 같은 쪽 보내기의 충돌을 묻는다(D32): 대상 폴더를 한 번 읽어 맨 위 이름을 견주고, 겹치면 충돌
  * 시트에 묻는다. 실행할 동작을 돌려주고, 취소하거나 대상 폴더를 읽지 못하면 null.
+ * 시트에서 전송 작업을 바꾸면 `verbRef`에 그대로 기록한다(V3·함정 C).
  */
 async function sameSideOps(
   verb: 'move' | 'copy',
   items: readonly SameSideItem[],
-  dest: Loc
+  dest: Loc,
+  verbRef: VerbRef
 ): Promise<SameSideOp[] | null> {
   const listing = await fetchEntries(dest)
   if (!listing.success) {
@@ -95,12 +98,19 @@ async function sameSideOps(
   if (!first.conflicts.length) return first.ops
   // 원격 이동의 두 카드는 그 서버의 파일이다. 로컬 복사에는 연결이 없다(MC33)
   const servers = verb === 'move' ? { server: dest.server } : {}
-  const decisions = await useTransferStore.getState().askConflicts(verb, first.conflicts, servers)
-  return decisions && planSameSide(items, listing.data, dest, platform, decisions).ops
+  // 원격↔원격(V2)은 복사 칸이 막혀 기본이 이동이므로 토글 기본값을 넘기지 않는다.
+  const answer = await useTransferStore
+    .getState()
+    .askConflicts(verb, first.conflicts, servers, verb === 'move' ? undefined : verbRef.verb)
+  if (!answer) return null
+  verbRef.verb = answer.verb // 한 보내기의 다른 부분과 같은 값을 쓴다(V3·함정 C)
+  return planSameSide(items, listing.data, dest, platform, answer.decisions).ops
 }
 
 async function moveRemote(items: readonly SameSideItem[], dest: Loc): Promise<boolean> {
-  const ops = await sameSideOps('move', items, dest)
+  // 원격↔원격은 verb와 무관하게 rename이 곧 이동이다(V7). ref는 시트의 기본값 용도뿐이다.
+  const verbRef: VerbRef = { verb: 'move' }
+  const ops = await sameSideOps('move', items, dest, verbRef)
   if (!ops) return false
   const replace = new Set(
     ops.filter((o) => o.overwrite).map((o) => joinPath('remote', dest.path, o.name))
@@ -113,9 +123,13 @@ async function moveRemote(items: readonly SameSideItem[], dest: Loc): Promise<bo
   )
 }
 
-async function copyLocal(items: readonly SameSideItem[], dest: Loc): Promise<boolean> {
+async function copyLocal(
+  items: readonly SameSideItem[],
+  dest: Loc,
+  verbRef: VerbRef
+): Promise<boolean> {
   try {
-    const ops = await sameSideOps('copy', items, dest)
+    const ops = await sameSideOps('copy', items, dest, verbRef)
     if (!ops) return false
     if (!ops.length) return true
     const r = await window.api.invoke<IpcResult<void>>(
@@ -125,6 +139,14 @@ async function copyLocal(items: readonly SameSideItem[], dest: Loc): Promise<boo
       ops.map((o) => o.name)
     )
     if (!r.success) toast.error(t('toast.sendFailed'), { description: r.error })
+    // 이동을 고르면 복사가 끝난 ops의 원본만 잇다(V6). skipped는 애초에 ops에 없다.
+    else if (verbRef.verb === 'move' && ops.length) {
+      const kind = new Map(items.map((i) => [i.path, i.type]))
+      await window.api.invoke<IpcResult<void>>(
+        'local:deleteBatch',
+        ops.map((o) => ({ path: o.source, isDirectory: kind.get(o.source) === 'directory' }))
+      )
+    }
     return r.success
   } catch (err) {
     toast.error(t('toast.sendFailed'), {
@@ -141,14 +163,16 @@ function transfer(
   direction: 'upload' | 'download',
   conn: string,
   paths: string[],
-  dest: Loc
+  dest: Loc,
+  verbRef: VerbRef
 ): Promise<boolean> {
   return useTransferStore
     .getState()
     .send(
       conn,
       { direction, sources: paths, destDir: dest.path },
-      { label: batchLabel(paths.map(baseName)), to: dest }
+      { label: batchLabel(paths.map(baseName)), to: dest },
+      verbRef
     )
     .then((r) => r !== null)
 }
@@ -177,6 +201,8 @@ function byServer(entries: readonly ExplorerEntry[]): Map<string, ExplorerEntry[
 
 /** 검사를 마친 계획을 실행한다. 시작에 성공한 부분(전송·같은 쪽 동작)의 항목을 돌려준다. */
 async function runParts(plan: SendPlan, dest: Loc): Promise<ExplorerEntry[]> {
+  // 한 보내기의 토글 값을 모든 부분이 함께 쓴다(함정 C): 하나를 만들어 그대로 준다.
+  const verbRef: VerbRef = { verb: 'copy' }
   const parts: Array<[ExplorerEntry[], Promise<boolean>]> = []
   if (plan.direction === 'upload')
     parts.push([
@@ -185,7 +211,8 @@ async function runParts(plan: SendPlan, dest: Loc): Promise<ExplorerEntry[]> {
         'upload',
         dest.server ?? '',
         plan.transfer.map((e) => e.path),
-        dest
+        dest,
+        verbRef
       )
     ])
   // 다운로드는 항목의 서버마다 한 번씩 보낸다(MC17).
@@ -197,10 +224,11 @@ async function runParts(plan: SendPlan, dest: Loc): Promise<ExplorerEntry[]> {
           'download',
           server,
           entries.map((e) => e.path),
-          dest
+          dest,
+          verbRef
         )
       ])
-  // 서버 간 복사는 보내는 서버마다 한 번씩 보낸다
+  // 서버 간 복사는 보내는 서버마다 한 번씩 보낸다(토글 범위 밖 — verbRef를 넘기지 않는다)
   for (const [server, entries] of byServer(plan.relay))
     parts.push([
       entries,
@@ -211,7 +239,8 @@ async function runParts(plan: SendPlan, dest: Loc): Promise<ExplorerEntry[]> {
       )
     ])
   if (plan.sameSideVerb === 'move') parts.push([plan.sameSide, moveRemote(plan.sameSide, dest)])
-  if (plan.sameSideVerb === 'copy') parts.push([plan.sameSide, copyLocal(plan.sameSide, dest)])
+  if (plan.sameSideVerb === 'copy')
+    parts.push([plan.sameSide, copyLocal(plan.sameSide, dest, verbRef)])
   const oks = await Promise.all(parts.map(([, run]) => run))
   return parts.flatMap(([entries], i) => (oks[i] ? entries : []))
 }
@@ -285,13 +314,14 @@ export async function dropOsFiles(files: readonly File[], dest: Loc): Promise<bo
   })
   const paths = items.map((i) => i.path)
   if (!paths.length) return false
-  if (dest.side === 'local') return copyLocal(items, dest)
+  // OS 드롭에도 충돌 시트가 뜨면 토글이 보인다(V1의 범위): 기본은 복사로 시작한다.
+  if (dest.side === 'local') return copyLocal(items, dest, { verb: 'copy' })
   const { server } = dest
   if (!server || connStatus(server) !== 'connected') {
     toast.error(t('send.invalidNotConnected'))
     return false
   }
-  return transfer('upload', server, paths, dest)
+  return transfer('upload', server, paths, dest, { verb: 'copy' })
 }
 
 /**
@@ -362,8 +392,9 @@ export function sendDestinations(current: Loc): Loc[] {
 }
 
 /**
- * 원격 탭의 서버(`"user@host:port"`)에 연결한다(D2·D6). 저장된 서버면 기존 연결 흐름:
- * 비밀번호가 저장돼 있으면 바로 연결하고, 아니면 툴바에 그 서버를 넣고 비밀번호 칸에 포커스를 준다.
+ * 원격 탭의 서버(`"user@host:port"`)에 연결한다(D2·D6). 저장된 서버면 공통 활성화 경로
+ * (`connectSaved`): 바로 연결할 수 있으면(저장 비밀번호·익명) 연결하고, 아니면 툴바에 그 서버를
+ * 넣고 비밀번호 칸에 포커스를 준다.
  */
 export function connectToServer(server: string): void {
   const parsed = parseConnKey(server)
@@ -372,22 +403,34 @@ export function connectToServer(server: string): void {
   const store = useServerStore.getState()
   // 익명 연결은 저장된 사용자 이름이 비어 있어도 'anonymous'로 접속한다(useServerStore.connect).
   const saved = savedServerOf(store.servers, server)
-  if (saved) return connectSaved(saved)
+  if (saved) {
+    void connectSaved(saved)
+    return
+  }
   store.setAddress(user ? `${user}@${host}:${port}` : `${host}:${port}`)
   focusPassword()
 }
 
-/** 저장된 서버에 연결한다(D6): 비밀번호가 저장돼 있으면 바로, 아니면 툴바에 넣고 비밀번호 칸에 포커스. */
-export function connectSaved(saved: FtpServer): void {
+/**
+ * 저장 서버의 유일한 활성화 진입점(D1·D2·D5): 1) 주소를 채우고 2) 바로 연결할 수 있으면(저장
+ * 비밀번호·익명) 연결을 시작해 true를, 3) 아니면 해당 맥락의 비밀번호 칸에 포커스만 준 뒤 false를
+ * 돌려준다. `scope`는 포커스할 비밀번호 칸의 범위. 없으면 문서 전체(툴바)이고, 관리창은 자기
+ * 컨테이너를 넘긴다(함정 A).
+ */
+export function connectSaved(saved: FtpServer, scope?: ParentNode): Promise<boolean> {
   const store = useServerStore.getState()
   store.select(saved)
-  if (saved.hasPassword) void store.connect()
-  else focusPassword()
+  if (!canConnectSaved(saved)) {
+    focusPassword(scope)
+    return Promise.resolve(false)
+  }
+  return store.connect()
 }
 
 // 비밀번호 칸은 사용자 이름이 있을 때만 그려진다. 다음 프레임에 찾는다.
-function focusPassword(): void {
+// 범위를 넘기면 그 안에서만 찾는다: 관리창은 포커스를 가두므로 문서에서 찾으면 툴바로 빠진다(함정 A).
+function focusPassword(scope: ParentNode = document): void {
   requestAnimationFrame(() =>
-    document.querySelector<HTMLInputElement>('input[type="password"]')?.focus()
+    scope.querySelector<HTMLInputElement>('input[type="password"]')?.focus()
   )
 }
