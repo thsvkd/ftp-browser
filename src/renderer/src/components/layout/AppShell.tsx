@@ -33,7 +33,12 @@ const REGIONS = [
   ['[data-region="tabs"] [role="tab"][aria-selected="true"]'],
   ['[data-region="content"] [data-pane="left"] [id^="explorer-list-"]'],
   ['[data-region="content"] [data-pane="right"] [id^="explorer-list-"]'],
-  ['[data-region="shelf-dock"] li[tabindex]', '[data-region="shelf-dock"] button']
+  [
+    '[data-region="shelf-dock"] li[tabindex]',
+    '[data-region="shelf-dock"] button',
+    // 접힌 상태에서는 pill 버튼이 data-region을 직접 갖는다
+    'button[data-region="shelf-dock"]'
+  ]
 ]
 
 const isTyping = (target: EventTarget | null): boolean =>

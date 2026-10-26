@@ -271,6 +271,24 @@ export async function sendItems(items: readonly ExplorerEntry[], dest: Loc): Pro
 }
 
 /**
+ * `sendItems`와 같되 전부 시작했는지가 아니라 시작에 성공한 부분의 항목을 돌려준다(막히면 빈 배열).
+ * 모두 시작하면 이미 그 폴더에 있던 항목(`plan.here`)도 함께 돌려준다(`dropShelfOnce`와 같다, F15).
+ */
+export async function sendItemsStarted(
+  items: readonly ExplorerEntry[],
+  dest: Loc
+): Promise<ExplorerEntry[]> {
+  const plan = planSend(items, dest, new Set(connectedKeys()))
+  if (plan.invalid) {
+    toast.error(t(plan.invalid))
+    return []
+  }
+  const started = await runParts(plan, dest)
+  const ok = started.length === plan.transfer.length + plan.sameSide.length + plan.relay.length
+  return ok ? [...items] : started
+}
+
+/**
  * 선반의 모든 항목을 `dest`에 내려놓는다. 더미가 활동 알약(`[data-activity-target]`)으로 날아가고,
  * 시작에 성공하면 보낸 항목만 선반에서 뺀다(그사이 더 담은 것은 남는다).
  */

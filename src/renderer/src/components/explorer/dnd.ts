@@ -11,7 +11,7 @@ import { t } from '@renderer/i18n'
 import { locKey, type ExplorerEntry, type Loc } from '@renderer/lib/explorerEntry'
 import { planSend } from '@renderer/lib/sendPlan'
 import { connStatus, useConnectedKeys } from '@renderer/lib/connections'
-import { dropOsFiles, planVerb, sendItems, shelveOsFiles } from '@renderer/lib/sendItems'
+import { dropOsFiles, planVerb, sendItemsStarted, shelveOsFiles } from '@renderer/lib/sendItems'
 import { connectIntoPane, connectNow, startShelfConnect } from '@renderer/lib/splitConnect'
 import { useShelfStore } from '@renderer/stores/useShelfStore'
 import type { FtpServer } from '@shared/types/ftp'
@@ -216,9 +216,10 @@ export function useDropTarget(
           startShelfConnect(dest)
           return
         }
-        // 선반에서 끌어 온 전송이 시작에 성공하면 그 항목만 선반에서 뺀다(자기 자신에 놓으면 남는다).
-        void sendItems(dragged, dest).then((ok) => {
-          if (ok && fromShelf) useShelfStore.getState().remove(dragged.map(locKey))
+        // 선반에서 끌어 온 전송은 시작에 성공한 부분의 항목을, 모두 시작하면 이미 그 폴더에 있던
+        // 항목까지 선반에서 뺀다(dropShelfOnce와 같다, F15).
+        void sendItemsStarted(dragged, dest).then((started) => {
+          if (fromShelf && started.length) useShelfStore.getState().remove(started.map(locKey))
         })
       }
     }
