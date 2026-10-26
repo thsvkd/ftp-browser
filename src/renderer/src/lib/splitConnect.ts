@@ -7,7 +7,8 @@
 import { t } from '@renderer/i18n'
 import { connKey } from '@shared/connKey'
 import { confirmDialog } from '@renderer/stores/useConfirmStore'
-import { useServerStore } from '@renderer/stores/useServerStore'
+import { useFtpStore } from '@renderer/stores/useFtpStore'
+import { connectingKey, useServerStore } from '@renderer/stores/useServerStore'
 import { useTabsStore, visiblePanes, type PaneId } from '@renderer/stores/useTabsStore'
 import { savedServerOf } from './connections'
 import { sameLoc, type Loc } from './explorerEntry'
@@ -30,27 +31,36 @@ export function isPendingConnect(server: string | undefined): boolean {
   return !!server && pendingConnects.has(server)
 }
 
+/** 차례를 기다리는 시도들(먼저 놓은 것부터). 각각은 부르면 곧바로(동기로) 연결을 시작한다. */
+const waiters: Array<() => void> = []
+let draining = false
+
 /**
- * M8: 연결 시도는 하나씩 — 지금 진행 중인 시도가 끝날 때까지 기다린다. upstream
- * `useServerStore.connect`는 `connecting`이면 즉시 거부하므로(P-C2), 둘째 시도를 받으려면
- * 기다려야 한다. 취소(`cancel`)로 `connecting`이 꺼지면 기다리던 시도가 바로 이어진다.
+ * F7(M8): 시도는 하나씩 차례로. upstream `useServerStore.connect`는 `connecting`이면 즉시 거부하므로
+ * (P-C2) `connecting`이 꺼질 때 **하나만** 깨운다 — 한꺼번에 깨우면 둘째부터 재진입 가드에 걸려 시도
+ * 없이 실패한다. 깨운 시도의 `select`도 스토어를 바꾸므로 재진입을 막는다. 시작한 시도가 바로
+ * 거부되면(`connecting`이 안 켜지면) 다음을 깨운다.
  */
-async function whenAttemptsIdle(): Promise<void> {
-  while (useServerStore.getState().connecting)
-    await new Promise<void>((resolve) => {
-      const unsub = useServerStore.subscribe((s) => {
-        if (!s.connecting) {
-          unsub()
-          resolve()
-        }
-      })
-    })
+function drain(): void {
+  if (draining) return
+  draining = true
+  try {
+    while (waiters.length > 0 && !useServerStore.getState().connecting) waiters.shift()?.()
+  } finally {
+    draining = false
+  }
+}
+useServerStore.subscribe(drain)
+
+/** 줄이 비어 있고 진행 중인 시도도 없으면 바로 시작한다 — 놓은 순간 시도가 보인다(M16 ①). */
+function enqueue(run: () => void): void {
+  waiters.push(run)
+  drain()
 }
 
 /** 분할 없이 잇는 시도(모달·복귀 없음). 앞 시도가 끝날 때까지 기다린다(M8). */
-async function attemptPlain(server: FtpServer): Promise<void> {
-  if (useServerStore.getState().connecting) await whenAttemptsIdle()
-  await connectSaved(server).catch(() => false)
+function attemptPlain(server: FtpServer): void {
+  enqueue(() => void connectSaved(server).catch(() => false))
 }
 
 /**
@@ -63,7 +73,7 @@ export function connectNow(server: FtpServer): void {
     connectToServer(key)
     return
   }
-  void attemptPlain(server)
+  attemptPlain(server)
 }
 
 /** 시도 하나의 복귀 정보(M18·P-C4): 드롭 전 활성 탭과, 그 패널에서 치환됐던 탭. */
@@ -84,16 +94,31 @@ interface RevertState {
  * - ② 성공: `adoptRemote`가 그 자리표시자 탭을 제자리에서 채운다(최근 폴더 → 없으면 루트).
  * - ③ 실패·20초 타임아웃: 모달 → 닫으면 드롭 전 상태로 되돌린다(M18).
  * `pane`이 null이면 분할은 건드리지 않는다(M19′). 저장 로그인으로 바로 붙을 수 있는 서버만
- * 이 흐름을 연다 — 아니면 1번 스펙의 주소·비밀번호 경로로 간다(P-C6).
+ * 이 흐름을 연다 — 아니면 1번 스펙의 주소·비밀번호 경로로 간다(P-C6). 이미 연결된 서버는 연결
+ * 흐름을 타지 않고 그 서버의 탭을 바로 그 패널에 놓는다(F7). `prevActiveId`는 복귀 기준인 드롭 전
+ * 활성 탭으로, 부르는 쪽이 탭을 활성화하기 전에 읽어 넘긴다(F7).
  */
-export function connectIntoPane(server: FtpServer, pane: PaneId | null): void {
+export function connectIntoPane(
+  server: FtpServer,
+  pane: PaneId | null,
+  prevActiveId = useTabsStore.getState().activeId
+): void {
   const key = connKey(server.host, server.port, server.username)
+  if (useFtpStore.getState().connections[key]?.status === 'connected') {
+    if (!pane) return
+    const s = useTabsStore.getState()
+    // 활성 탭이 아닌 그 서버의 탭이 있으면 그것을, 없으면 루트의 새 탭을 놓는다.
+    const id =
+      s.tabs.find((t) => t.id !== s.activeId && t.loc.side === 'remote' && t.loc.server === key)
+        ?.id ?? s.openTab({ side: 'remote', path: '/', server: key }, false)
+    useTabsStore.getState().placeInPane(id, pane)
+    return
+  }
   if (!canConnectSaved(server)) {
     connectToServer(key)
     return
   }
   const s = useTabsStore.getState()
-  const prevActiveId = s.activeId
   // M18 ②용: 드롭 전에 분할이 보였다면 그 패널의 원래 탭을 치환 전에 기억한다.
   const shown = visiblePanes(s).length === 2
   const displaced =
@@ -106,28 +131,33 @@ export function connectIntoPane(server: FtpServer, pane: PaneId | null): void {
     placeholder = s.openTab({ side: 'remote', path: '/', server: key }, false)
     useTabsStore.getState().placeInPane(placeholder, pane)
   }
-  void runConnect(key, server, { pane, placeholder, displaced, prevActiveId })
+  // M8: 앞 시도가 끝난 뒤 시작한다 — 시도가 시작돼야 20초가 흐른다(M17).
+  enqueue(() => runConnect(key, server, { pane, placeholder, displaced, prevActiveId }))
 }
 
-async function runConnect(key: string, server: FtpServer, rev: RevertState): Promise<void> {
-  // M8: 앞 시도가 끝날 때까지 기다린다 — 시도가 시작돼야 20초가 흐른다(M17).
-  if (useServerStore.getState().connecting) await whenAttemptsIdle()
+/** 시도 하나. 차례가 오면 곧바로 연결을 시작하고 20초를 잰다(M17). */
+function runConnect(key: string, server: FtpServer, rev: RevertState): void {
   let settled = false
   const timer = setTimeout(() => {
-    if (settled) return
+    // F7: 자기 시도가 아직 로그인 중일 때만 포기한다. `connecting`이 꺼졌으면(성공 처리 중) 결과를
+    // 기다리고, 다른 시도가 진행 중이면 그것을 취소하지 않는다.
+    if (settled || connectingKey() !== key) return
     settled = true
     // M17: 시도를 취소해야 뒤늦은 성공이 되돌아온 분할을 되살리지 못한다.
     useServerStore.getState().cancel()
     pendingConnects.delete(key)
     void showFailed(server, rev)
   }, SPLIT_CONNECT_TIMEOUT_MS)
-  const ok = await connectSaved(server).catch(() => false)
-  if (settled) return
-  settled = true
-  clearTimeout(timer)
-  pendingConnects.delete(key)
-  // M16 ③: 실패하면 모달 → 닫으면 복귀.
-  if (!ok) void showFailed(server, rev)
+  void connectSaved(server)
+    .catch(() => false)
+    .then((ok) => {
+      clearTimeout(timer)
+      if (settled) return
+      settled = true
+      pendingConnects.delete(key)
+      // M16 ③: 실패하면 모달 → 닫으면 복귀.
+      if (!ok) void showFailed(server, rev)
+    })
 }
 
 /** 실패·타임아웃 공통: 모달을 닫으면 드롭 전 상태로 되돌린다(M16 ③·M18). */
@@ -175,6 +205,8 @@ export function startShelfConnect(dest: Loc): void {
   const s = useTabsStore.getState()
   const shown = visiblePanes(s).length === 2
   const target = s.tabs.find((t) => sameLoc(t.loc, dest))
+  // F7: 복귀 기준(드롭 전 활성 탭)은 놓은 탭을 활성화하기 전에 읽는다.
+  const prevActiveId = s.activeId
   if (target && target.id !== s.activeId) useTabsStore.getState().activate(target.id)
-  connectIntoPane(saved, shown ? null : 'right')
+  connectIntoPane(saved, shown ? null : 'right', prevActiveId)
 }

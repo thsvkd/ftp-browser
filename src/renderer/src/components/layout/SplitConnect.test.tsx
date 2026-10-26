@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { en } from '@renderer/i18n/locales/en'
+import { fromLocalEntry } from '@renderer/lib/explorerEntry'
 import { emptyDraft } from '@renderer/lib/serverAddress'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
@@ -15,6 +16,7 @@ import {
   ftp,
   local,
   localLoc,
+  setConnection,
   setupExplorer,
   type ExplorerHarness
 } from '@renderer/components/explorer/explorerTestHarness'
@@ -37,6 +39,16 @@ const NAS2: FtpServer = {
   host: 'b.lan',
   port: 21,
   username: 'bob',
+  hasPassword: true,
+  secure: false
+}
+
+const NAS3: FtpServer = {
+  id: 8,
+  name: 'NAS3',
+  host: 'c.lan',
+  port: 21,
+  username: 'cat',
   hasPassword: true,
   secure: false
 }
@@ -245,5 +257,150 @@ describe('SplitConnect — server drop opens a pane and connects', () => {
       connects[1]({ success: false, error: 'nope' })
     })
     await waitFor(() => expect(useServerStore.getState().connecting).toBe(false))
+  })
+
+  it('runs queued attempts one by one: B and C each really try after the one before settles', async () => {
+    // covers: Test-1280
+    const connects: Array<(result: unknown) => void> = []
+    h.handlers['ftp:connect'] = () => new Promise((resolve) => connects.push(resolve))
+    await renderApp()
+    const tick = async (): Promise<void> => {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+    }
+
+    dropOn('right', OFFICE)
+    await waitFor(() => expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(1))
+    // 앞 시도가 진행 중일 때 B와 C를 차례로 놓는다.
+    dropOn('left', NAS2)
+    dropOn('right', NAS3)
+    await tick()
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(1)
+
+    act(() => connects[0]({ success: true, data: undefined }))
+    await waitFor(() => expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(2))
+    expect(invokeCalls(h.invoke, 'ftp:connect')[1][0]).toMatchObject({ host: NAS2.host })
+    await tick()
+    // C는 시도 없이 실패하지 않는다: B가 끝날 때까지 기다린다.
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(2)
+
+    act(() => connects[1]({ success: true, data: undefined }))
+    await waitFor(() => expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(3))
+    expect(invokeCalls(h.invoke, 'ftp:connect')[2][0]).toMatchObject({ host: NAS3.host })
+    act(() => connects[2]({ success: true, data: undefined }))
+    await waitFor(() => expect(useServerStore.getState().connecting).toBe(false))
+    await tick()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  it('keeps a success whose finishing overlaps the 20 s timer and cancels no other attempt', async () => {
+    // covers: Test-1281
+    const connects: Array<(result: unknown) => void> = []
+    h.handlers['ftp:connect'] = () => new Promise((resolve) => connects.push(resolve))
+    await renderApp()
+    // 성공 처리(저장 서버 목록 다시 읽기)를 붙잡아 둔다 — 그 사이에 20초가 지난다.
+    let releaseServers = (): void => undefined
+    h.handlers['ftp:getRecentServers'] = () =>
+      new Promise((resolve) => {
+        releaseServers = () => resolve({ success: true, data: [OFFICE, NAS2] })
+      })
+    const settle = async (ms = 0): Promise<void> => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms)
+        for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+
+    vi.useFakeTimers()
+    dropOn('right', OFFICE)
+    await settle()
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toHaveLength(1)
+    await settle(19000)
+    dropOn('left', NAS2) // 줄 선 다음 시도
+
+    // 19초에 로그인이 성공한다. 성공 처리가 끝나기 전에 첫 시도의 20초 타이머가 울린다.
+    connects[0]({ success: true, data: undefined })
+    await settle()
+    await settle(1500)
+    releaseServers()
+    await settle()
+
+    // 성공한 패널은 그대로이고 실패 모달·복귀가 없다. 다른 시도도 끊지 않았다.
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:disconnect')).toEqual([])
+    const st = state()
+    expect(st.split).toBeTruthy()
+    expect(st.tabs.find((t) => t.id === st.split?.rightId)?.loc).toMatchObject({
+      side: 'remote',
+      server: OFFICE_KEY
+    })
+  })
+
+  it('puts an already connected server’s tab into the pane without connecting', async () => {
+    // covers: Test-1282
+    setConnection(OFFICE_KEY, 'connected')
+    await renderApp()
+    const cancel = vi.fn()
+    useServerStore.setState({ cancel })
+
+    vi.useFakeTimers()
+    dropOn('right', OFFICE)
+    const st = state()
+    expect(st.split).toBeTruthy()
+    expect(st.tabs.find((t) => t.id === st.split?.rightId)?.loc).toMatchObject({
+      side: 'remote',
+      server: OFFICE_KEY
+    })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000)
+    })
+    expect(invokeCalls(h.invoke, 'ftp:connect')).toEqual([])
+    expect(invokeCalls(h.invoke, 'ftp:disconnect')).toEqual([])
+    expect(cancel).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(state().split).toBeTruthy()
+  })
+
+  it('reactivates the tab active before a shelf drop when its connect fails', async () => {
+    // covers: Test-1283
+    const ANON: FtpServer = {
+      id: 9,
+      name: 'Pub',
+      host: 'p.lan',
+      port: 21,
+      username: '',
+      hasPassword: false,
+      secure: false
+    }
+    const ANON_KEY = 'anonymous@p.lan:21'
+    h.handlers['ftp:getRecentServers'] = () => ({ success: true, data: [ANON] })
+    h.handlers['ftp:connect'] = () => ({ success: false, error: '530 Login incorrect' })
+    useServerStore.setState({ servers: [ANON] })
+    await renderApp()
+    state().openTab({ side: 'remote', path: '/old', server: ANON_KEY }, false)
+    await flush()
+    const before = state().activeId
+
+    // 선반 항목을 미연결 서버의 탭에 놓는다(2단계 흐름).
+    act(() =>
+      useDnd.setState({
+        items: [fromLocalEntry(local(HOME, 'a.txt'))],
+        fromShelf: true,
+        server: null,
+        over: null,
+        thumbs: []
+      })
+    )
+    const tab = screen.getByRole('tab', { name: 'old' })
+    fireEvent.dragOver(tab, { dataTransfer: dt() })
+    fireEvent.drop(tab, { dataTransfer: dt() })
+
+    const modal = await screen.findByRole('alertdialog')
+    fireEvent.click(within(modal).getByRole('button', { name: en['common.close'] }))
+    await waitFor(() => expect(state().split).toBeNull())
+    expect(state().activeId).toBe(before)
   })
 })
