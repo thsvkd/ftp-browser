@@ -34,8 +34,8 @@ interface ServerStore {
   connecting: boolean
   error: string
 
-  /** `prefill` puts the most recent server into an empty toolbar (startup). */
-  loadServers: (prefill?: boolean) => Promise<void>
+  /** `prefill` puts the most recent server into an empty toolbar (startup). Resolves false when the list could not be loaded. */
+  loadServers: (prefill?: boolean) => Promise<boolean>
   select: (server: FtpServer) => void
   setAddress: (text: string) => void
   patch: (fields: Partial<ServerDraft>) => void
@@ -78,11 +78,13 @@ export const useServerStore = create<ServerStore>((set, get) => ({
   loadServers: async (prefill = false) => {
     try {
       const result = await window.api.invoke<IpcResult<FtpServer[]>>('ftp:getRecentServers')
-      if (!result.success) return
+      if (!result.success) return false
       set({ servers: result.data })
       if (prefill && result.data[0] && !get().draft.host) get().select(result.data[0])
+      return true
     } catch (err) {
       console.warn('[useServerStore] Failed to load saved servers:', err)
+      return false
     }
   },
 

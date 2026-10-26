@@ -4,6 +4,8 @@ import { X, Copy, Database, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
+import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
+import { EMPTY_OVERRIDES } from '@renderer/lib/fileCategories'
 import { confirmDialog } from '@renderer/stores/useConfirmStore'
 import { TILE_MAX, TILE_MIN, TILE_STEP } from '@renderer/lib/explorerLayout'
 import { formatBytes } from '@renderer/lib/utils'
@@ -49,9 +51,10 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   const [clearing, setClearing] = useState(false)
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
   const [mcpState, setMcpState] = useState<McpState | null>(null)
-  // 저장된 서버 수는 로드 전에 0개로 단정하지 않는다(함정 C).
-  const [serversLoaded, setServersLoaded] = useState(false)
-  const [protection, setProtection] = useState<PasswordProtection['level']>()
+  // 저장된 서버 수는 로드 전에 0개로 단정하지 않는다(함정 C). undefined는 로드 중, false는 실패다.
+  const [serversLoaded, setServersLoaded] = useState<boolean>()
+  // undefined는 조회 중, null은 조회 실패다.
+  const [protection, setProtection] = useState<PasswordProtection['level'] | null>()
   // 톱니 버튼으로 열면 포커스가 창 밖에 남으므로, 포커스와 관계없이 Esc로 닫는다.
   useEscapeKey(onClose, open)
 
@@ -74,15 +77,14 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
 
   // 저장된 서버 수를 세기 위해 설정창이 열릴 때마다 다시 부른다(함정 C).
   const refreshServers = useCallback(async () => {
-    await loadServers()
-    setServersLoaded(true)
+    setServersLoaded(await loadServers())
   }, [loadServers])
 
   const fetchProtection = useCallback(async () => {
     const result = await window.api.invoke<IpcResult<PasswordProtection>>(
       'ftp:getPasswordProtection'
     )
-    if (result.success && result.data) setProtection(result.data.level)
+    setProtection(result.success && result.data ? result.data.level : null)
   }, [])
 
   useEffect(() => {
@@ -180,6 +182,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
     })
     if (!confirmed) return
     resetSettings()
+    // 파일 카테고리 편집은 별도 스토어(`ftp-browser-file-categories`)라 따로 되돌린다.
+    useFileCategoryStore.setState({ overrides: EMPTY_OVERRIDES })
     toast.success(t('settings.resetDone'))
   }
 
@@ -267,9 +271,15 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
               </select>
             </label>
             {/* 새 탭의 기본 보기(D16). 격자 섹션은 크기 전용으로 남는다(S2). */}
-            <label className="mt-3 flex items-center justify-between gap-6">
-              <span className="text-sm text-[var(--tx)]">{t('settings.viewMode')}</span>
-              <div className="flex w-56 shrink-0 rounded-full bg-[var(--bg)] p-1 text-[12.5px]">
+            <div className="mt-3 flex items-center justify-between gap-6">
+              <span id="settings-view-mode" className="text-sm text-[var(--tx)]">
+                {t('settings.viewMode')}
+              </span>
+              <div
+                role="group"
+                aria-labelledby="settings-view-mode"
+                className="flex w-56 shrink-0 rounded-full bg-[var(--bg)] p-1 text-[12.5px]"
+              >
                 {(['grid', 'list'] as const).map((mode) => (
                   <button
                     key={mode}
@@ -286,7 +296,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                   </button>
                 ))}
               </div>
-            </label>
+            </div>
           </section>
 
           {/* Grid */}
@@ -354,10 +364,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
               {t('settings.account')}
             </h3>
             <p className="text-sm text-[var(--tx)]">
-              {serversLoaded
-                ? // loadServers는 success+undefined 응답에서 undefined를 넣을 수 있어 방어한다(함정 C).
-                  t('settings.savedServersCount', { count: servers?.length ?? 0 })
-                : t('common.loading')}
+              {serversLoaded === undefined
+                ? t('common.loading')
+                : serversLoaded
+                  ? // loadServers는 success+undefined 응답에서 undefined를 넣을 수 있어 방어한다(함정 C).
+                    t('settings.savedServersCount', { count: servers?.length ?? 0 })
+                  : '—'}
             </p>
             <div className="mt-2 flex items-center justify-between gap-6 py-1">
               <span className="text-sm text-[var(--tx)]">
@@ -366,18 +378,18 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
               {/* 약한 보호(basic·none)의 경고 문구를 섹션 안에서 항상 보여 준다(S6). */}
               <span
                 className={`text-sm ${
-                  protection === 'keyring' || protection === undefined
-                    ? 'text-[var(--mu)]'
-                    : 'text-[var(--dg)]'
+                  protection === 'keyring' || !protection ? 'text-[var(--mu)]' : 'text-[var(--dg)]'
                 }`}
               >
                 {protection === undefined
                   ? t('common.loading')
-                  : protection === 'keyring'
-                    ? t('settings.passwordProtectionStrong')
-                    : protection === 'basic'
-                      ? t('servers.passwordProtectionBasic')
-                      : t('servers.passwordProtectionNone')}
+                  : protection === null
+                    ? '—'
+                    : protection === 'keyring'
+                      ? t('settings.passwordProtectionStrong')
+                      : protection === 'basic'
+                        ? t('servers.passwordProtectionBasic')
+                        : t('servers.passwordProtectionNone')}
               </span>
             </div>
           </section>

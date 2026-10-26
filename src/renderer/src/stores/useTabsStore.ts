@@ -56,7 +56,7 @@ interface TabsStore {
   goForward: (tabId?: string) => void
   /** `tabId`(없으면 활성 탭)를 위로. 떠난 폴더를 선택한다. */
   goUp: (tabId?: string) => void
-  /** 새 탭을 끝에 연다. 보기는 활성 탭(없으면 설정의 `viewMode`)을 물려받는다. 새 탭 id를 돌려준다. */
+  /** 새 탭을 끝에 연다. 보기는 설정의 `viewMode`다(활성 탭의 보기를 물려받지 않는다). 새 탭 id를 돌려준다. */
   openTab: (loc: Loc, activate?: boolean) => string
   /**
    * 마지막 탭은 닫지 않는다. 활성 탭을 닫으면 같은 자리(없으면 앞)의 탭이 활성이 된다. 짝의 반쪽을 닫으면
@@ -215,7 +215,7 @@ export const useTabsStore = create<TabsStore>((set, get) => {
     },
 
     openTab: (loc, activate = true) => {
-      const t = newTab(loc, active()?.view ?? useSettingsStore.getState().viewMode)
+      const t = newTab(loc, useSettingsStore.getState().viewMode)
       set((s) => ({ tabs: [...s.tabs, t], activeId: activate || !s.activeId ? t.id : s.activeId }))
       return t.id
     },
