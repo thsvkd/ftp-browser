@@ -7,7 +7,11 @@ import { categoryOf, parentPath, type ExplorerEntry } from '@renderer/lib/explor
 import { EntryThumb } from '@renderer/components/thumbnail/EntryThumb'
 import { isImageFile } from '@shared/constants'
 import { useTabsStore } from '@renderer/stores/useTabsStore'
-import { useTransferStore, type ConflictPrompt } from '@renderer/stores/useTransferStore'
+import {
+  useTransferStore,
+  type ConflictPrompt,
+  type SendVerb
+} from '@renderer/stores/useTransferStore'
 import { useSettingsStore } from '@renderer/stores/useSettingsStore'
 import type { ConflictDecision, TransferConflict } from '@shared/types/transfer'
 
@@ -54,6 +58,10 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
   })
   const [choice, setChoice] = useState<ConflictDecision>(saved ?? 'newer')
   const [remember, setRemember] = useState(saved !== null)
+  // 전송 작업 토글(V1). `askConflicts`가 기본값(원격↔원격은 이동, 그 외는 복사)을 정해 넣었다(V2).
+  const [verb, setVerb] = useState<SendVerb>(prompt.verb)
+  // 원격↔원격: 원본 복사는 지원하지 않으므로 복사 칸을 막는다(V2).
+  const verbLocked = prompt.direction === 'move'
   const dialog = useRef<HTMLDivElement>(null)
   const conflict = conflicts[index]
   const rest = conflicts.length - index - 1
@@ -86,7 +94,8 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
     const chosen = applyAll ? conflicts.slice(index) : [conflict]
     const next = { ...decisions }
     for (const c of chosen) next[c.target] = forConflict(c, d)
-    if (index + chosen.length >= conflicts.length) resolve(prompt.id, next)
+    // 토글 값은 시트의 답에 함께 실려 이 보내기 전체에 적용된다(V3·V8).
+    if (index + chosen.length >= conflicts.length) resolve(prompt.id, { decisions: next, verb })
     else {
       setDecisions(next)
       setIndex(index + chosen.length)
@@ -205,6 +214,46 @@ function Sheet({ prompt }: { prompt: ConflictPrompt }): React.JSX.Element {
             {t('common.cancel')}
           </button>
         </div>
+        {/* 전송 작업 토글(V1): 카드 위쪽(checked 결정 라디오보다 뒤에 그려지지 않도록 라디오보다 앞에
+            둔다). 단추는 가두기의 순서에 그대로 끼지만 checked 라디오와 그 뒤 선택지들의 상대 순서는
+            바꾸지 않아 포커스 출발점·기존 Tab 순서가 그대로다(함정 B). 서버 간 복사(relay)는 토글
+            범위 밖이라 감춘다. */}
+        {prompt.direction !== 'relay' && (
+          <div
+            role="group"
+            aria-label={t('conflict.verbLabel')}
+            className="mx-5 mt-3 flex w-fit items-center gap-1 rounded-[10px] border border-[var(--bd)] bg-[var(--bg)] p-1"
+          >
+            {(['copy', 'move'] as const).map((v) => {
+              const locked = v === 'copy' && verbLocked
+              return (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={verb === v}
+                  aria-disabled={locked || undefined}
+                  title={
+                    locked
+                      ? t('send.invalidRemoteCopy')
+                      : v === 'move'
+                        ? t('conflict.verbMoveHint')
+                        : undefined
+                  }
+                  onClick={() => !locked && setVerb(v)}
+                  className={cn(
+                    'rounded-[8px] px-3 py-1 text-[12.5px] font-semibold transition-colors',
+                    verb === v
+                      ? 'bg-[var(--ac)] text-[var(--acx)]'
+                      : 'text-[var(--mu)] hover:bg-[var(--hv)]',
+                    locked && 'cursor-not-allowed opacity-40'
+                  )}
+                >
+                  {t(v === 'copy' ? 'conflict.verbCopy' : 'conflict.verbMove')}
+                </button>
+              )
+            })}
+          </div>
+        )}
         <div className="flex gap-3 px-5">
           {card('existing')}
           {card('incoming')}

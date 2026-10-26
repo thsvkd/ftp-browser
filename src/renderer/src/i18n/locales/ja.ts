@@ -175,6 +175,20 @@ export const ja = {
   'settings.themeSystem': 'システムの設定を使用',
   'settings.themeLight': 'ライト',
   'settings.themeDark': 'ダーク',
+  'settings.viewMode': '新しいタブの既定の表示',
+  'settings.viewModeGrid': 'グリッド',
+  'settings.viewModeList': 'リスト',
+  'settings.account': 'アカウントとセキュリティ',
+  'settings.savedServersCount_other': '保存済みサーバー {{count}} 台',
+  'settings.passwordProtectionLevel': '保存パスワードの保護',
+  'settings.passwordProtectionStrong': 'システムキーチェーンで暗号化されています',
+  'settings.cacheLimit': '{{size}} まで保持',
+  'settings.about': '情報',
+  'settings.copyDiagnostics': '診断情報をコピー',
+  'settings.diagnosticsCopied': '診断情報をコピーしました',
+  'settings.reset': 'すべての設定をリセット',
+  'settings.resetConfirm': 'すべての設定を既定値に戻しますか？',
+  'settings.resetDone': '設定をリセットしました',
   'settings.grid': 'グリッド',
   'settings.thumbnailSize': 'サムネイルのサイズ',
   'settings.zoomTip':
@@ -449,6 +463,10 @@ export const ja = {
   'conflict.choiceLabel': 'この項目の処理',
   'conflict.rememberChoice': '今回の選択を記憶する',
   'conflict.confirm': '確定',
+  'conflict.verbLabel': '送信方法',
+  'conflict.verbCopy': 'コピー',
+  'conflict.verbMove': '移動',
+  'conflict.verbMoveHint': 'すべて届いた後に元ファイルを削除',
 
   'lightbox.label': 'プレビュー: {{name}}',
   'lightbox.previous': '前へ (←)',
@@ -465,5 +483,6 @@ export const ja = {
   'toast.sendSkipped_other': '{{count}} 件の項目をスキップしました',
   'toast.sendFailed': '転送を開始できませんでした',
   'toast.relayPartialRemoved': '{{server}} 上の {{name}} の不完全なコピーを削除しました',
+  'toast.moveCleanupFailed': '移動しましたが、元ファイルを削除できませんでした',
   'toast.retryFailed': '再試行できませんでした'
 } satisfies LocaleMessages

@@ -172,6 +172,20 @@ export const ko = {
   'settings.themeSystem': '시스템 설정 사용',
   'settings.themeLight': '밝게',
   'settings.themeDark': '어둡게',
+  'settings.viewMode': '새 탭의 기본 보기',
+  'settings.viewModeGrid': '격자',
+  'settings.viewModeList': '목록',
+  'settings.account': '계정·보안',
+  'settings.savedServersCount_other': '저장된 서버 {{count}}개',
+  'settings.passwordProtectionLevel': '저장된 비밀번호 보호 수준',
+  'settings.passwordProtectionStrong': '시스템 키체인으로 암호화됨',
+  'settings.cacheLimit': '{{size}}까지 보관',
+  'settings.about': '정보',
+  'settings.copyDiagnostics': '진단 정보 복사',
+  'settings.diagnosticsCopied': '진단 정보를 복사했습니다',
+  'settings.reset': '모든 설정 초기화',
+  'settings.resetConfirm': '모든 설정을 기본값으로 되돌릴까요?',
+  'settings.resetDone': '설정을 초기화했습니다',
   'settings.grid': '격자',
   'settings.thumbnailSize': '썸네일 크기',
   'settings.zoomTip':
@@ -445,6 +459,10 @@ export const ko = {
   'conflict.choiceLabel': '이 항목을 어떻게 할까요',
   'conflict.rememberChoice': '지금 결정 기억하기',
   'conflict.confirm': '확인',
+  'conflict.verbLabel': '전송 작업',
+  'conflict.verbCopy': '복사',
+  'conflict.verbMove': '이동',
+  'conflict.verbMoveHint': '모두 도착한 뒤 원본을 삭제',
 
   'lightbox.label': '미리 보기: {{name}}',
   'lightbox.previous': '이전 (←)',
@@ -461,5 +479,6 @@ export const ko = {
   'toast.sendSkipped_other': '항목 {{count}}개를 건너뛰었습니다',
   'toast.sendFailed': '전송을 시작하지 못했습니다',
   'toast.relayPartialRemoved': '{{server}}에서 {{name}}의 불완전한 복사본을 지웠습니다',
+  'toast.moveCleanupFailed': '옮겼지만 원본을 삭제하지 못했습니다',
   'toast.retryFailed': '다시 시도하지 못했습니다'
 } satisfies LocaleMessages
