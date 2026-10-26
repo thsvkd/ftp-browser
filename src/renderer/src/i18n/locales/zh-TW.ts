@@ -284,6 +284,9 @@ export const zhTW = {
   'split.divider': '調整窗格大小',
   'split.paneLeft': '左窗格: {{name}}',
   'split.paneRight': '右窗格: {{name}}',
+  'split.dropHint': '拖放到這裡以在該側開啟',
+  'split.connectFailedTitle': '無法連線至 {{name}}',
+  'split.connectFailedBody': '請檢查位址與密碼，然後再試一次。',
 
   'path.backTooltip': '上一頁 (Alt+←)',
   'path.forwardTooltip': '下一頁 (Alt+→)',

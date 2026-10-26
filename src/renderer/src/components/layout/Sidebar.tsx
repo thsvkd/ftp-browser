@@ -21,7 +21,7 @@ import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { useActiveTab, useTabsStore } from '@renderer/stores/useTabsStore'
 import { SourceBadge } from '@renderer/components/common/SourceBadge'
-import { useDropTarget } from '@renderer/components/explorer/dnd'
+import { endDrag, startServerDrag, useDropTarget } from '@renderer/components/explorer/dnd'
 import { connKey, connLabel } from '@shared/connKey'
 import type { ConnectionStatus, FtpServer, RecentPath } from '@shared/types/ftp'
 import type { IpcResult } from '@shared/types/ipc'
@@ -183,6 +183,12 @@ function ServerRow({
   return (
     <div className="group relative shrink-0">
       <button
+        // M14: 저장 서버 한 줄은 그 자체로 끈다. 클릭·더블클릭 연결 규칙(D3·D8)은 그대로다.
+        draggable={!!saved}
+        onDragStart={(e) => {
+          if (saved) startServerDrag(e, saved)
+        }}
+        onDragEnd={endDrag}
         onClick={(e) => {
           if (root) {
             if (e.ctrlKey || e.metaKey) openTab(root)

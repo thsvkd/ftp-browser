@@ -182,7 +182,8 @@ export function ServerOfflinePanel({
         </button>
       }
     >
-      {t('explorer.offlineHint')}
+      {/* M16 ①·M20: 연결 시도 중에는 본문도 기존 "연결 시도 중" 안내로 바꾼다(새 키 없이). */}
+      {connecting ? t('sidebar.serverConnecting') : t('explorer.offlineHint')}
     </Panel>
   )
 }

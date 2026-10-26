@@ -311,6 +311,9 @@ export const es = {
   'split.divider': 'Cambiar tamaño de los paneles',
   'split.paneLeft': 'Panel izquierdo: {{name}}',
   'split.paneRight': 'Panel derecho: {{name}}',
+  'split.dropHint': 'Suelta aquí para abrir este lado',
+  'split.connectFailedTitle': 'No se pudo conectar a {{name}}',
+  'split.connectFailedBody': 'Comprueba la dirección y la contraseña e inténtalo de nuevo.',
 
   'path.backTooltip': 'Atrás (Alt+←)',
   'path.forwardTooltip': 'Adelante (Alt+→)',

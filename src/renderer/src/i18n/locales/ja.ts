@@ -296,6 +296,9 @@ export const ja = {
   'split.divider': 'ペインのサイズを変更',
   'split.paneLeft': '左ペイン: {{name}}',
   'split.paneRight': '右ペイン: {{name}}',
+  'split.dropHint': 'ここにドロップしてこの側を開く',
+  'split.connectFailedTitle': '{{name}} に接続できませんでした',
+  'split.connectFailedBody': 'アドレスとパスワードを確認して、もう一度お試しください。',
 
   'path.backTooltip': '戻る (Alt+←)',
   'path.forwardTooltip': '進む (Alt+→)',

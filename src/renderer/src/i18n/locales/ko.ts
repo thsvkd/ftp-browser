@@ -293,6 +293,9 @@ export const ko = {
   'split.divider': '패널 크기 조절',
   'split.paneLeft': '왼쪽 패널: {{name}}',
   'split.paneRight': '오른쪽 패널: {{name}}',
+  'split.dropHint': '여기에 놓으면 이쪽을 엽니다',
+  'split.connectFailedTitle': '{{name}}에 연결하지 못했습니다',
+  'split.connectFailedBody': '주소와 비밀번호를 확인한 뒤 다시 시도하세요.',
 
   'path.backTooltip': '뒤로 (Alt+←)',
   'path.forwardTooltip': '앞으로 (Alt+→)',

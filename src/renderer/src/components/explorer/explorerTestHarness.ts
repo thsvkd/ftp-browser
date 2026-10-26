@@ -199,7 +199,7 @@ export function setupExplorer(
     panelSending: 0
   })
   useConfirmStore.setState({ request: null })
-  useDnd.setState({ items: null, over: null, thumbs: [] })
+  useDnd.setState({ items: null, server: null, over: null, thumbs: [], fromShelf: false })
   return h
 }
 

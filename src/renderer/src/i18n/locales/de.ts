@@ -312,6 +312,9 @@ export const de = {
   'split.divider': 'Bereichsgröße ändern',
   'split.paneLeft': 'Linker Bereich: {{name}}',
   'split.paneRight': 'Rechter Bereich: {{name}}',
+  'split.dropHint': 'Hier ablegen, um diese Seite zu öffnen',
+  'split.connectFailedTitle': 'Verbindung zu {{name}} fehlgeschlagen',
+  'split.connectFailedBody': 'Prüfen Sie Adresse und Passwort und versuchen Sie es erneut.',
 
   'path.backTooltip': 'Zurück (Alt+←)',
   'path.forwardTooltip': 'Vorwärts (Alt+→)',

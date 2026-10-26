@@ -701,6 +701,59 @@ describe('Explorer — drag and drop', () => {
   })
 })
 
+describe('Explorer — split zones for a server drag', () => {
+  const zoneDt = (): Record<string, unknown> => ({
+    types: [],
+    files: [],
+    dropEffect: '',
+    setData: vi.fn(),
+    setDragImage: vi.fn(),
+    effectAllowed: ''
+  })
+  const OFFICE: FtpServer = {
+    id: 2,
+    name: 'Office',
+    host: 'ftp.office.lan',
+    port: 2121,
+    username: 'kim',
+    hasPassword: true,
+    secure: false
+  }
+
+  it('highlights only the hovered half with the split hint while a server is dragged', async () => {
+    // covers: Test-1258
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    await renderExplorer(remoteLoc(DIR))
+
+    // 항목을 끌 때는 분할 자리가 없다(M14·M15의 구분).
+    act(() =>
+      useDnd.setState({
+        items: [fromFtpEntry(ftp('a.jpg'), DIR, server())],
+        over: null,
+        thumbs: []
+      })
+    )
+    expect(screen.queryByTestId('split-zones')).toBeNull()
+
+    act(() =>
+      useDnd.setState({ server: OFFICE, items: null, over: null, thumbs: [], fromShelf: false })
+    )
+    const zones = screen.getByTestId('split-zones')
+    const left = within(zones).getByTestId('split-left')
+    const right = within(zones).getByTestId('split-right')
+
+    fireEvent.dragOver(left, { dataTransfer: zoneDt() })
+    expect(within(left).getByText(en['split.dropHint'])).toBeTruthy()
+    expect(within(right).queryByText(en['split.dropHint'])).toBeNull()
+    expect(useDnd.getState().over).toBe('split:left')
+
+    fireEvent.dragOver(right, { dataTransfer: zoneDt() })
+    expect(within(right).getByText(en['split.dropHint'])).toBeTruthy()
+    expect(within(left).queryByText(en['split.dropHint'])).toBeNull()
+    expect(useDnd.getState().over).toBe('split:right')
+  })
+})
+
 describe('Explorer — drag-and-drop upload progress in the destination tab', () => {
   const dt = (files: File[] = []): Record<string, unknown> => ({
     setData: vi.fn(),

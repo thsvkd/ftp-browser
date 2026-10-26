@@ -310,6 +310,9 @@ export const it = {
   'split.divider': 'Ridimensiona i pannelli',
   'split.paneLeft': 'Pannello sinistro: {{name}}',
   'split.paneRight': 'Pannello destro: {{name}}',
+  'split.dropHint': 'Rilascia qui per aprire questo lato',
+  'split.connectFailedTitle': 'Impossibile connettersi a {{name}}',
+  'split.connectFailedBody': 'Controlla indirizzo e password, poi riprova.',
 
   'path.backTooltip': 'Indietro (Alt+←)',
   'path.forwardTooltip': 'Avanti (Alt+→)',

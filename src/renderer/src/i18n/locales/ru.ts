@@ -335,6 +335,9 @@ export const ru = {
   'split.divider': 'Изменить размер панелей',
   'split.paneLeft': 'Левая панель: {{name}}',
   'split.paneRight': 'Правая панель: {{name}}',
+  'split.dropHint': 'Перетащите сюда, чтобы открыть эту сторону',
+  'split.connectFailedTitle': 'Не удалось подключиться к {{name}}',
+  'split.connectFailedBody': 'Проверьте адрес и пароль, затем повторите попытку.',
 
   'path.backTooltip': 'Назад (Alt+←)',
   'path.forwardTooltip': 'Вперёд (Alt+→)',

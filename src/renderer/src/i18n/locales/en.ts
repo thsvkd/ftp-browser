@@ -307,6 +307,9 @@ export const en = {
   'split.divider': 'Resize panes',
   'split.paneLeft': 'Left pane: {{name}}',
   'split.paneRight': 'Right pane: {{name}}',
+  'split.dropHint': 'Drop here to open this side',
+  'split.connectFailedTitle': 'Could not connect to {{name}}',
+  'split.connectFailedBody': 'Check the address and password, then try again.',
 
   'path.backTooltip': 'Back (Alt+←)',
   'path.forwardTooltip': 'Forward (Alt+→)',

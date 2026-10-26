@@ -284,6 +284,9 @@ export const zhCN = {
   'split.divider': '调整窗格大小',
   'split.paneLeft': '左窗格: {{name}}',
   'split.paneRight': '右窗格: {{name}}',
+  'split.dropHint': '拖放到这里以在该侧打开',
+  'split.connectFailedTitle': '无法连接到 {{name}}',
+  'split.connectFailedBody': '请检查地址和密码，然后重试。',
 
   'path.backTooltip': '后退 (Alt+←)',
   'path.forwardTooltip': '前进 (Alt+→)',

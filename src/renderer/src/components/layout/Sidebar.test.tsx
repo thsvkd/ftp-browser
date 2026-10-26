@@ -16,7 +16,8 @@ import {
   setupExplorer,
   type ExplorerHarness
 } from '@renderer/components/explorer/explorerTestHarness'
-import { useDnd } from '@renderer/components/explorer/dnd'
+import { GHOST_ID, useDnd } from '@renderer/components/explorer/dnd'
+import { AppShell } from '@renderer/components/layout/AppShell'
 import type { FtpServer } from '@shared/types/ftp'
 import { act } from '@testing-library/react'
 import { Sidebar } from './Sidebar'
@@ -300,6 +301,37 @@ describe('Sidebar — servers', () => {
     )
     fireEvent.dragOver(office, { dataTransfer: { types: [], files: [], dropEffect: '' } })
     expect(office.getAttribute('title')).toBe('Move 1 → Office')
+  })
+
+  it('drags a saved server row with its own ghost, apart from entry drags', async () => {
+    // covers: Test-1257
+    // 고스트는 화면 밖에 그려져 있고, 실제로는 앱 전체(탐색기·고스트)를 그린다.
+    h.handlers['ftp:getRecentServers'] = () => ({ success: true, data: [OFFICE, NAS] })
+    useTabsStore.getState().openTab(localLoc(HOME))
+    render(<AppShell />)
+    await flush()
+
+    const dt = {
+      setData: vi.fn(),
+      setDragImage: vi.fn(),
+      effectAllowed: '',
+      dropEffect: '',
+      types: [],
+      files: []
+    }
+    fireEvent.dragStart(place(/^NAS/), { dataTransfer: dt })
+
+    // M14: useDnd.server에 서버가 담기고 항목 드래그(items)는 비어 있다.
+    const dnd = useDnd.getState()
+    expect(dnd.server).toMatchObject({ name: 'NAS', host: 'nas.local', port: 21 })
+    expect(dnd.items).toBeNull()
+
+    // 고스트가 뜨고 서버 이름과 주소를 보여 주며 setDragImage가 그것을 찍는다.
+    const ghost = document.getElementById(GHOST_ID)
+    expect(ghost).toBeTruthy()
+    expect(ghost?.textContent).toContain('NAS')
+    expect(ghost?.textContent).toContain('nas.local:21')
+    expect(dt.setDragImage).toHaveBeenCalledWith(ghost, 22, 22)
   })
 })
 

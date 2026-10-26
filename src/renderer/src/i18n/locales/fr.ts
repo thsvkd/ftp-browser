@@ -311,6 +311,9 @@ export const fr = {
   'split.divider': 'Redimensionner les volets',
   'split.paneLeft': 'Volet gauche : {{name}}',
   'split.paneRight': 'Volet droit : {{name}}',
+  'split.dropHint': 'Déposez ici pour ouvrir ce côté',
+  'split.connectFailedTitle': 'Impossible de se connecter à {{name}}',
+  'split.connectFailedBody': "Vérifiez l'adresse et le mot de passe, puis réessayez.",
 
   'path.backTooltip': 'Précédent (Alt+←)',
   'path.forwardTooltip': 'Suivant (Alt+→)',

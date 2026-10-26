@@ -309,6 +309,9 @@ export const ptBR = {
   'split.divider': 'Redimensionar painéis',
   'split.paneLeft': 'Painel esquerdo: {{name}}',
   'split.paneRight': 'Painel direito: {{name}}',
+  'split.dropHint': 'Solte aqui para abrir este lado',
+  'split.connectFailedTitle': 'Não foi possível conectar a {{name}}',
+  'split.connectFailedBody': 'Verifique o endereço e a senha e tente novamente.',
 
   'path.backTooltip': 'Voltar (Alt+←)',
   'path.forwardTooltip': 'Avançar (Alt+→)',
