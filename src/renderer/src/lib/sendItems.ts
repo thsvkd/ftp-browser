@@ -24,6 +24,7 @@ import { moveRemoteFiles } from './remoteDrop'
 import { planSameSide, type SameSideItem, type SameSideOp } from './sameSidePlan'
 import { connStatus, connectedKeys, savedServerOf } from './connections'
 import { planSend, type SendPlan } from './sendPlan'
+import { canConnectSaved } from './serverAddress'
 import { connLabel, parseConnKey } from '@shared/connKey'
 import type { IpcResult } from '@shared/types/ipc'
 import type { FtpServer } from '@shared/types/ftp'
@@ -362,8 +363,9 @@ export function sendDestinations(current: Loc): Loc[] {
 }
 
 /**
- * 원격 탭의 서버(`"user@host:port"`)에 연결한다(D2·D6). 저장된 서버면 기존 연결 흐름:
- * 비밀번호가 저장돼 있으면 바로 연결하고, 아니면 툴바에 그 서버를 넣고 비밀번호 칸에 포커스를 준다.
+ * 원격 탭의 서버(`"user@host:port"`)에 연결한다(D2·D6). 저장된 서버면 공통 활성화 경로
+ * (`connectSaved`): 바로 연결할 수 있으면(저장 비밀번호·익명) 연결하고, 아니면 툴바에 그 서버를
+ * 넣고 비밀번호 칸에 포커스를 준다.
  */
 export function connectToServer(server: string): void {
   const parsed = parseConnKey(server)
@@ -372,22 +374,34 @@ export function connectToServer(server: string): void {
   const store = useServerStore.getState()
   // 익명 연결은 저장된 사용자 이름이 비어 있어도 'anonymous'로 접속한다(useServerStore.connect).
   const saved = savedServerOf(store.servers, server)
-  if (saved) return connectSaved(saved)
+  if (saved) {
+    void connectSaved(saved)
+    return
+  }
   store.setAddress(user ? `${user}@${host}:${port}` : `${host}:${port}`)
   focusPassword()
 }
 
-/** 저장된 서버에 연결한다(D6): 비밀번호가 저장돼 있으면 바로, 아니면 툴바에 넣고 비밀번호 칸에 포커스. */
-export function connectSaved(saved: FtpServer): void {
+/**
+ * 저장 서버의 유일한 활성화 진입점(D1·D2·D5): 1) 주소를 채우고 2) 바로 연결할 수 있으면(저장
+ * 비밀번호·익명) 연결을 시작해 true를, 3) 아니면 해당 맥락의 비밀번호 칸에 포커스만 준 뒤 false를
+ * 돌려준다. `scope`는 포커스할 비밀번호 칸의 범위. 없으면 문서 전체(툴바)이고, 관리창은 자기
+ * 컨테이너를 넘긴다(함정 A).
+ */
+export function connectSaved(saved: FtpServer, scope?: ParentNode): Promise<boolean> {
   const store = useServerStore.getState()
   store.select(saved)
-  if (saved.hasPassword) void store.connect()
-  else focusPassword()
+  if (!canConnectSaved(saved)) {
+    focusPassword(scope)
+    return Promise.resolve(false)
+  }
+  return store.connect()
 }
 
 // 비밀번호 칸은 사용자 이름이 있을 때만 그려진다. 다음 프레임에 찾는다.
-function focusPassword(): void {
+// 범위를 넘기면 그 안에서만 찾는다: 관리창은 포커스를 가두므로 문서에서 찾으면 툴바로 빠진다(함정 A).
+function focusPassword(scope: ParentNode = document): void {
   requestAnimationFrame(() =>
-    document.querySelector<HTMLInputElement>('input[type="password"]')?.focus()
+    scope.querySelector<HTMLInputElement>('input[type="password"]')?.focus()
   )
 }

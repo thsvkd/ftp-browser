@@ -1,7 +1,8 @@
 import { cn } from '@renderer/lib/utils'
 import { useT } from '@renderer/i18n'
 import { useServerStore } from '@renderer/stores/useServerStore'
-import { serverAddress, serverLabel, toDraft } from '@renderer/lib/serverAddress'
+import { connectSaved } from '@renderer/lib/sendItems'
+import { serverAddress, serverLabel } from '@renderer/lib/serverAddress'
 import type { FtpServer } from '@shared/types/ftp'
 import { ServerDot } from './serverUi'
 
@@ -17,7 +18,7 @@ export function NotConnectedPane(): React.JSX.Element {
   const servers = useServerStore((s) => s.servers)
   const currentId = useServerStore((s) => s.draft.id)
   const connecting = useServerStore((s) => s.connecting)
-  const { select, connect } = useServerStore.getState()
+  const { select } = useServerStore.getState()
   const t = useT()
 
   return (
@@ -43,7 +44,7 @@ export function NotConnectedPane(): React.JSX.Element {
                   // 연결 중에는 툴바의 서버를 바꾸지 않는다.
                   disabled={connecting}
                   onClick={() => select(s)}
-                  onDoubleClick={() => void connect(toDraft(s))}
+                  onDoubleClick={() => void connectSaved(s)}
                   title={t('connect.chipTooltip', { address: serverAddress(s) })}
                   className={cn(
                     'inline-flex h-7 max-w-full items-center gap-1.5 rounded-full px-3 text-xs ring-1 ring-inset transition-colors disabled:opacity-50',
