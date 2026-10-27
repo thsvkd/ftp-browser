@@ -34,6 +34,7 @@ export const es = {
   'connect.port': 'Puerto',
   'connect.username': 'Nombre de usuario',
   'connect.password': 'Contraseña',
+  'connect.anonymous': 'Iniciar sesión de forma anónima',
   'connect.showPassword': 'Mostrar contraseña',
   'connect.hidePassword': 'Ocultar contraseña',
   'connect.savedPassword': 'Contraseña guardada',

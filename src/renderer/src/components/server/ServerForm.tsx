@@ -1,9 +1,11 @@
-import { useId, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import { Eye, EyeOff, Folder, ShieldAlert } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useT } from '@renderer/i18n'
 import {
   draftFields,
+  hasUser,
   isValidPort,
   parseServerAddress,
   type ServerDraft
@@ -189,7 +191,8 @@ export function ServerForm({
   disabled,
   autoFocusHost,
   passwordWarning,
-  passwordHint
+  passwordHint,
+  hasSavedPassword = false
 }: {
   draft: ServerDraft
   onPatch: (fields: Partial<ServerDraft>) => void
@@ -200,9 +203,39 @@ export function ServerForm({
   passwordWarning?: string
   /** Under the password field: what to do before this draft can be saved (E16). */
   passwordHint?: string
+  /** Whether the saved row still has a saved password, so unchecking anonymous may restore it (AN8). */
+  hasSavedPassword?: boolean
 }): React.JSX.Element {
   const id = useId()
   const t = useT()
+  // 익명 체크는 폼의 상태다. 사용자 이름이 비었거나 anonymous면 지금도 익명으로 접속하니 체크된 채 연다(AN2).
+  const [anonymous, setAnonymous] = useState(() => !hasUser(draft.username))
+  // 체크하기 직전의 계정. 체크를 풀면 되돌린다(AN4).
+  const beforeAnonymous =
+    useRef<Pick<ServerDraft, 'username' | 'password' | 'savedPassword'>>(undefined)
+  const userRef = useRef<HTMLInputElement>(null)
+  const toggleAnonymous = (on: boolean): void => {
+    if (on) {
+      const { username, password, savedPassword } = draft
+      beforeAnonymous.current = { username, password, savedPassword }
+      setAnonymous(true)
+      onPatch({ username: '', password: '', savedPassword: false })
+      return
+    }
+    // 칸이 켜진 뒤에 포커스를 줘야 하므로 먼저 그린다.
+    flushSync(() => {
+      setAnonymous(false)
+      // 체크한 채 저장해 저장 비밀번호가 지워졌으면 그 표시는 되돌리지 않는다(AN8).
+      const before = beforeAnonymous.current
+      if (before) onPatch({ ...before, savedPassword: before.savedPassword && hasSavedPassword })
+    })
+    userRef.current?.focus()
+  }
+  // 주소에 계정을 적어 붙여넣으면 익명이 아니다(AN5).
+  const patchHost = (fields: Partial<ServerDraft>): void => {
+    if (fields.username !== undefined && hasUser(fields.username)) setAnonymous(false)
+    onPatch(fields)
+  }
   const portInvalid = draft.port.trim() !== '' && !isValidPort(Number(draft.port))
   const maxTransfersInvalid =
     draft.maxTransfers.trim() !== '' && !isValidMaxTransfers(Number(draft.maxTransfers))
@@ -242,7 +275,7 @@ export function ServerForm({
               value={draft.host}
               disabled={disabled}
               autoFocus={autoFocusHost}
-              onPatch={onPatch}
+              onPatch={patchHost}
             />
           )}
         </div>
@@ -271,14 +304,25 @@ export function ServerForm({
         </div>
       </div>
       <div className="flex flex-col gap-1.5">
+        <label className="inline-flex cursor-pointer select-none items-center gap-2 self-start text-[13px] text-[var(--tx)]">
+          <input
+            type="checkbox"
+            checked={anonymous}
+            disabled={disabled}
+            onChange={(e) => toggleAnonymous(e.target.checked)}
+            className="h-4 w-4 accent-[var(--ac)]"
+          />
+          {t('connect.anonymous')}
+        </label>
         <div className="grid grid-cols-2 gap-[14px]">
           {row(
             t('connect.username'),
             `${id}-user`,
             <input
+              ref={userRef}
               id={`${id}-user`}
               value={draft.username}
-              disabled={disabled}
+              disabled={disabled || anonymous}
               spellCheck={false}
               autoComplete="off"
               placeholder="anonymous"
@@ -294,7 +338,7 @@ export function ServerForm({
               <PasswordInput
                 id={`${id}-pw`}
                 value={draft.password}
-                disabled={disabled}
+                disabled={disabled || anonymous}
                 placeholder={draft.savedPassword ? t('connect.savedPassword') : undefined}
                 onChange={(password) => onPatch({ password })}
                 className="w-full"

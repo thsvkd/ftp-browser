@@ -34,6 +34,7 @@ export const de = {
   'connect.port': 'Port',
   'connect.username': 'Benutzername',
   'connect.password': 'Passwort',
+  'connect.anonymous': 'Anonym anmelden',
   'connect.showPassword': 'Passwort anzeigen',
   'connect.hidePassword': 'Passwort ausblenden',
   'connect.savedPassword': 'Gespeichertes Passwort',

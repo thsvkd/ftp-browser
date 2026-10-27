@@ -409,6 +409,7 @@ export function ServerManagerDialog({
                 autoFocusHost={selId === 'new' && initial.id === undefined}
                 passwordWarning={passwordWarning}
                 passwordHint={passwordHint}
+                hasSavedPassword={selected?.hasPassword ?? false}
               />
             </div>
             {error && (

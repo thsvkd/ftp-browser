@@ -32,6 +32,7 @@ export const zhCN = {
   'connect.port': '端口',
   'connect.username': '用户名',
   'connect.password': '密码',
+  'connect.anonymous': '匿名登录',
   'connect.showPassword': '显示密码',
   'connect.hidePassword': '隐藏密码',
   'connect.savedPassword': '已保存的密码',

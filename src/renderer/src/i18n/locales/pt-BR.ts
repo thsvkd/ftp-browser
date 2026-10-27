@@ -34,6 +34,7 @@ export const ptBR = {
   'connect.port': 'Porta',
   'connect.username': 'Nome de usuário',
   'connect.password': 'Senha',
+  'connect.anonymous': 'Entrar anonimamente',
   'connect.showPassword': 'Mostrar senha',
   'connect.hidePassword': 'Ocultar senha',
   'connect.savedPassword': 'Senha salva',

@@ -38,6 +38,7 @@ export const ru = {
   'connect.port': 'Порт',
   'connect.username': 'Имя пользователя',
   'connect.password': 'Пароль',
+  'connect.anonymous': 'Войти анонимно',
   'connect.showPassword': 'Показать пароль',
   'connect.hidePassword': 'Скрыть пароль',
   'connect.savedPassword': 'Сохранённый пароль',
