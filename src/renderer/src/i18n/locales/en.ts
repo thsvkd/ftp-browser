@@ -412,6 +412,8 @@ export const en = {
   'shelf.expand': 'Open the shelf remote',
   'shelf.collapse': 'Close the shelf remote',
   'shelf.dockHint': 'Drop here to add to the shelf',
+  'shelf.panelHint':
+    'Sends to the active tab · drag an item onto a tab, or middle-click to remove it',
   'rail.label': 'Side panel',
   'panes.toggleLeft': 'Sidebar',
   'panes.toggleRight': 'Side panel',

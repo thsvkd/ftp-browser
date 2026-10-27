@@ -418,6 +418,8 @@ export const de = {
   'shelf.expand': 'Ablage-Fernbedienung öffnen',
   'shelf.collapse': 'Ablage-Fernbedienung schließen',
   'shelf.dockHint': 'Hierher ziehen, um zur Ablage hinzuzufügen',
+  'shelf.panelHint':
+    'Sendet an den aktiven Tab · Element auf einen Tab ziehen oder per Mittelklick entfernen',
   'rail.label': 'Seitenleiste',
   'panes.toggleLeft': 'Seitenleiste',
   'panes.toggleRight': 'Seitenpanel',

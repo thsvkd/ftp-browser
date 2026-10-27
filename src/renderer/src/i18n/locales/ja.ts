@@ -395,6 +395,7 @@ export const ja = {
   'shelf.expand': '棚リモコンを開く',
   'shelf.collapse': '棚リモコンを閉じる',
   'shelf.dockHint': 'ここにドロップして棚に追加',
+  'shelf.panelHint': 'アクティブなタブへ送ります · 項目をタブへドラッグ、または中クリックで外す',
   'rail.label': 'サイドパネル',
   'panes.toggleLeft': 'サイドバー',
   'panes.toggleRight': 'サイドパネル',

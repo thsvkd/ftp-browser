@@ -416,6 +416,8 @@ export const it = {
   'shelf.expand': 'Apri il telecomando del ripiano',
   'shelf.collapse': 'Chiudi il telecomando del ripiano',
   'shelf.dockHint': 'Rilascia qui per aggiungere al ripiano',
+  'shelf.panelHint':
+    'Invia alla scheda attiva · trascina un elemento su una scheda o fai clic centrale per rimuoverlo',
   'rail.label': 'Pannello laterale',
   'panes.toggleLeft': 'Barra laterale',
   'panes.toggleRight': 'Pannello laterale',

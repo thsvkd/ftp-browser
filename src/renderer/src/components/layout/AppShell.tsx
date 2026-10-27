@@ -33,12 +33,7 @@ const REGIONS = [
   ['[data-region="tabs"] [role="tab"][aria-selected="true"]'],
   ['[data-region="content"] [data-pane="left"] [id^="explorer-list-"]'],
   ['[data-region="content"] [data-pane="right"] [id^="explorer-list-"]'],
-  [
-    '[data-region="shelf-dock"] li[tabindex]',
-    '[data-region="shelf-dock"] button',
-    // 접힌 상태에서는 pill 버튼이 data-region을 직접 갖는다
-    'button[data-region="shelf-dock"]'
-  ]
+  ['[data-region="shelf-dock"] li[tabindex]', '[data-region="shelf-dock"] button']
 ]
 
 const isTyping = (target: EventTarget | null): boolean =>
@@ -153,6 +148,8 @@ export function AppShell(): React.JSX.Element {
         <main data-region="content" className="relative flex min-w-0 flex-1 flex-col">
           <TabStrip />
           <Explorer />
+          {/* 섬은 탐색 영역 하단 가운데에 뜬다 — 창 가운데면 펼친 패널이 오른쪽 레일을 덮는다 */}
+          <ShelfDock />
         </main>
         <SidePane side="right" id="rail-pane" containerWidth={rowWidth}>
           <RightRail />
@@ -161,7 +158,6 @@ export function AppShell(): React.JSX.Element {
       <StatusBar />
       <TransferPanel />
       <ConflictSheet />
-      <ShelfDock />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
