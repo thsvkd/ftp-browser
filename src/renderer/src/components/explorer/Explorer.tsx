@@ -989,9 +989,10 @@ function TabExplorer({
         )}
       >
         {showList && (
+          // h-full: 안쪽 그리드·리스트의 minHeight 100%가 풀려 마지막 항목 아래 빈 곳에서도 마퀴가 시작된다
           <div
             className={cn(
-              'transition-opacity',
+              'h-full transition-opacity',
               dimmed && 'opacity-60',
               mode === 'stale' && 'grayscale-[.4]',
               mode === 'pending' && 'pointer-events-none'
