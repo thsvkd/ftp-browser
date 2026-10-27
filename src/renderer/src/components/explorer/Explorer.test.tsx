@@ -1537,6 +1537,19 @@ describe('Explorer — selection is the focus', () => {
     expect(selectionOf()).toEqual(CLEARED)
   })
 
+  it.each(['grid', 'list'] as const)(
+    'lets the %s marquee box fill the scroller so a drag can start below the last item',
+    async (view) => {
+      // covers: Test-1329
+      await remoteFiles(['a.txt', 'b.txt'], { view })
+      const box = option('a.txt').parentElement as HTMLElement
+      const wrapper = box.parentElement as HTMLElement
+      expect(box.style.minHeight).toBe('100%')
+      expect(wrapper.parentElement?.id).toBe(`explorer-list-${activeTab().id}`)
+      expect(wrapper.classList.contains('h-full')).toBe(true)
+    }
+  )
+
   it('moves the selection with Ctrl or Cmd plus an arrow and adds a range with Ctrl+Shift', async () => {
     // covers: Test-859
     const names = Array.from({ length: 14 }, (_, i) => `f${String(i).padStart(2, '0')}.txt`)
