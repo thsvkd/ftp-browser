@@ -391,6 +391,7 @@ export const ko = {
   'shelf.expand': '선반 리모컨 열기',
   'shelf.collapse': '선반 리모컨 닫기',
   'shelf.dockHint': '여기로 끌어오면 선반에 담깁니다',
+  'shelf.panelHint': '활성 탭으로 보냅니다 · 항목을 탭에 끌어 놓거나 휠 클릭으로 빼기',
   'rail.label': '오른쪽 패널',
   'panes.toggleLeft': '사이드바',
   'panes.toggleRight': '오른쪽 패널',

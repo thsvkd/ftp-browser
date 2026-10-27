@@ -417,6 +417,8 @@ export const fr = {
   'shelf.expand': 'Ouvrir la télécommande de l’étagère',
   'shelf.collapse': 'Fermer la télécommande de l’étagère',
   'shelf.dockHint': 'Déposez ici pour ajouter à l’étagère',
+  'shelf.panelHint':
+    'Envoie vers l’onglet actif · glissez un élément sur un onglet ou clic du milieu pour le retirer',
   'rail.label': 'Panneau latéral',
   'panes.toggleLeft': 'Barre latérale',
   'panes.toggleRight': 'Panneau latéral',

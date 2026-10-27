@@ -147,7 +147,11 @@ describe('AppShell — regions', () => {
     render(<AppShell />)
     await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
     // 선반이 도크로 옮긴 뒤(함정 E): 담긴 항목의 행이 F6의 네 번째 지역이다.
-    act(() => useShelfStore.getState().add([fromLocalEntry(local(HOME, 's.txt'))]))
+    // 담아도 펼쳐지지 않으므로(shelf-island I8) 행에 닿으려면 펼친다
+    act(() => {
+      useShelfStore.getState().add([fromLocalEntry(local(HOME, 's.txt'))])
+      useShelfStore.getState().setDockOpen(true)
+    })
     const key = (shiftKey = false): void => {
       fireEvent.keyDown(document.activeElement ?? document.body, { key: 'F6', shiftKey })
     }

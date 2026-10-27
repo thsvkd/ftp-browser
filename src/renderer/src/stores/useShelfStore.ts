@@ -8,9 +8,9 @@ export interface ShelfItem {
 
 interface ShelfStore {
   items: ShelfItem[]
-  /** 하단 리모컨 카드를 펼쳤는지. add()가 새로 담을 때 true로 만든다(화면을 드러내는 유일한 경로). */
+  /** 하단 섬을 패널로 펼쳤는지. 담아도 바뀌지 않는다 — 접힌 캡슐이 늘 보이고 거기서 보낸다(I8). */
   dockOpen: boolean
-  /** 같은 `side+server+path`는 한 번만 담는다. 새로 담은 수를 돌려주고, 있으면 도크를 연다. */
+  /** 같은 `side+server+path`는 한 번만 담는다. 새로 담은 수를 돌려준다. */
   add: (entries: readonly ExplorerEntry[]) => number
   /** `locKey(entry)`로 뺀다. */
   remove: (keys: readonly string[]) => void
@@ -32,7 +32,7 @@ export const useShelfStore = create<ShelfStore>((set, get) => ({
       have.add(key)
       fresh.push({ entry })
     }
-    if (fresh.length) set((s) => ({ items: [...s.items, ...fresh], dockOpen: true }))
+    if (fresh.length) set((s) => ({ items: [...s.items, ...fresh] }))
     return fresh.length
   },
 

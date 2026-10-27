@@ -382,6 +382,7 @@ export const zhTW = {
   'shelf.expand': '開啟暫存架遙控器',
   'shelf.collapse': '關閉暫存架遙控器',
   'shelf.dockHint': '拖放到這裡以加入暫存架',
+  'shelf.panelHint': '傳送到使用中的分頁 · 將項目拖到分頁，或按滑鼠中鍵移除',
   'rail.label': '側邊面板',
   'panes.toggleLeft': '側邊欄',
   'panes.toggleRight': '側邊面板',

@@ -382,6 +382,7 @@ export const zhCN = {
   'shelf.expand': '打开暂存架遥控器',
   'shelf.collapse': '关闭暂存架遥控器',
   'shelf.dockHint': '拖放到这里以加入暂存架',
+  'shelf.panelHint': '发送到当前标签页 · 将项目拖到标签页，或按鼠标中键移除',
   'rail.label': '侧边面板',
   'panes.toggleLeft': '侧边栏',
   'panes.toggleRight': '侧边面板',

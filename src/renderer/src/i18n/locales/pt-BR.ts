@@ -415,6 +415,8 @@ export const ptBR = {
   'shelf.expand': 'Abrir o controle da prateleira',
   'shelf.collapse': 'Fechar o controle da prateleira',
   'shelf.dockHint': 'Solte aqui para adicionar à prateleira',
+  'shelf.panelHint':
+    'Envia para a aba ativa · arraste um item para uma aba ou clique com o botão do meio para removê-lo',
   'rail.label': 'Painel lateral',
   'panes.toggleLeft': 'Barra lateral',
   'panes.toggleRight': 'Painel lateral',

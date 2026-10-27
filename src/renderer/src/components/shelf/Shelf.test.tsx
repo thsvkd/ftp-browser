@@ -99,6 +99,36 @@ describe('Shelf — list and drop button', () => {
   })
 })
 
+describe('Shelf — the open island panel', () => {
+  it('heads with count, size, sources, clear and collapse, ends with the hint and the drop, and moves focus with left and right', () => {
+    // covers: Test-1325
+    h = setupExplorer({ remote: { '/DCIM/2024': [] } })
+    useShelfStore.getState().add([localItem('b.jpg'), localItem('c.jpg'), remoteItem('a.jpg')])
+    useShelfStore.getState().setDockOpen(true)
+    useTabsStore.getState().openTab(remoteLoc('/DCIM/2024'))
+    render(<Shelf />)
+
+    expect(screen.getByText('3 items')).toBeTruthy()
+    expect(screen.getByText('5 KB')).toBeTruthy()
+    expect(screen.getByText(en['sidebar.thisPc']).parentElement?.textContent).toContain('2')
+    expect(screen.getByText('example.org:21').parentElement?.textContent).toContain('1')
+    expect(screen.getByText(en['shelf.panelHint'])).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Upload 2 · Move 1 to 2024\s*→/ })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: en['shelf.collapse'] }))
+    expect(useShelfStore.getState().dockOpen).toBe(false)
+
+    row('b.jpg').focus()
+    fireEvent.keyDown(row('b.jpg'), { key: 'ArrowRight' })
+    expect(document.activeElement).toBe(row('c.jpg'))
+    fireEvent.keyDown(row('c.jpg'), { key: 'ArrowLeft' })
+    expect(document.activeElement).toBe(row('b.jpg'))
+
+    fireEvent.click(screen.getByRole('button', { name: en['shelf.clear'] }))
+    expect(shelfNames()).toEqual([])
+  })
+})
+
 describe('Shelf — dropping into the active tab', () => {
   const setup = (): void => {
     h = setupExplorer({ local: { 'C:\\dl': [] } })
@@ -126,6 +156,8 @@ describe('Shelf — dropping into the active tab', () => {
 
     act(() => {
       useShelfStore.getState().add([remoteItem('b.jpg')])
+      // 담아도 펼쳐지지 않는다(shelf-island I8): 행에서 Enter를 누르려면 펼친다
+      useShelfStore.getState().setDockOpen(true)
     })
     fireEvent.keyDown(row('b.jpg'), { key: 'Enter' })
     await waitFor(() => expect(shelfNames()).toEqual([]))
@@ -566,6 +598,7 @@ describe('Shelf — the two-step connect of an unconnected server tab', () => {
     useTabsStore.getState().openTab(localLoc('C:\\pics'))
     useTabsStore.getState().openTab({ side: 'remote', path: '/old', server: NAS2_KEY }, false)
     useShelfStore.getState().add([localItem('a.jpg')])
+    useShelfStore.getState().setDockOpen(true)
     render(
       <>
         <AppShell />
@@ -643,6 +676,7 @@ describe('Shelf — the two-step connect of an unconnected server tab', () => {
     })
     useTabsStore.getState().openTab(remoteLoc('/x')) // 이미 연결된 서버(기본 connected)
     useShelfStore.getState().add([localItem('b.jpg')])
+    useShelfStore.getState().setDockOpen(true)
     render(
       <>
         <AppShell />

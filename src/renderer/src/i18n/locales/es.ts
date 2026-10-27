@@ -417,6 +417,8 @@ export const es = {
   'shelf.expand': 'Abrir el mando de la bandeja',
   'shelf.collapse': 'Cerrar el mando de la bandeja',
   'shelf.dockHint': 'Arrastra aquí para añadir a la bandeja',
+  'shelf.panelHint':
+    'Envía a la pestaña activa · arrastra un elemento a una pestaña o haz clic central para quitarlo',
   'rail.label': 'Panel lateral',
   'panes.toggleLeft': 'Barra lateral',
   'panes.toggleRight': 'Panel lateral',

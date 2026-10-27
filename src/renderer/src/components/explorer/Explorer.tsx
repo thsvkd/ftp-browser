@@ -527,7 +527,8 @@ function TabExplorer({
       toast(t('toast.alreadyOnShelf'))
       return
     }
-    flyTo(from, document.querySelector('[data-shelf-target]'))
+    // 접힌 섬에는 놓기 대상 표시가 없다(shelf-island I4) — 섬 자체로 날아간다
+    flyTo(from, document.querySelector('[data-shelf-target], [data-shelf-island]'))
   }
   const unshelve = (entries: ExplorerEntry[]): void =>
     useShelfStore.getState().remove(entries.map(locKey))

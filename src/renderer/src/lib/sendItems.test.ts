@@ -81,7 +81,8 @@ describe('shelveOsFiles', () => {
       fromLocalEntry(entry('C:\\in\\docs', 'directory'))
     ])
     expect(useShelfStore.getState().items[1].entry.type).toBe('directory')
-    expect(useShelfStore.getState().dockOpen).toBe(true)
+    // 담아도 도크는 열리지 않는다(shelf-island I8)
+    expect(useShelfStore.getState().dockOpen).toBe(false)
 
     invoke.mockClear()
     expect(await shelveOsFiles([])).toBe(0)
@@ -111,7 +112,7 @@ describe('shelveOsFiles', () => {
     expect(await shelveOsFiles([file('a.jpg'), file('b.jpg'), file('b.jpg')])).toBe(1)
     expect(shelfNames()).toEqual(['a.jpg', 'b.jpg'])
     expect(toast).not.toHaveBeenCalled()
-    expect(useShelfStore.getState().dockOpen).toBe(true)
+    expect(useShelfStore.getState().dockOpen).toBe(false)
   })
 
   it('reports what could not be read without throwing', async () => {

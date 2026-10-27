@@ -46,10 +46,14 @@ describe('useShelfStore', () => {
     expect(useShelfStore.getState().items).toEqual([])
   })
 
-  it('opens the dock when items are added', () => {
-    // covers: Test-1245
+  it('leaves the dock as it was when items are added', () => {
+    // covers: Test-1316
     useShelfStore.setState({ dockOpen: false })
     expect(useShelfStore.getState().add([entry('local', '/a')])).toBe(1)
+    expect(useShelfStore.getState().dockOpen).toBe(false)
+
+    useShelfStore.setState({ dockOpen: true })
+    expect(useShelfStore.getState().add([entry('local', '/b')])).toBe(1)
     expect(useShelfStore.getState().dockOpen).toBe(true)
   })
 
