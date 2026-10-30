@@ -1678,7 +1678,7 @@ describe('Explorer — rename to a name that is already taken', () => {
     expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
   })
 
-  it('keeps a waiting new folder editor when focus stays in the pane or comes back from another app', async () => {
+  it('keeps a waiting new folder editor when focus moves within the pane or comes back from another app', async () => {
     // covers: Test-1383
     h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
     await renderExplorer(remoteLoc(DIR))
@@ -1704,7 +1704,10 @@ describe('Explorer — rename to a name that is already taken', () => {
     await flush()
     // 다른 앱에 다녀오면 포커스가 있던 그 요소에 focusin이 다시 온다
     fireEvent.focusIn(outside)
-    // 탐색기 목록 안으로 옮기는 것도 떠난 것이 아니다
+    // 탐색기 안의 버튼이나 목록으로 옮기는 것도 떠난 것이 아니다
+    const refresh = screen.getAllByRole('button', { name: /Refresh/ })[0]
+    act(() => refresh.focus())
+    expect(document.activeElement).toBe(refresh)
     act(() => listbox().focus())
     expect(document.activeElement).toBe(listbox())
     await act(async () => waits[1]())
@@ -1768,6 +1771,34 @@ describe('Explorer — rename to a name that is already taken', () => {
     await act(async () => waits[0]())
     await flush()
     await act(async () => waits[1]())
+    await flush()
+
+    expect(option('New folder')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(document.activeElement).toBe(find)
+  })
+
+  it('opens no new folder editor when the user went to type in the find box meanwhile', async () => {
+    // covers: Test-1386
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    let listed = (): void => undefined
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise(
+        (resolve) =>
+          (listed = () => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    // 새 폴더의 목록 읽기(밀리지 않은)가 끝나기 전에 찾기 칸으로 가서 친다
+    key('f', { ctrlKey: true })
+    const find = screen.getByRole('textbox', { name: en['filter.find'] })
+    act(() => find.focus())
+    await act(async () => listed())
     await flush()
 
     expect(option('New folder')).toBeTruthy()

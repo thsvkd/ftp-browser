@@ -510,14 +510,18 @@ function TabExplorer({
   }, [renaming, renameHere, settling, indexOf])
   // 기다리는 동안 사용자가 목록 밖의 입력 칸(찾기·경로 칸 등)이나 이 탐색기 밖으로 포커스를 옮기면, 늦게 열린 입력이
   // 포커스와 치던 글자를 빼앗지 않게 취소한다. 다른 앱에 다녀와 같은 요소로 포커스가 돌아온 것은 옮긴 것이 아니다(N9·N11).
+  /** 사용자가 목록 밖의 입력 칸에서 치고 있다. 그때 새 폴더 입력이 열리면 치던 글자를 가로챈다(N11). */
+  const typingElsewhere = (target: EventTarget | null): boolean =>
+    target instanceof Element &&
+    target.matches('input, textarea, select, [contenteditable="true"]') &&
+    // 목록 안의 입력은 이름 입력 자신뿐이다(기다리는 동안에는 아직 없다)
+    !scrollRef.current?.contains(target)
   useEffect(() => {
     if (!waitingRow) return
     const before = document.activeElement
-    const leaves = (target: EventTarget | null): boolean => {
-      if (!(target instanceof Element) || scrollRef.current?.contains(target)) return false
-      if (target.matches('input, textarea, select, [contenteditable="true"]')) return true
-      return target !== before && !paneRef.current?.contains(target)
-    }
+    const leaves = (target: EventTarget | null): boolean =>
+      typingElsewhere(target) ||
+      (target instanceof Element && target !== before && !paneRef.current?.contains(target))
     // 이미 다른 입력 칸에서 치고 있으면 기다리지 않는다
     if (leaves(before)) {
       setRenaming(null)
@@ -645,6 +649,8 @@ function TabExplorer({
     }
     await useListingStore.getState().load(loc)
     selectOnly(path)
+    // 만드는 사이 다른 입력 칸으로 가서 치고 있으면 이름 입력을 열지 않는다(N11)
+    if (typingElsewhere(document.activeElement)) return
     // 만들기 시작한 위치의 항목만 편집한다(그사이 다른 위치로 옮겼으면 N10이 닫는다)
     setRenaming({ key, path })
   }
