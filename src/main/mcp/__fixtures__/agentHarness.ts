@@ -239,6 +239,7 @@ export class FakeHub extends EventEmitter {
     queue.on('queue:updated', (update: TransferUpdate) => this.emit('queue:updated', update))
   }
   getAll = (): TransferJob[] => this.queues.flatMap((queue) => queue.getAll())
+  cancel = vi.fn()
 }
 
 /**

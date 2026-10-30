@@ -29,12 +29,14 @@ Windows 설치판은 앱을 시작할 때 새 버전을 확인합니다. 설정�
 Claude Code, Codex 같은 AI 에이전트가 이 앱을 도구로 쓸 수 있습니다. 저장된 서버 연결, 폴더 탐색, 이미지 미리보기, 다운로드·업로드, 이름 변경, 삭제를 할 수 있고, 에이전트가 한 일은 앱 창에 그대로 보입니다. 기본으로 꺼져 있습니다.
 
 1. 설정의 **Agent access (MCP)**에서 **Enable MCP server**를 켭니다. 서버는 이 컴퓨터(`http://127.0.0.1:47821/mcp`)에서만 열리고 접속 토큰을 요구합니다.
-2. MCP 클라이언트에 등록합니다. Claude Code는 **Copy Claude Code command**로 복사한 명령을 터미널에서 실행합니다. 다른 클라이언트도 같은 URL과 `Authorization: Bearer <토큰>` 헤더로 등록합니다.
+2. MCP 클라이언트에 등록합니다. 클라이언트(**Claude Code**, **Codex**, **JSON**)를 고르고 복사 버튼을 누릅니다. Claude Code는 복사한 명령을 터미널에서 실행하고, Codex는 복사한 조각을 `~/.codex/config.toml`에 붙여 넣습니다. Cursor 같은 다른 클라이언트는 복사한 `mcpServers` JSON을 그 클라이언트의 MCP 설정에 넣습니다(VS Code는 `mcpServers` 대신 `servers` 키를 씁니다).
 3. 셸만 쓰는 에이전트는 **Copy CLI command**로 복사한 명령(앱에 든 `ftpb`를 앱 실행 파일로 돌립니다. Windows는 PowerShell 형식)에 `tools`, `<도구> --help`, `list-directory --path /photos`처럼 인자를 붙여 씁니다. `ftpb`는 앱이 실행 중이어야 동작하고, `--help`가 사용법·위험도·종료 코드(0 성공, 1 도구 오류, 2 사용법 오류, 4 앱 미실행·접근 꺼짐·토큰 거부)와 예제를 보여 줍니다.
 
 각 도구 설명의 첫 줄은 위험도(`[RISK: read-only]`, `[RISK: changes state, no data loss]`, `[RISK: uploads local files to the server]`, `[RISK: DESTRUCTIVE — …]`)입니다. 앱은 실행 전에 묻지 않으니 업로드·삭제는 에이전트 도구의 승인 기능으로 확인하세요. 다운로드는 이미 있는 로컬 파일을 덮어쓰지 않고, 이름 변경도 덮어쓰지 않습니다.
 
 `ftpb`의 출력은 항상 JSON입니다. `get-image-previews`가 받은 미리보기는 OS 임시 폴더의 `ftpb-previews`에 파일로 저장되고, 출력에는 base64 대신 그 경로(`savedTo`)가 나옵니다. 원격 파일 이름처럼 신뢰할 수 없는 문자열은 명령줄 인자가 아니라 stdin의 JSON으로 넘깁니다(`ftpb delete --args - < args.json`). 특히 Windows 셸은 따옴표·`&`·`|`·`%`가 든 인자를 다시 해석합니다.
+
+에이전트가 앱을 쓰는 동안 창 가장자리가 빛나고, 툴바 아래에 어떤 에이전트가 무엇을 하는지 보여 주는 표시가 뜹니다. 표시의 **Stop**을 누르면 진행 중인 호출과 에이전트가 시작한 전송·삭제가 멈춥니다. MCP 서버는 켜진 채로 두며, 에이전트는 사용자가 멈췄다는 오류(`STOPPED_BY_USER`)를 받습니다.
 
 **Regenerate token**을 누르면 이전 토큰은 바로 거부됩니다. MCP 클라이언트에는 새 명령으로 다시 등록합니다(`ftpb`는 토큰을 앱에서 읽습니다).
 

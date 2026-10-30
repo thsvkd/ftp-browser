@@ -11,6 +11,7 @@ import { ConflictSheet } from '@renderer/components/activity/ConflictSheet'
 import { TransferPanel } from '@renderer/components/activity/TransferPanel'
 import { ShelfDock } from '@renderer/components/shelf/ShelfDock'
 import { SettingsDialog } from '@renderer/components/settings/SettingsDialog'
+import { AgentActivityIndicator } from './AgentActivityIndicator'
 import { useThumbnailListener } from '@renderer/hooks/useThumbnailListener'
 import { useLocalThumbnailListener } from '@renderer/hooks/useLocalThumbnailListener'
 import { useUpdateListener } from '@renderer/hooks/useUpdateListener'
@@ -159,6 +160,7 @@ export function AppShell(): React.JSX.Element {
       <TransferPanel />
       <ConflictSheet />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <AgentActivityIndicator />
     </div>
   )
 }

@@ -191,6 +191,11 @@ before running it; approval is left to the agent tool (Claude Code, Codex…).
   `connect` adds a connection and never logs in again to one already connected.
 - GUI sync: `ftp:remoteChanged` (every FTP mutation, `ftpHandlers.ts`) and `agent:session`
   (connect/disconnect) feed `useAgentSync`.
+- Activity (spec `docs/handoff/agent-activity.md`): `agentActivity.ts` counts running tool calls and
+  the transfers/deletes agents started, and sends `agent:activity`; `AgentActivityIndicator` shows
+  a window glow and a pill whose stop (`agent:stop`) ends running calls with `STOPPED_BY_USER` and
+  cancels those jobs without turning MCP off. Settings › Agent access copies a Claude Code command,
+  a Codex `config.toml` snippet or `mcpServers` JSON (`McpService.ts` builders).
 - `ftpb` (`src/main/cli/`): a dependency-free MCP client of the same endpoint (one POST per request
   with the 2026-07-28 `_meta` envelope); always JSON; exit codes 0 ok, 1 tool error, 2 usage, 4 app
   unavailable. `script/build-cli.mjs`, run by a plugin in `electron.vite.config.ts`, bundles it into

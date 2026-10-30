@@ -247,10 +247,15 @@ export async function startDelete(
         const rest = targets.length - i - 1
         if (entry.type === 'directory') {
           let removed = 0
-          await fileOps.deleteDirectory(p, (n, total, item) => {
-            removed = n
-            ops.progress(id, done + n, posix.basename(item), done + total + rest)
-          })
+          await fileOps.deleteDirectory(
+            p,
+            (n, total, item) => {
+              removed = n
+              ops.progress(id, done + n, posix.basename(item), done + total + rest)
+            },
+            // 폴더 하나를 지우는 동안에도 중지(agent-activity A5)가 멈추게 한다
+            () => ops.isCancelled(id)
+          )
           done += removed
         } else {
           await fileOps.deleteFile(p)
@@ -258,6 +263,7 @@ export async function startDelete(
         }
         ops.progress(id, done, posix.basename(p), done + rest)
       }
+      if (ops.isCancelled(id)) return ops.markCancelled(id)
       ops.complete(id)
     } catch (err) {
       ops.fail(id, err instanceof Error ? err.message : String(err))

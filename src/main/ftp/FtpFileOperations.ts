@@ -52,16 +52,21 @@ export async function ensureRemoteDir(client: Client, remotePath: string): Promi
  *
  * The whole tree is listed before anything is deleted, so `onProgress` gets an exact total at
  * no extra cost: it is the same set of `LIST` commands a delete-as-you-go walk would issue.
+ *
+ * `isCancelled` is checked before every command; once it returns true the walk stops and leaves
+ * the rest in place (the caller marks its job cancelled).
  */
 export async function removeRemoteDirRecursive(
   client: Client,
   remotePath: string,
-  onProgress?: DeleteProgressCallback
+  onProgress?: DeleteProgressCallback,
+  isCancelled: () => boolean = () => false
 ): Promise<void> {
   const files: string[] = []
   const dirs: string[] = []
   const walk = async (dir: string): Promise<void> => {
     const base = dir.replace(/\/+$/, '')
+    if (isCancelled()) return
     for (const entry of await client.list(dir)) {
       if (entry.name === '.' || entry.name === '..') continue
       const child = `${base}/${entry.name}`
@@ -77,14 +82,17 @@ export async function removeRemoteDirRecursive(
     dirs.push(dir)
   }
   await walk(remotePath)
+  if (isCancelled()) return
 
   const total = files.length + dirs.length
   let removed = 0
   for (const file of files) {
+    if (isCancelled()) return
     await client.remove(file)
     onProgress?.(++removed, total, file)
   }
   for (const dir of dirs) {
+    if (isCancelled()) return
     await client.removeEmptyDir(dir)
     onProgress?.(++removed, total, dir)
   }
@@ -223,10 +231,14 @@ export class FtpFileOperations {
     this.manager.emit('mutation', { kind: 'delete', remotePath })
   }
 
-  async deleteDirectory(remotePath: string, onProgress?: DeleteProgressCallback): Promise<void> {
+  async deleteDirectory(
+    remotePath: string,
+    onProgress?: DeleteProgressCallback,
+    isCancelled?: () => boolean
+  ): Promise<void> {
     try {
       await this.manager.runOnMainClient((client) =>
-        removeRemoteDirRecursive(client, remotePath, onProgress)
+        removeRemoteDirRecursive(client, remotePath, onProgress, isCancelled)
       )
     } finally {
       // 중간에 실패해도 하위 항목 일부는 이미 지워졌으므로 캐시는 무효화해야 한다.

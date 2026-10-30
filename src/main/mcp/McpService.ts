@@ -17,6 +17,21 @@ export function buildClaudeCodeCommand(url: string, token: string): string {
   return `claude mcp add --scope user --transport http ftp-browser ${url} --header "Authorization: Bearer ${token}"`
 }
 
+/** Codex `~/.codex/config.toml`에 붙여 넣는 조각. `codex mcp add --url`은 토큰을 환경변수로만 받는다. */
+export function buildCodexConfig(url: string, token: string): string {
+  return (
+    '[mcp_servers.ftp-browser]\n' +
+    `url = "${url}"\n` +
+    `http_headers = { Authorization = "Bearer ${token}" }\n`
+  )
+}
+
+/** Cursor 등 `mcpServers` JSON 설정을 읽는 클라이언트용 */
+export function buildJsonConfig(url: string, token: string): string {
+  const server = { type: 'http', url, headers: { Authorization: `Bearer ${token}` } }
+  return JSON.stringify({ mcpServers: { 'ftp-browser': server } }, null, 2)
+}
+
 const validateHost = localhostHostValidation()
 const validateOrigin = localhostOriginValidation()
 
@@ -59,7 +74,13 @@ export class McpService {
       enabled: this.readSetting('mcpEnabled') === 'true',
       running: this.server !== null,
       url,
-      ...(this.token ? { command: buildClaudeCodeCommand(url, this.token) } : {}),
+      ...(this.token
+        ? {
+            command: buildClaudeCodeCommand(url, this.token),
+            codexConfig: buildCodexConfig(url, this.token),
+            jsonConfig: buildJsonConfig(url, this.token)
+          }
+        : {}),
       ...(this.error ? { error: this.error } : {})
     }
   }

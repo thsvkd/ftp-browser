@@ -10,7 +10,7 @@ import { confirmDialog } from '@renderer/stores/useConfirmStore'
 import { TILE_MAX, TILE_MIN, TILE_STEP } from '@renderer/lib/explorerLayout'
 import { formatBytes } from '@renderer/lib/utils'
 import { installUpdate } from '@renderer/lib/installUpdate'
-import { LOCALES, useLocale, useT, type LanguageSetting } from '@renderer/i18n'
+import { LOCALES, useLocale, useT, type LanguageSetting, type MessageKey } from '@renderer/i18n'
 import { FileCategorySettings } from './FileCategorySettings'
 import type { IpcResult } from '@shared/types/ipc'
 import type { UpdateState } from '@shared/types/update'
@@ -27,6 +27,46 @@ interface CacheStats {
   totalBytes: number
   totalCount: number
 }
+
+/**
+ * MCP 클라이언트마다 복사할 설정(agent-activity I1–I3). 셋 다 토큰을 담아 화면에 보이지 않는다.
+ * 클라이언트 이름은 제품·형식 이름이라 번역하지 않는다.
+ */
+const MCP_CLIENTS = [
+  {
+    id: 'claude',
+    label: 'Claude Code',
+    field: 'command',
+    copy: 'settings.mcpCopyCommand',
+    copied: 'settings.mcpCommandCopied',
+    hint: 'settings.mcpHintClaude'
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    field: 'codexConfig',
+    copy: 'settings.mcpCopyCodex',
+    copied: 'settings.mcpCodexCopied',
+    hint: 'settings.mcpHintCodex'
+  },
+  {
+    id: 'json',
+    label: 'JSON',
+    field: 'jsonConfig',
+    copy: 'settings.mcpCopyJson',
+    copied: 'settings.mcpJsonCopied',
+    hint: 'settings.mcpHintJson'
+  }
+] as const satisfies ReadonlyArray<{
+  id: string
+  label: string
+  field: keyof McpState
+  copy: MessageKey
+  copied: MessageKey
+  hint: MessageKey
+}>
+
+type McpClient = (typeof MCP_CLIENTS)[number]['id']
 
 export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JSX.Element | null {
   const tileSize = useSettingsStore((s) => s.tileSize)
@@ -51,6 +91,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   const [clearing, setClearing] = useState(false)
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
   const [mcpState, setMcpState] = useState<McpState | null>(null)
+  const [mcpClient, setMcpClient] = useState<McpClient>('claude')
   // 저장된 서버 수는 로드 전에 0개로 단정하지 않는다(함정 C). undefined는 로드 중, false는 실패다.
   const [serversLoaded, setServersLoaded] = useState<boolean>()
   // undefined는 조회 중, null은 조회 실패다.
@@ -100,6 +141,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
   }, [open, fetchCacheStats, fetchUpdateState, fetchMcpState, refreshServers, fetchProtection])
 
   if (!open) return null
+
+  const client = MCP_CLIENTS.find(({ id }) => id === mcpClient)!
 
   const handleClearCache = async (): Promise<void> => {
     setClearing(true)
@@ -517,15 +560,31 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                     ? t('settings.mcpStartFailed', { reason: mcpState.error })
                     : t('settings.mcpRunning', { url: mcpState.url })}
                 </p>
+                <div
+                  role="radiogroup"
+                  aria-label={t('settings.mcpClient')}
+                  className="mt-3 inline-flex rounded-md border border-[var(--bd2)] bg-[var(--sf)] p-0.5"
+                >
+                  {MCP_CLIENTS.map(({ id, label }) => (
+                    <button
+                      key={id}
+                      role="radio"
+                      aria-checked={mcpClient === id}
+                      onClick={() => setMcpClient(id)}
+                      className={`rounded px-3 py-1 text-sm ${mcpClient === id ? 'bg-[var(--acw)] text-[var(--tx)]' : 'text-[var(--mu)] hover:bg-[var(--hv)]'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-xs text-[var(--mu)]">{t(client.hint)}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
-                    onClick={() =>
-                      void copyCommand(mcpState.command, t('settings.mcpCommandCopied'))
-                    }
-                    disabled={!mcpState.command}
+                    onClick={() => void copyCommand(mcpState[client.field], t(client.copied))}
+                    disabled={!mcpState[client.field]}
                     className="rounded-md border border-[var(--bd2)] bg-[var(--sf)] px-3 py-1.5 text-sm text-[var(--tx)] hover:bg-[var(--hv)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {t('settings.mcpCopyCommand')}
+                    {t(client.copy)}
                   </button>
                   <button
                     onClick={() =>

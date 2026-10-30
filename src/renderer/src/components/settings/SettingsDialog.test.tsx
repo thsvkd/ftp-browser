@@ -336,6 +336,43 @@ describe('SettingsDialog agent access (MCP)', () => {
     expect(document.body.textContent).not.toContain(token)
   })
 
+  it('copies the Codex or JSON config for the client the user picks', async () => {
+    // covers: Test-1342
+    const token = 'tok_SECRET-value_1342'
+    const codexConfig = `[mcp_servers.ftp-browser]\nhttp_headers = { Authorization = "Bearer ${token}" }\n`
+    const jsonConfig = `{"mcpServers":{"ftp-browser":{"headers":{"Authorization":"Bearer ${token}"}}}}`
+    serveMcpState(() => ({
+      enabled: true,
+      running: true,
+      url,
+      command: `claude mcp add … Bearer ${token}`,
+      codexConfig,
+      jsonConfig
+    }))
+    const user = userEvent.setup()
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+
+    // 기본은 Claude Code
+    expect(
+      (await screen.findByRole('radio', { name: 'Claude Code' })).getAttribute('aria-checked')
+    ).toBe('true')
+    expect(screen.getByText(en['settings.mcpHintClaude'])).not.toBeNull()
+
+    await user.click(screen.getByRole('radio', { name: 'Codex' }))
+    expect(screen.getByText(en['settings.mcpHintCodex'])).not.toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Copy Codex config' }))
+    await waitFor(async () => expect(await navigator.clipboard.readText()).toBe(codexConfig))
+    expect(toast.success).toHaveBeenCalledWith('Codex config copied')
+
+    await user.click(screen.getByRole('radio', { name: 'JSON' }))
+    expect(screen.getByText(en['settings.mcpHintJson'])).not.toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Copy JSON config' }))
+    await waitFor(async () => expect(await navigator.clipboard.readText()).toBe(jsonConfig))
+    expect(toast.success).toHaveBeenCalledWith('JSON config copied')
+
+    expect(document.body.textContent).not.toContain(token)
+  })
+
   it('shows an error toast when toggling or copying fails instead of failing silently', async () => {
     // covers: Test-294
     const command = 'claude mcp add …'

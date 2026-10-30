@@ -124,6 +124,23 @@ describe('preload api', () => {
     }
   })
 
+  it('allows the agent stop call and the activity event', async () => {
+    // covers: Test-1353
+    const api = await loadExposedApi()
+    const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>
+    const on = api.on as (channel: string, callback: (...args: unknown[]) => void) => () => void
+
+    await invoke('agent:stop')
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('agent:stop')
+
+    const callback = vi.fn()
+    on('agent:activity', callback)
+    const listener = vi.mocked(ipcRenderer.on).mock.calls.at(-1)?.[1]
+    expect(ipcRenderer.on).toHaveBeenLastCalledWith('agent:activity', expect.any(Function))
+    listener?.({} as Electron.IpcRendererEvent, { active: true })
+    expect(callback).toHaveBeenCalledWith({ active: true })
+  })
+
   it('should allow asking how saved passwords are protected', async () => {
     // covers: Test-728
     // 렌더러 테스트는 window.api를 목으로 바꾸므로 허용 목록 누락은 여기서만 잡힌다.

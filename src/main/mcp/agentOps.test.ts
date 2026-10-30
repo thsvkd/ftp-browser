@@ -362,7 +362,11 @@ describe('remote changes', () => {
       operationId: expect.any(String)
     })
     expect([...h.remote.nodes.keys()].sort()).toEqual(['/', '/keep.txt'])
-    expect(h.remote.deleteDirectory).toHaveBeenCalledWith('/a', expect.any(Function))
+    expect(h.remote.deleteDirectory).toHaveBeenCalledWith(
+      '/a',
+      expect.any(Function),
+      expect.any(Function)
+    )
     expect(h.remote.deleteFile).toHaveBeenCalledWith('/x.txt')
   })
 
