@@ -141,7 +141,7 @@ describe('AgentActivityIndicator', () => {
     expect(pill().className).toContain('z-[71]')
     expect(stopButton()?.getAttribute('aria-disabled')).toBe('false')
 
-    // 남아 있는 동안은 멈출 것이 없다: 버튼 없이 클릭을 통과시킨다
+    // 남아 있는 동안은 멈출 것이 없다: [중지]를 끄고 클릭을 통과시킨다
     emit({ active: false, tool: 'list_directory' })
     expect(glow()?.getAttribute('data-active')).toBe('false')
     expect(pill().className).toContain('z-40')
