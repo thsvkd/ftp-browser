@@ -116,6 +116,24 @@ describe('MCP image previews', () => {
     expect(stats.open).toBe(0)
   })
 
+  it('downloads no further image once the call is stopped', async () => {
+    // covers: Test-1373
+    const { ftp, stats, hold } = fakeFtp()
+    const previews = createThumbnailPreviewer(fakeRegistry(ftp), generator, cache)
+    let stopped = false
+    hold.on = true
+    const pending = previews(KEY, images('s', 3), () => stopped)
+    await vi.waitFor(() => expect(stats.active).toBe(1))
+
+    stopped = true
+    hold.release()
+    const outcomes = await pending
+
+    expect(outcomes.map((outcome) => outcome.ok)).toEqual([true, false, false])
+    expect(outcomes[2]).toEqual({ ok: false, error: 'The user stopped this call.' })
+    expect(stats.maxActive).toBe(1)
+  })
+
   it('fails the waiting previews and drops the connection when the FTP connection changes', async () => {
     // covers: Test-474
     const { ftp, stats, hold } = fakeFtp()

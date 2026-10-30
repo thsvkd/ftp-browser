@@ -1,8 +1,9 @@
 import path from 'path'
 import { ipcMain } from 'electron'
 import type { IpcResult } from '@shared/types/ipc'
-import type { McpState } from '@shared/types/mcp'
+import type { AgentActivityEvent, McpState } from '@shared/types/mcp'
 import type { McpService } from '../mcp/McpService'
+import type { AgentActivity } from '../mcp/agentActivity'
 import { ipcError } from '../utils/errorClassifier'
 
 /** out/main 옆의 out/cli/ftpb.cjs. 패키징된 앱에서는 asar 밖(app.asar.unpacked)에 풀려 있다. */
@@ -51,4 +52,21 @@ export function registerMcpHandlers(service: McpService, cliCommand: string): vo
       return ipcError(err)
     }
   })
+}
+
+/** 창의 에이전트 활동 표시에서 [중지](agent-activity A5). MCP 설정은 그대로다. */
+export function registerAgentHandlers(activity: AgentActivity): void {
+  ipcMain.handle('agent:stop', (): IpcResult<void> => {
+    try {
+      activity.stop()
+      return { success: true, data: undefined }
+    } catch (err) {
+      return ipcError(err)
+    }
+  })
+  // 새로 고친 창이 지금 상태부터 그린다(A10)
+  ipcMain.handle(
+    'agent:getActivity',
+    (): IpcResult<AgentActivityEvent> => ({ success: true, data: activity.current() })
+  )
 }

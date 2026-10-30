@@ -41,6 +41,15 @@ export class TransferHub extends EventEmitter {
     else this.owners().get(id)?.queue.cancel(id)
   }
 
+  /** 여러 작업을 취소한다. 큰 배치도 목록을 한 번만 훑는다(agent-activity A8). 모르는 id는 무시. */
+  cancelMany(ids: string[]): void {
+    const owners = this.owners()
+    for (const id of ids) {
+      if (this.lane.has(id)) this.lane.cancel(id)
+      else owners.get(id)?.queue.cancel(id)
+    }
+  }
+
   /**
    * 큐마다 한 번, 그 큐의 id만 넘긴다(한 배치의 업로드가 사이 폴더 메모 하나를 함께 쓴다). 서버 간 작업은 레인에
    * 한 번. 모르는 id는 무시.

@@ -26,7 +26,7 @@ export interface JobTracker {
 }
 
 /** EventEmitter 중 트래커가 구독하는 알림 하나 */
-interface Listenable<E extends string, T> {
+export interface Listenable<E extends string, T> {
   on(event: E, listener: (payload: T) => void): unknown
   off(event: E, listener: (payload: T) => void): unknown
 }

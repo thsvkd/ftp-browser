@@ -69,7 +69,9 @@ const INVOKE_CHANNELS = [
   // Built-in MCP server
   'mcp:getState',
   'mcp:setEnabled',
-  'mcp:regenerateToken'
+  'mcp:regenerateToken',
+  'agent:stop',
+  'agent:getActivity'
 ] as const
 
 const EVENT_CHANNELS = [
@@ -84,7 +86,8 @@ const EVENT_CHANNELS = [
   'update:stateChanged',
   // Agent access: the GUI follows what agents change
   'ftp:remoteChanged',
-  'agent:session'
+  'agent:session',
+  'agent:activity'
 ] as const
 
 type InvokeChannel = (typeof INVOKE_CHANNELS)[number]

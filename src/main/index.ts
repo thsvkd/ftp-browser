@@ -13,10 +13,16 @@ import { registerDragHandlers } from './ipc/dragHandlers'
 import { registerGalleryHandlers } from './ipc/galleryHandlers'
 import { registerUpdateHandlers } from './ipc/updateHandlers'
 import { registerAppHandlers } from './ipc/appHandlers'
-import { buildCliCommand, bundledCliPath, registerMcpHandlers } from './ipc/mcpHandlers'
+import {
+  buildCliCommand,
+  bundledCliPath,
+  registerAgentHandlers,
+  registerMcpHandlers
+} from './ipc/mcpHandlers'
 import { McpService } from './mcp/McpService'
 import { createMcpToolServer, type McpToolDeps } from './mcp/mcpTools'
 import { createJobTracker } from './mcp/jobTracker'
+import { createAgentActivity } from './mcp/agentActivity'
 import { createThumbnailPreviewer } from './mcp/thumbnailPreviews'
 import { ConnectionRegistry, createSession } from './ftp/ConnectionRegistry'
 import { RemoteFolderPreviewCache } from './ftp/RemoteFolderPreviewCache'
@@ -154,6 +160,16 @@ app.whenReady().then(() => {
 
   // 에이전트(내장 MCP 서버, ftpb)는 GUI와 같은 연결·전송 큐·파일 작업·썸네일 캐시를 쓴다(기본 꺼짐).
   // 도구마다 대상 연결을 고른다(server 인자, 마지막 사용 연결, 유일한 연결 — multi-connection MC18).
+  const activity = createAgentActivity(
+    (event) => {
+      // macOS에서 다시 만든 창도 받는다
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.webContents.isDestroyed()) w.webContents.send('agent:activity', event)
+      }
+    },
+    hub,
+    operationManager
+  )
   const agentDeps: McpToolDeps = {
     version: app.getVersion(),
     db,
@@ -165,6 +181,7 @@ app.whenReady().then(() => {
     passwords,
     previews: createThumbnailPreviewer(registry, generator, cacheManager),
     jobs: createJobTracker(hub, operationManager),
+    activity,
     onSession: (event) => {
       if (!win.isDestroyed()) win.webContents.send('agent:session', event)
     }
@@ -177,6 +194,7 @@ app.whenReady().then(() => {
     mcp,
     buildCliCommand(process.platform, process.execPath, bundledCliPath(__dirname))
   )
+  registerAgentHandlers(activity)
   void mcp.init()
   app.on('will-quit', () => void mcp.stop())
 

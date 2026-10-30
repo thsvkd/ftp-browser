@@ -32,6 +32,7 @@
   --ac: #0e8c88;
   --acw: #ddf2f1;
   --acx: #ffffff;
+  --agent: #8b5cf6;
   --spring: 600ms;
   --sidebar-left-min: 180px;
   --sidebar-left-default: 220px;
@@ -71,6 +72,7 @@
     --ac: #34c2bc;
     --acw: #133432;
     --acx: #06201f;
+    --agent: #a78bfa;
   }
 }
 
@@ -473,6 +475,23 @@ main[data-region='content']:has(+ div > #rail-pane[data-collapsed='true']) {
     opacity: 0;
   }
 }
+/* 에이전트 활동 표시(agent-activity A4): 창 가장자리 글로우. 활성 중에만 맥동한다 */
+.agent-glow {
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--agent) 70%, transparent),
+    inset 0 0 28px 4px color-mix(in srgb, var(--agent) 35%, transparent);
+  opacity: 0.55;
+  transition: opacity 0.4s ease-out;
+}
+.agent-glow[data-active='true'] {
+  opacity: 1;
+  animation: agent-glow 2.4s ease-in-out infinite;
+}
+@keyframes agent-glow {
+  50% {
+    opacity: 0.6;
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .side-pane[data-animate='true'] {
@@ -494,7 +513,8 @@ main[data-region='content']:has(+ div > #rail-pane[data-collapsed='true']) {
   }
   .shimmer,
   .indet,
-  .spin {
+  .spin,
+  .agent-glow {
     animation: none !important;
   }
   .fade {

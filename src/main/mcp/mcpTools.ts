@@ -8,6 +8,7 @@ import { listServers } from '../db/servers'
 import { classifyError } from '../utils/errorClassifier'
 import type { ConnKey } from '@shared/connKey'
 import * as ops from './agentOps'
+import { clientName, type ActivityCall, type AgentActivity } from './agentActivity'
 import { savedOf, targetSession } from './agentTarget'
 import type { JobTracker } from './jobTracker'
 
@@ -24,12 +25,23 @@ export type PreviewOutcome =
 /** 도구가 쓰는 것. 요청마다 새 McpServer가 같은 deps를 공유한다. */
 export interface McpToolDeps extends ops.AgentDeps {
   version: string
-  /** 그 연결에서 앱 썸네일 파이프라인으로 미리보기를 만든다. 결과는 요청과 같은 순서다. */
-  previews(conn: ConnKey, requests: PreviewRequest[]): Promise<PreviewOutcome[]>
+  /**
+   * 그 연결에서 앱 썸네일 파이프라인으로 미리보기를 만든다. 결과는 요청과 같은 순서다. `isStopped`가 참이 되면
+   * 남은 요청을 받지 않는다(A14).
+   */
+  previews(
+    conn: ConnKey,
+    requests: PreviewRequest[],
+    isStopped?: () => boolean
+  ): Promise<PreviewOutcome[]>
   /** 앱에 하나. wait_for_jobs와 delete가 기다린다. */
   jobs: JobTracker
   /** delete가 작업을 기다리는 최대 시간(테스트가 줄인다). 60초 클라이언트 타임아웃 아래로 둔다. */
   deleteWaitMs?: number
+  /** 창의 에이전트 활동 표시와 중지(agent-activity A1). 없으면 알리지 않는다(테스트). */
+  activity?: AgentActivity
+  /** 이 호출이 시작한 전송·파일 작업 id를 활동 표시에 넘긴다. 호출마다 감싸개가 채운다. */
+  track?(ids: string[]): void
 }
 
 /** 위험도 하나로 설명 첫 줄과 어노테이션을 만든다(K3). 앱은 묻지 않는다. */
@@ -62,6 +74,8 @@ const INSTRUCTIONS =
   'starts with its [RISK: …]. FTP Browser runs every ' +
   'call without asking the user, so use upload and delete only when the user asked for exactly ' +
   'that. download and upload return a jobId at once: follow it with wait_for_jobs. ' +
+  'The app window shows the user that you are working, and the user can stop you there: a ' +
+  'STOPPED_BY_USER error means stop, do not retry, and ask the user. ' +
   UNTRUSTED
 
 // --- 결과와 오류 ---
@@ -91,6 +105,7 @@ const NEXT: Record<string, string> = {
   INVALID_PATH: 'Use a normalized absolute path.',
   BUSY: 'Wait for the running jobs with wait_for_jobs (the user can cancel them in the app).',
   AMBIGUOUS: 'Pass server with one of the user@host:port keys listed.',
+  STOPPED_BY_USER: 'Do not retry; tell the user and wait for instructions.',
   JOB_FAILED: 'Some items may already be gone: list the parent folder to see what is left.',
   [ErrorCode.FTP_PERMISSION_DENIED]: PARENT_NEXT,
   // pyftpdlib처럼 없는 디렉터리에 550 대신 501을 주는 서버가 있다.
@@ -352,9 +367,10 @@ const TOOLS = [
       const listings = new Map<string, Promise<FtpFileEntry[]>>()
       const previews: Array<Record<string, unknown>> = []
       const requests: PreviewRequest[] = []
+      const lister = ops.haltingLister(deps, manager)
       for (const path of paths) {
         const parent = posix.dirname(path)
-        const listing = listings.get(parent) ?? manager.list(parent).then((r) => r.entries)
+        const listing = listings.get(parent) ?? lister.list(parent).then((r) => r.entries)
         listings.set(parent, listing)
         let error: string | undefined
         const entry = await listing.then(
@@ -373,7 +389,12 @@ const TOOLS = [
         }
         previews.push({ path, ok: !error, ...(entry ? { size: entry.size } : {}), error })
       }
-      const outcomes = requests.length > 0 ? await deps.previews(key, requests) : []
+      // 중지된 호출은 미리보기 큐에 넣지 않는다(A7)
+      if (deps.stopped?.()) return codedError('STOPPED_BY_USER', 'The user stopped this call.')
+      const outcomes =
+        requests.length > 0
+          ? await deps.previews(key, requests, () => deps.stopped?.() === true)
+          : []
       const images: CallToolResult['content'] = []
       // 이미지 블록은 ok 항목 순서대로다
       for (const [i, preview] of previews.filter((p) => p.ok).entries()) {
@@ -493,7 +514,9 @@ const TOOLS = [
       server: targetServer
     }),
     async run({ remotePaths, localDir, server }, deps) {
-      return transferResult(deps, await ops.download(deps, remotePaths, localDir, server))
+      const started = await ops.download(deps, remotePaths, localDir, server)
+      deps.track?.(started.ids)
+      return transferResult(deps, started)
     }
   }),
 
@@ -515,6 +538,7 @@ const TOOLS = [
     }),
     async run({ localPaths, remoteDir, overwrite, server }, deps) {
       const started = await ops.upload(deps, localPaths, remoteDir, overwrite, server)
+      deps.track?.(started.ids)
       return transferResult(deps, started, { overwrites: started.plan.overwrites })
     }
   }),
@@ -533,6 +557,7 @@ const TOOLS = [
     }),
     async run({ paths, server }, deps) {
       const id = await ops.startDelete(deps, paths, server)
+      deps.track?.([id])
       const [job] = await deps.jobs.wait([id], deps.deleteWaitMs ?? 45_000)
       if (job.status === 'failed') {
         return codedError('JOB_FAILED', `Deleting failed: ${job.error ?? 'unknown error'}`)
@@ -565,13 +590,33 @@ export function createMcpToolServer(deps: McpToolDeps): McpServer {
     server.registerTool(
       def.name,
       { description, inputSchema: def.input, annotations },
-      async (input: Record<string, unknown>) => {
+      async (input: Record<string, unknown>, ctx) => {
+        const client = clientName(
+          server.server.getClientVersion()?.name,
+          ctx.http?.req?.headers.get('user-agent')
+        )
+        let call: ActivityCall | undefined
         try {
-          return await def.run(input, deps)
+          call = deps.activity?.begin(def.name, input, client)
+          const run = def.run(
+            input,
+            call ? { ...deps, track: call.track, stopped: call.isStopped } : deps
+          )
+          // 사용자가 중지하면 밑의 작업을 기다리지 않고 끝낸다(A5). run의 늦은 실패는 race가 받는다.
+          const stopped = call?.stopped.then(() =>
+            codedError(
+              'STOPPED_BY_USER',
+              'The user stopped you in FTP Browser. A change already sent to the server may ' +
+                'still complete.'
+            )
+          )
+          return await (stopped ? Promise.race([run, stopped]) : run)
         } catch (err) {
           // AgentError는 그 코드로, FTP·파일 시스템 오류는 classifyError 코드로. 프로토콜 오류로 던지지 않는다.
           const { code, message } = err instanceof ops.AgentError ? err : classifyError(err)
           return codedError(code, message)
+        } finally {
+          call?.end()
         }
       }
     )
