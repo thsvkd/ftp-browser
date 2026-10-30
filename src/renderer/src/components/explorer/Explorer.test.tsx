@@ -1631,6 +1631,56 @@ describe('Explorer — rename to a name that is already taken', () => {
     expect(within(option('New folder')).getByRole('textbox')).toBeTruthy()
   })
 
+  it('closes the editor when the tab moves to the same path on another server', async () => {
+    // covers: Test-1378
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('docs', { dir: true })] } })
+    await renderExplorer(remoteLoc(DIR))
+    const input = startRename()
+    fireEvent.change(input, { target: { value: 'c.txt' } })
+    const staging = connKey('staging.org', 21, '')
+    setConnection(staging, 'connected')
+
+    act(() => useTabsStore.getState().navigate({ side: 'remote', path: DIR, server: staging }))
+    await flush()
+    await flush()
+
+    expect(option('a.txt')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+  })
+
+  it('drops a waiting new folder editor when focus leaves the list before it appears', async () => {
+    // covers: Test-1379
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const waits: Array<() => void> = []
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise((resolve) =>
+        waits.push(() => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    act(() => useListingStore.getState().invalidate('remote', server(), DIR))
+    await act(async () => waits[0]())
+    await flush()
+    // 두 번째 목록을 기다리는 사이 사용자가 다른 입력 칸으로 간다
+    const elsewhere = document.createElement('input')
+    document.body.append(elsewhere)
+    onTestFinished(() => elsewhere.remove())
+    act(() => elsewhere.focus())
+    await act(async () => waits[1]())
+    await flush()
+
+    expect(option('New folder')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(document.activeElement).toBe(elsewhere)
+  })
+
   it('closes a new folder editor that find hides and never reopens it', async () => {
     // covers: Test-1339
     h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })

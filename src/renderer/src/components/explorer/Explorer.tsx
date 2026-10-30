@@ -489,20 +489,32 @@ function TabExplorer({
   } | null>(null)
   const [props, setProps] = useState<ExplorerEntry | null>(null)
   const [lightbox, setLightbox] = useState<number | null>(null)
-  const [renaming, setRenaming] = useState<string | null>(null)
+  /** 이름 입력 중인 항목. 그 항목을 고른 위치(`key`)와 함께 둔다: 다른 위치의 같은 경로에서 열리지 않는다. */
+  const [renaming, setRenaming] = useState<{ key: string; path: string } | null>(null)
   const [editingPath, setEditingPath] = useState(false)
   // 찾기 칸의 열림. Ctrl+F가 연다. 찾기가 ⋯에 접혀도 막대가 칸을 그린다(explorer-ux-polish X7).
   const [searchOpen, setSearchOpen] = useState(false)
   const refocus = (): void => scrollRef.current?.focus({ preventScroll: true })
-  // 편집하던 항목이 보이는 목록에서 사라지면(다른 폴더로 이동, 다른 클라이언트의 삭제·이름 변경, 목록 오류, 찾기·필터에
-  // 가려짐) 편집을 닫는다. 창이 비활성이라 편집이 열린 채 남아 있던 사이에도 생긴다. 목록을 다시 읽는 중에는
-  // 기다린다: 새 폴더를 만든 뒤 자기 목록 읽기가 다른 읽기에 밀리면 옛 목록이 잠시 남는다(rename-name-taken N10).
+  // 편집하던 항목이 보이는 목록에서 사라지면(다른 위치로 이동, 다른 클라이언트의 삭제·이름 변경, 목록 오류, 찾기·필터에
+  // 가려짐) 편집을 닫는다. 창이 비활성이라 편집이 열린 채 남아 있던 사이에도 생긴다. 같은 위치의 목록을 다시 읽는
+  // 중에는 기다린다: 새 폴더를 만든 뒤 자기 목록 읽기가 다른 읽기에 밀리면 옛 목록이 잠시 남는다(rename-name-taken N10).
   const settling = mode === 'live' && !!listing?.refreshing
+  const renameHere = renaming?.key === key
+  const waitingRow = !!renaming && renameHere && settling && !indexOf.has(renaming.path)
   useEffect(() => {
-    if (!renaming || settling || indexOf.has(renaming)) return
+    if (!renaming || (renameHere && (settling || indexOf.has(renaming.path)))) return
     setRenaming(null)
     if (document.activeElement === document.body) refocus()
-  }, [renaming, settling, indexOf])
+  }, [renaming, renameHere, settling, indexOf])
+  // 기다리는 동안 사용자가 목록 밖(찾기 칸 등)으로 포커스를 옮기면, 늦게 열린 입력이 포커스를 빼앗지 않게 취소한다
+  useEffect(() => {
+    if (!waitingRow) return
+    const onFocusIn = (e: FocusEvent): void => {
+      if (!scrollRef.current?.contains(e.target as Node)) setRenaming(null)
+    }
+    document.addEventListener('focusin', onFocusIn)
+    return () => document.removeEventListener('focusin', onFocusIn)
+  }, [waitingRow])
 
   // ---------- 선택 ----------
   const selection: SelectionState = { sel: tab.sel, anchor: tab.anchor, focus: tab.focus }
@@ -617,7 +629,8 @@ function TabExplorer({
     }
     await useListingStore.getState().load(loc)
     selectOnly(path)
-    setRenaming(path)
+    // 만들기 시작한 위치의 항목만 편집한다(그사이 다른 위치로 옮겼으면 N10이 닫는다)
+    setRenaming({ key, path })
   }
 
   const copyPaths = (list: string[]): void => {
@@ -685,7 +698,7 @@ function TabExplorer({
         icon: Pencil,
         shortcut: 'F2',
         disabled: !one,
-        onSelect: () => one && setRenaming(one.path)
+        onSelect: () => one && setRenaming({ key, path: one.path })
       },
       {
         label: t('menu.copyPath'),
@@ -808,7 +821,7 @@ function TabExplorer({
         return
       case 'F2':
         handled()
-        if (cur && interactive) setRenaming(cur.path)
+        if (cur && interactive) setRenaming({ key, path: cur.path })
         return
       case 'Delete':
         handled()
@@ -875,7 +888,7 @@ function TabExplorer({
     scope,
     selected: selSet.has(entry.path),
     shelved: shelved.has(locKey(entry)),
-    renaming: renaming === entry.path,
+    renaming: renameHere && renaming?.path === entry.path,
     nameTaken: (name) => {
       const next = name.trim()
       return name !== entry.name && next !== entry.name && folderNames.has(next)
