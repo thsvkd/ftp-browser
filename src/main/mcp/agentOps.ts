@@ -63,6 +63,11 @@ export interface AgentDeps {
   onSession(event: AgentSessionEvent): void
   /** 로컬 파일 이름 규칙(toLocalFileName). 기본은 process.platform */
   platform?: string
+  /**
+   * 사용자가 이 호출을 중지했다(agent-activity A7). 중지된 호출은 목록 읽기·서버 명령·로컬 폴더 만들기·큐 넣기를
+   * 더 하지 않는다. 호출마다 MCP 감싸개가 넣는다.
+   */
+  stopped?(): boolean
 }
 
 /** 에이전트가 고칠 수 있는 실패(NOT_CONNECTED, NOT_FOUND, TARGET_EXISTS, INVALID_PATH, BUSY). */
@@ -73,6 +78,11 @@ export class AgentError extends Error {
   ) {
     super(message)
   }
+}
+
+/** 중지된 호출(A7)을 다음 명령 전에 끝낸다. 에이전트는 이미 STOPPED_BY_USER를 받았다. */
+function haltIfStopped(deps: AgentDeps): void {
+  if (deps.stopped?.()) throw new AgentError('STOPPED_BY_USER', 'The user stopped this call.')
 }
 
 // --- 저장된 서버와 연결 ---
@@ -140,6 +150,7 @@ export async function connectSaved(
   const key = connKey(host, port, user)
   if (!deps.connections.connectedKeys().includes(key)) {
     const password = (await deps.passwords.reveal(id!)) || 'anonymous@'
+    haltIfStopped(deps)
     const payload = { id, name, host, port, user, password, secure, maxTransfers }
     const result = await deps.connections.connect(payload)
     if (!result.success) {
@@ -215,6 +226,7 @@ export async function renameRemote(
       `${to} already exists on the server; rename never overwrites.`
     )
   }
+  haltIfStopped(deps)
   await fileOps.rename(from, to)
 }
 
@@ -231,6 +243,7 @@ export async function startDelete(
     throw new AgentError('INVALID_PATH', 'Refusing to delete the root folder.')
   const { key, manager, fileOps } = targetSession(deps, server)
   const targets = await findRemote(manager, outermost(paths))
+  haltIfStopped(deps)
   const { operations: ops } = deps
   const itemName = targets.length === 1 ? posix.basename(targets[0].remotePath) : undefined
   const { id } = ops.create(
@@ -239,11 +252,12 @@ export async function startDelete(
     'files',
     targets.length
   )
+  const cancelled = (): boolean => ops.isCancelled(id) || deps.stopped?.() === true
   void (async () => {
     let done = 0
     try {
       for (const [i, { remotePath: p, entry }] of targets.entries()) {
-        if (ops.isCancelled(id)) return ops.markCancelled(id)
+        if (cancelled()) return ops.markCancelled(id)
         const rest = targets.length - i - 1
         if (entry.type === 'directory') {
           let removed = 0
@@ -254,7 +268,7 @@ export async function startDelete(
               ops.progress(id, done + n, posix.basename(item), done + total + rest)
             },
             // 폴더 하나를 지우는 동안에도 중지(agent-activity A5)가 멈추게 한다
-            () => ops.isCancelled(id)
+            cancelled
           )
           done += removed
         } else {
@@ -263,7 +277,7 @@ export async function startDelete(
         }
         ops.progress(id, done, posix.basename(p), done + rest)
       }
-      if (ops.isCancelled(id)) return ops.markCancelled(id)
+      if (cancelled()) return ops.markCancelled(id)
       ops.complete(id)
     } catch (err) {
       ops.fail(id, err instanceof Error ? err.message : String(err))
@@ -274,9 +288,16 @@ export async function startDelete(
 
 // --- 전송 ---
 
+/** 중지된 호출은 남은 폴더를 더 읽지 않는다(A7). 메인 연결을 GUI 탐색에 돌려준다. */
 const planDeps = (deps: AgentDeps, session: AgentSession): PlanDeps => ({
-  list: (dir) => session.manager.list(dir),
-  collectFiles: (dir) => deps.localFs.collectFiles(dir),
+  list: async (dir) => {
+    haltIfStopped(deps)
+    return session.manager.list(dir)
+  },
+  collectFiles: async (dir) => {
+    haltIfStopped(deps)
+    return deps.localFs.collectFiles(dir)
+  },
   platform: deps.platform ?? process.platform
 })
 
@@ -294,6 +315,7 @@ export async function download(
   const session = targetSession(deps, server)
   const planned = await planDownload(planDeps(deps, session), remotePaths, localDir)
   const plan: TransferPlan = { ...resolvePlan(planned, () => 'skip'), dirs: planned.dirs }
+  haltIfStopped(deps)
   for (const dir of plan.dirs) mkdirSync(dir, { recursive: true })
   const options = { exclusive: true }
   const ids = session.queue.enqueueBatch(
@@ -321,6 +343,7 @@ export async function upload(
   const planned = await planUpload(planDeps(deps, session), localPaths, remoteDir)
   const decision = overwrite ? 'overwrite' : 'skip'
   const plan: TransferPlan = { ...resolvePlan(planned, () => decision), dirs: planned.dirs }
+  haltIfStopped(deps)
   const ids = session.queue.enqueueBatch('upload', plan.items, plan.dirs.length > 0, plan.dirs)
   return { ids, plan }
 }

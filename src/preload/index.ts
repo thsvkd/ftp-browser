@@ -70,7 +70,8 @@ const INVOKE_CHANNELS = [
   'mcp:getState',
   'mcp:setEnabled',
   'mcp:regenerateToken',
-  'agent:stop'
+  'agent:stop',
+  'agent:getActivity'
 ] as const
 
 const EVENT_CHANNELS = [

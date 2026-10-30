@@ -1,7 +1,7 @@
 import path from 'path'
 import { ipcMain } from 'electron'
 import type { IpcResult } from '@shared/types/ipc'
-import type { McpState } from '@shared/types/mcp'
+import type { AgentActivityEvent, McpState } from '@shared/types/mcp'
 import type { McpService } from '../mcp/McpService'
 import type { AgentActivity } from '../mcp/agentActivity'
 import { ipcError } from '../utils/errorClassifier'
@@ -64,4 +64,9 @@ export function registerAgentHandlers(activity: AgentActivity): void {
       return ipcError(err)
     }
   })
+  // 새로 고친 창이 지금 상태부터 그린다(A10)
+  ipcMain.handle(
+    'agent:getActivity',
+    (): IpcResult<AgentActivityEvent> => ({ success: true, data: activity.current() })
+  )
 }

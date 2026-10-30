@@ -162,7 +162,8 @@ app.whenReady().then(() => {
   // 도구마다 대상 연결을 고른다(server 인자, 마지막 사용 연결, 유일한 연결 — multi-connection MC18).
   const activity = createAgentActivity(
     (event) => {
-      if (!win.isDestroyed()) win.webContents.send('agent:activity', event)
+      // macOS에서 다시 만든 창도 받는다
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('agent:activity', event)
     },
     hub,
     operationManager

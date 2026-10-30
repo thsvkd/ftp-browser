@@ -17,12 +17,15 @@ export function buildClaudeCodeCommand(url: string, token: string): string {
   return `claude mcp add --scope user --transport http ftp-browser ${url} --header "Authorization: Bearer ${token}"`
 }
 
-/** Codex `~/.codex/config.toml`에 붙여 넣는 조각. `codex mcp add --url`은 토큰을 환경변수로만 받는다. */
+/**
+ * Codex `~/.codex/config.toml`에 붙여 넣는 조각. `codex mcp add --url`은 토큰을 환경변수로만 받는다. 값은 JSON
+ * 문자열로 적는다: TOML 기본 문자열과 이스케이프가 같아 따옴표·역슬래시가 들어 있어도 깨지지 않는다.
+ */
 export function buildCodexConfig(url: string, token: string): string {
   return (
     '[mcp_servers.ftp-browser]\n' +
-    `url = "${url}"\n` +
-    `http_headers = { Authorization = "Bearer ${token}" }\n`
+    `url = ${JSON.stringify(url)}\n` +
+    `http_headers = { Authorization = ${JSON.stringify(`Bearer ${token}`)} }\n`
   )
 }
 

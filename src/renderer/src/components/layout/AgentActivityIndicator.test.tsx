@@ -77,19 +77,85 @@ describe('AgentActivityIndicator', () => {
     render(<AgentActivityIndicator />)
     emit({ active: true, client: 'Claude Code', tool: 'download', target: '/a.jpg' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Stop the agent' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop all agents' }))
     expect(invokeCalls(mockInvoke, 'agent:stop')).toHaveLength(1)
 
     mockInvoke.mockResolvedValueOnce({ success: false, error: 'boom' })
-    fireEvent.click(screen.getByRole('button', { name: 'Stop the agent' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop all agents' }))
     await vi.waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith("Couldn't stop the agent", { description: 'boom' })
     )
 
     mockInvoke.mockRejectedValueOnce(new Error('gone'))
-    fireEvent.click(screen.getByRole('button', { name: 'Stop the agent' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop all agents' }))
     await vi.waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith("Couldn't stop the agent", { description: 'gone' })
     )
+  })
+
+  it('starts from the activity already running when the window loads', async () => {
+    // covers: Test-1363
+    mockInvoke.mockImplementation(async (channel: string) =>
+      channel === 'agent:getActivity'
+        ? { success: true, data: { active: true, client: 'Codex', tool: 'download' } }
+        : { success: true, data: undefined }
+    )
+    render(<AgentActivityIndicator />)
+
+    expect(await screen.findByRole('status')).toHaveProperty(
+      'textContent',
+      expect.stringContaining('Codex is working')
+    )
+    expect(invokeCalls(mockInvoke, 'agent:getActivity')).toHaveLength(1)
+  })
+
+  it('ignores a stale snapshot once an event has arrived, and an idle one', async () => {
+    // covers: Test-1363
+    let answer: (value: unknown) => void = () => undefined
+    mockInvoke.mockImplementation((channel: string) =>
+      channel === 'agent:getActivity'
+        ? new Promise((resolve) => (answer = resolve))
+        : Promise.resolve({ success: true, data: undefined })
+    )
+    render(<AgentActivityIndicator />)
+    emit({ active: false, stopped: true })
+    await act(async () => answer({ success: true, data: { active: true, tool: 'delete' } }))
+    expect(screen.queryByRole('status')).toBeNull()
+
+    cleanup()
+    mockInvoke.mockResolvedValue({ success: true, data: { active: false, tool: 'delete' } })
+    render(<AgentActivityIndicator />)
+    await act(async () => undefined)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('stops pulsing and drops below dialogs while it lingers, and a new call keeps it up', () => {
+    // covers: Test-1364
+    vi.useFakeTimers()
+    render(<AgentActivityIndicator />)
+    emit({ active: true, tool: 'list_directory' })
+    expect(glow()?.getAttribute('data-active')).toBe('true')
+    expect(screen.getByRole('status').className).toContain('z-[71]')
+
+    emit({ active: false, tool: 'list_directory' })
+    expect(glow()?.getAttribute('data-active')).toBe('false')
+    expect(screen.getByRole('status').className).toContain('z-40')
+    act(() => vi.advanceTimersByTime(AGENT_ACTIVITY_LINGER_MS - 1))
+
+    emit({ active: true, tool: 'download' })
+    act(() => vi.advanceTimersByTime(AGENT_ACTIVITY_LINGER_MS * 2))
+    expect(screen.queryByRole('status')).not.toBeNull()
+    expect(screen.getByRole('status').className).toContain('z-[71]')
+  })
+
+  it('truncates a long agent name so Stop stays in the pill', () => {
+    // covers: Test-1365
+    render(<AgentActivityIndicator />)
+    emit({ active: true, client: '﷽'.repeat(40), tool: 'download' })
+    const name = screen.getByText(/is working/)
+    expect(name.className).toContain('truncate')
+    expect(name.className).toContain('max-w-[14rem]')
+    expect(name.className).not.toContain('shrink-0')
+    expect(screen.getByRole('button', { name: 'Stop all agents' }).className).toContain('shrink-0')
   })
 })

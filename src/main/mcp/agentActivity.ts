@@ -11,6 +11,8 @@ export interface ActivityCall {
   track(ids: string[]): void
   end(): void
   stopped: Promise<void>
+  /** 사용자가 이 호출을 중지했다. 중지된 호출은 서버 명령·큐 넣기를 더 하지 않는다(A7). */
+  isStopped(): boolean
 }
 
 /**
@@ -21,11 +23,13 @@ export interface AgentActivity {
   begin(tool: string, input: Record<string, unknown>, client?: string): ActivityCall
   /** 진행 중인 호출을 끝내고 에이전트의 남은 작업을 취소한다. MCP는 그대로다(A5). */
   stop(): void
+  /** 마지막으로 알린 상태. 새로 고친 창이 처음에 읽는다(A10). */
+  current(): AgentActivityEvent
 }
 
-/** 제어문자를 공백으로 바꾸고 `max`자로 자른다. 원격 이름은 신뢰할 수 없는 데이터다. */
+/** 제어문자를 공백으로 바꾸고 앞뒤 공백을 지운 뒤 `max`자로 자른다. 원격 이름은 신뢰할 수 없는 데이터다. */
 const clean = (text: string, max: number): string =>
-  Array.from(text.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, ' '))
+  Array.from(text.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, ' ').trim())
     .slice(0, max)
     .join('')
 
@@ -57,7 +61,9 @@ const KNOWN_AGENTS: Array<[RegExp, string]> = [
 
 /** 에이전트 이름(A2): 요청 envelope의 clientInfo.name, 없으면 알려진 User-Agent */
 export function clientName(envelopeName?: string, userAgent?: string | null): string | undefined {
-  if (envelopeName) return clean(envelopeName, 40)
+  // 공백·제어문자뿐인 이름은 이름이 없는 것과 같다(A9)
+  const name = envelopeName && clean(envelopeName, 40)
+  if (name) return name
   return KNOWN_AGENTS.find(([pattern]) => pattern.test(userAgent ?? ''))?.[1]
 }
 
@@ -65,7 +71,8 @@ const isRunning = (status: string): boolean => status === 'pending' || status ==
 
 export function createAgentActivity(
   emit: (event: AgentActivityEvent) => void,
-  transfers: Pick<TransferHub, 'getAll' | 'cancel'> & Listenable<'queue:updated', TransferUpdate>,
+  transfers: Pick<TransferHub, 'getAll' | 'cancelMany'> &
+    Listenable<'queue:updated', TransferUpdate>,
   operations: Pick<OperationManager, 'getAll' | 'requestCancel'> &
     Listenable<'operation:updated', OperationJob[]>
 ): AgentActivity {
@@ -74,6 +81,9 @@ export function createAgentActivity(
   const jobs = new Set<string>()
   let last: Pick<AgentActivityEvent, 'client' | 'tool' | 'target'> = {}
   let active = false
+  let latest: AgentActivityEvent = { active: false }
+  /** 중지했지만 취소할 수 없던 전송(메인 연결로 도는 것)이 끝나기를 기다린다. 끝나면 바로 사라진다(A8). */
+  let draining = false
 
   /** 추적하는 작업 중 아직 도는 것. 끝났거나 목록에서 빠진 것은 잊는다. */
   const runningJobs = (): { transfers: string[]; operations: string[] } => {
@@ -88,21 +98,36 @@ export function createAgentActivity(
     return running
   }
 
+  /** 전송은 한 번에(큐마다 목록을 한 번만 훑는다, A8), 파일 작업은 하나가 실패해도 나머지를 요청한다. */
   const cancel = ({ transfers: t, operations: o }: ReturnType<typeof runningJobs>): void => {
-    t.forEach((id) => transfers.cancel(id))
-    o.forEach((id) => operations.requestCancel(id))
+    try {
+      if (t.length > 0) transfers.cancelMany(t)
+    } finally {
+      for (const id of o) {
+        try {
+          operations.requestCancel(id)
+        } catch (err) {
+          console.warn('[agent] Failed to cancel an operation:', err)
+        }
+      }
+    }
   }
 
   const publish = (extra: Partial<AgentActivityEvent> = {}): void => {
     active = calls.size > 0 || jobs.size > 0
-    emit({ active, ...last, ...extra })
+    latest = { active, ...last, ...extra }
+    emit(latest)
   }
 
   /** 작업 알림마다 다시 보고, 활성이 바뀔 때만 알린다(전송 진행률마다 보내지 않는다). */
   const recheck = (): void => {
     if (jobs.size === 0) return
     runningJobs()
-    if ((calls.size > 0 || jobs.size > 0) !== active) publish()
+    if ((calls.size > 0 || jobs.size > 0) === active) return
+    if (draining && calls.size === 0 && jobs.size === 0) {
+      draining = false
+      publish({ stopped: true })
+    } else publish()
   }
   transfers.on('queue:updated', recheck)
   operations.on('operation:updated', recheck)
@@ -110,17 +135,23 @@ export function createAgentActivity(
   return {
     begin(tool, input, client) {
       const call = {}
-      let stopCall = (): void => undefined
-      const stopped = new Promise<void>((resolve) => (stopCall = resolve))
-      calls.set(call, stopCall)
+      let halted = false
+      let resolveStopped = (): void => undefined
+      const stopped = new Promise<void>((resolve) => (resolveStopped = resolve))
+      calls.set(call, () => {
+        halted = true
+        resolveStopped()
+      })
+      draining = false
       last = { tool, target: summarizeTarget(input), client }
       publish()
       return {
         stopped,
+        isStopped: () => halted,
         track: (ids) => {
           for (const id of ids) jobs.add(id)
-          // 중지 뒤에 계획을 마치고 큐에 넣은 작업(폴더 목록 읽기 중 중지)은 넣자마자 취소한다
-          if (!calls.has(call)) {
+          // 중지된 호출은 큐에 넣지 않지만(A7), 그래도 들어온 작업은 넣자마자 취소한다
+          if (halted) {
             const running = runningJobs()
             const mine = new Set(ids)
             cancel({
@@ -140,14 +171,20 @@ export function createAgentActivity(
     },
     stop() {
       try {
-        cancel(runningJobs())
+        const running = runningJobs()
+        cancel(running)
+        // 파일 작업은 다음 명령 전에 멈춘다. 취소가 듣지 않은 전송(메인 연결로 도는 것)만 끝날 때까지
+        // 표시를 남기고, 취소된 전송은 runningJobs가 잊는다(A8).
+        for (const id of running.operations) jobs.delete(id)
+        runningJobs()
       } finally {
-        jobs.clear()
         const stops = [...calls.values()]
         calls.clear()
         stops.forEach((stopCall) => stopCall())
-        publish({ stopped: true })
+        draining = jobs.size > 0
+        publish(draining ? {} : { stopped: true })
       }
-    }
+    },
+    current: () => latest
   }
 }

@@ -304,6 +304,15 @@ describe('McpService settings', () => {
     expect(buildJsonConfig(url, 't')).toContain('\n  "mcpServers"')
   })
 
+  it('escapes quotes and backslashes in the Codex TOML values', () => {
+    // covers: Test-1367
+    expect(buildCodexConfig('http://h/"x', 'a"b\\c')).toBe(
+      '[mcp_servers.ftp-browser]\n' +
+        'url = "http://h/\\"x"\n' +
+        'http_headers = { Authorization = "Bearer a\\"b\\\\c" }\n'
+    )
+  })
+
   it('carries the Codex and JSON configs with the current token', async () => {
     // covers: Test-1341
     const state = await service.setEnabled(true)

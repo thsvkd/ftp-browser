@@ -175,6 +175,8 @@ export class FakeRemote extends EventEmitter {
 /** TransferQueue의 공개 API만 흉내 낸다. 상태는 finish로 바꾸고 queue:updated를 낸다. */
 export class FakeQueue extends EventEmitter {
   jobs: TransferJob[] = []
+  /** 메인 연결로 도는 작업 id. 실제 큐는 진행 중인 이 작업을 취소하지 못한다. */
+  mainClient = new Set<string>()
 
   /** 작업의 `server`. 실제 큐처럼 생성자 옵션으로 받는다. */
   constructor(private server: ConnKey = FAKE_SERVER) {
@@ -239,7 +241,16 @@ export class FakeHub extends EventEmitter {
     queue.on('queue:updated', (update: TransferUpdate) => this.emit('queue:updated', update))
   }
   getAll = (): TransferJob[] => this.queues.flatMap((queue) => queue.getAll())
-  cancel = vi.fn()
+  /** 실제 큐처럼 대기·진행 작업을 취소한다. `mainClient`의 진행 작업(메인 연결로 도는 것)은 무시한다. */
+  cancelMany = vi.fn((ids: string[]): void => {
+    for (const queue of this.queues) {
+      for (const job of queue.jobs) {
+        if (!ids.includes(job.id) || (job.status !== 'pending' && job.status !== 'active')) continue
+        if (job.status === 'active' && queue.mainClient.has(job.id)) continue
+        queue.finish(job.id, 'cancelled')
+      }
+    }
+  })
 }
 
 /**

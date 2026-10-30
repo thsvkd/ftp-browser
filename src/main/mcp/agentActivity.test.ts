@@ -5,7 +5,9 @@ import path from 'path'
 import type { Client } from '@modelcontextprotocol/client'
 import type { AgentActivityEvent } from '@shared/types/mcp'
 import type { FtpListResult } from '@shared/types/ftp'
+import { createMcpHandler } from '@modelcontextprotocol/server'
 import { clientName, createAgentActivity, summarizeTarget } from './agentActivity'
+import { createMcpToolServer } from './mcpTools'
 import {
   call,
   connectClient,
@@ -48,6 +50,9 @@ function holdList(): { release: () => void } {
 }
 
 const last = (): AgentActivityEvent | undefined => events.at(-1)
+
+/** 중지된 호출이 백그라운드에서 마저 도는 동안 기다린다(그 결과는 에이전트에게 가지 않는다). */
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20))
 
 describe('agent activity', () => {
   it('reports a call from start to end, even when the tool fails', async () => {
@@ -136,16 +141,16 @@ describe('agent activity', () => {
 
     h.deps.activity!.stop()
 
-    expect(h.hub.cancel).toHaveBeenCalledTimes(1)
-    expect(h.hub.cancel).toHaveBeenCalledWith(running.jobId)
-    expect(h.hub.cancel).not.toHaveBeenCalledWith(gui.id)
+    expect(h.hub.cancelMany.mock.calls).toEqual([[[running.jobId]]])
+    expect(h.queue.jobs.find((job) => job.id === running.jobId)?.status).toBe('cancelled')
+    expect(h.queue.jobs.find((job) => job.id === gui.id)?.status).toBe('active')
     expect(cancel).toHaveBeenCalledWith(deleting.operationId)
     expect(last()).toMatchObject({ active: false, stopped: true })
   })
 
-  it('cancels the jobs a stopped call queues after it finishes planning', async () => {
+  it('a call stopped while it plans a download lists no further and queues nothing', async () => {
     // covers: Test-1354
-    h.remote.addDir('/folder').addFile('/folder/a.txt', 3).addFile('/folder/b.txt', 3)
+    h.remote.addDir('/folder').addDir('/folder/sub').addFile('/folder/sub/a.txt', 3)
     const held = holdList()
     const pending = call(client, 'download', { remotePaths: ['/folder'], localDir: tmp })
     await vi.waitFor(() => expect(h.remote.list).toHaveBeenCalled())
@@ -153,11 +158,25 @@ describe('agent activity', () => {
     h.deps.activity!.stop()
     expect(textOf(await pending)).toMatch(/^STOPPED_BY_USER/)
     held.release()
-    await vi.waitFor(() => expect(h.queue.enqueueBatch).toHaveBeenCalled())
+    await settle()
 
-    const queued = h.queue.jobs.map((job) => job.id)
-    expect(queued).toHaveLength(2)
-    for (const id of queued) expect(h.hub.cancel).toHaveBeenCalledWith(id)
+    expect(h.remote.list).toHaveBeenCalledTimes(1)
+    expect(h.queue.enqueueBatch).not.toHaveBeenCalled()
+    await expect(fs.readdir(tmp)).resolves.toEqual([])
+    expect(last()).toMatchObject({ active: false, stopped: true })
+  })
+
+  it('cancels at once a job a stopped call still hands over', () => {
+    // covers: Test-1354
+    const queued = h.queue.add({ status: 'pending' })
+    const activity = h.deps.activity!
+    const running = activity.begin('download', {})
+    activity.stop()
+
+    running.track([queued.id])
+
+    expect(h.hub.cancelMany).toHaveBeenLastCalledWith([queued.id])
+    expect(queued.status).toBe('cancelled')
     expect(last()).toMatchObject({ active: false, stopped: true })
   })
 
@@ -185,6 +204,95 @@ describe('agent activity', () => {
     await vi.waitFor(() =>
       expect(h.operations.getAll().find((j) => j.id === operationId)?.status).toBe('cancelled')
     )
+  })
+
+  it.each([
+    ['a file', '/keep.txt'],
+    ['a folder', '/keep']
+  ])('a delete of %s stopped while it checks the paths deletes nothing', async (_kind, target) => {
+    // covers: Test-1358
+    h.remote.addFile('/keep.txt', 1).addDir('/keep').addFile('/keep/a', 1)
+    const held = holdList()
+    const pending = call(client, 'delete', { paths: [target] })
+    await vi.waitFor(() => expect(h.remote.list).toHaveBeenCalled())
+
+    h.deps.activity!.stop()
+    expect(textOf(await pending)).toMatch(/^STOPPED_BY_USER/)
+    held.release()
+    await settle()
+
+    expect(h.remote.deleteFile).not.toHaveBeenCalled()
+    expect(h.remote.deleteDirectory).not.toHaveBeenCalled()
+    expect(h.operations.getAll()).toEqual([])
+  })
+
+  it('a rename stopped while it checks the target sends no rename', async () => {
+    // covers: Test-1359
+    h.remote.addFile('/a.txt', 1)
+    const held = holdList()
+    const pending = call(client, 'rename', { from: '/a.txt', to: '/b.txt' })
+    await vi.waitFor(() => expect(h.remote.list).toHaveBeenCalled())
+
+    h.deps.activity!.stop()
+    expect(textOf(await pending)).toMatch(/^STOPPED_BY_USER/)
+    held.release()
+    await settle()
+
+    expect(h.remote.rename).not.toHaveBeenCalled()
+  })
+
+  it('keeps showing a transfer Stop could not cancel until it ends, then hides at once', async () => {
+    // covers: Test-1360
+    h.remote.addFile('/a.txt', 3)
+    const { jobId } = dataOf<{ jobId: string }>(
+      await call(client, 'download', { remotePaths: ['/a.txt'], localDir: tmp })
+    )
+    h.queue.jobs.find((job) => job.id === jobId)!.status = 'active'
+    h.queue.mainClient.add(jobId)
+
+    h.deps.activity!.stop()
+    expect(last()).toMatchObject({ active: true, tool: 'download' })
+    expect(last()?.stopped).toBeUndefined()
+
+    h.queue.finish(jobId, 'completed')
+    expect(last()).toMatchObject({ active: false, stopped: true })
+    expect(h.deps.activity!.current()).toEqual(last())
+  })
+
+  it('names the event after the client in the request envelope', async () => {
+    // covers: Test-1362
+    // ftpb처럼 initialize 없이 2026-07-28 `_meta` envelope 하나로 부른다
+    const handler = createMcpHandler(() => createMcpToolServer(h.deps))
+    const version = '2026-07-28'
+    const res = await handler.fetch(
+      new Request('http://localhost/mcp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+          'MCP-Protocol-Version': version,
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'get_status'
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: {
+            name: 'get_status',
+            arguments: {},
+            _meta: {
+              'io.modelcontextprotocol/protocolVersion': version,
+              'io.modelcontextprotocol/clientInfo': { name: 'ftpb', version: '1' },
+              'io.modelcontextprotocol/clientCapabilities': {}
+            }
+          }
+        })
+      })
+    )
+    expect(res.status).toBe(200)
+    await res.text()
+    expect(last()).toMatchObject({ active: false, tool: 'get_status', client: 'ftpb' })
   })
 
   it('runs new calls normally after a stop', async () => {
@@ -230,5 +338,12 @@ describe('clientName', () => {
     expect(clientName(undefined, null)).toBeUndefined()
     expect(clientName('x'.repeat(60))).toHaveLength(40)
     expect(clientName('bad\nname')).toBe('bad name')
+  })
+
+  it('treats a name of only spaces and control characters as no name', () => {
+    // covers: Test-1361
+    expect(clientName('\u202E\u200B')).toBeUndefined()
+    expect(clientName('  ', 'codex_cli_rs/0.164.0')).toBe('Codex')
+    expect(clientName(' ftpb ')).toBe('ftpb')
   })
 })

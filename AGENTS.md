@@ -184,7 +184,8 @@ before running it; approval is left to the agent tool (Claude Code, Codex…).
   (`AgentDeps`) through `agentOps.ts` (connect, rename, delete, download/upload planning);
   `jobTracker.ts` remembers finished jobs for `wait_for_jobs`; `thumbnailPreviews.ts` keeps one
   preview queue per connection. Errors are `CODE: message next-step` isError results. A new tool
-  goes into `TOOLS`, the §2 table of the spec and Test-450 (`TOOL_COUNT` in `McpService.test.ts`).
+  goes into `TOOLS`, the §2 table of the spec, Test-450 (`TOOL_COUNT` in `McpService.test.ts`) and
+  an `agent.action.<name>` message in every locale (Test-1350).
 - Target connection (`agentTarget.ts`, multi-connection MC18): the remote tools and `disconnect`
   take an optional `server`; without it they use the connection the agent last connected or named
   while still connected, else the only one; none is `NOT_CONNECTED`, two or more `AMBIGUOUS`.
@@ -194,7 +195,8 @@ before running it; approval is left to the agent tool (Claude Code, Codex…).
 - Activity (spec `docs/handoff/agent-activity.md`): `agentActivity.ts` counts running tool calls and
   the transfers/deletes agents started, and sends `agent:activity`; `AgentActivityIndicator` shows
   a window glow and a pill whose stop (`agent:stop`) ends running calls with `STOPPED_BY_USER` and
-  cancels those jobs without turning MCP off. Settings › Agent access copies a Claude Code command,
+  cancels those jobs without turning MCP off; a stopped call checks `deps.stopped()` (`agentOps.ts`)
+  before every further LIST, server command or enqueue. Settings › Agent access copies a Claude Code command,
   a Codex `config.toml` snippet or `mcpServers` JSON (`McpService.ts` builders).
 - `ftpb` (`src/main/cli/`): a dependency-free MCP client of the same endpoint (one POST per request
   with the 2026-07-28 `_meta` envelope); always JSON; exit codes 0 ok, 1 tool error, 2 usage, 4 app

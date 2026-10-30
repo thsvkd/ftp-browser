@@ -563,6 +563,16 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                 <div
                   role="radiogroup"
                   aria-label={t('settings.mcpClient')}
+                  onKeyDown={(e) => {
+                    // 라디오 그룹은 탭 정지 하나에 화살표로 고른다(WAI-ARIA radio)
+                    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
+                    if (step === undefined) return
+                    e.preventDefault()
+                    const at = MCP_CLIENTS.findIndex(({ id }) => id === mcpClient)
+                    const next = (at + step + MCP_CLIENTS.length) % MCP_CLIENTS.length
+                    setMcpClient(MCP_CLIENTS[next].id)
+                    e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus()
+                  }}
                   className="mt-3 inline-flex rounded-md border border-[var(--bd2)] bg-[var(--sf)] p-0.5"
                 >
                   {MCP_CLIENTS.map(({ id, label }) => (
@@ -570,6 +580,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.JS
                       key={id}
                       role="radio"
                       aria-checked={mcpClient === id}
+                      tabIndex={mcpClient === id ? 0 : -1}
                       onClick={() => setMcpClient(id)}
                       className={`rounded px-3 py-1 text-sm ${mcpClient === id ? 'bg-[var(--acw)] text-[var(--tx)]' : 'text-[var(--mu)] hover:bg-[var(--hv)]'}`}
                     >

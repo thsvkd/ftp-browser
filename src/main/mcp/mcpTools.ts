@@ -584,7 +584,10 @@ export function createMcpToolServer(deps: McpToolDeps): McpServer {
         )
         const call = deps.activity?.begin(def.name, input, client)
         try {
-          const run = def.run(input, call ? { ...deps, track: call.track } : deps)
+          const run = def.run(
+            input,
+            call ? { ...deps, track: call.track, stopped: call.isStopped } : deps
+          )
           // 사용자가 중지하면 밑의 작업을 기다리지 않고 끝낸다(A5). run의 늦은 실패는 race가 받는다.
           const stopped = call?.stopped.then(() =>
             codedError(

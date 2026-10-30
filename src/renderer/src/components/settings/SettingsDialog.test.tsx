@@ -373,6 +373,27 @@ describe('SettingsDialog agent access (MCP)', () => {
     expect(document.body.textContent).not.toContain(token)
   })
 
+  it('moves through the client choices with arrow keys from a single tab stop', async () => {
+    // covers: Test-1366
+    serveMcpState(() => ({ enabled: true, running: true, url, command: 'claude mcp add …' }))
+    const user = userEvent.setup()
+    render(<SettingsDialog open={true} onClose={vi.fn()} />)
+    const radio = (name: string): HTMLElement => screen.getByRole('radio', { name })
+    await screen.findByRole('radio', { name: 'Claude Code' })
+    expect(['Claude Code', 'Codex', 'JSON'].map((n) => radio(n).tabIndex)).toEqual([0, -1, -1])
+
+    radio('Claude Code').focus()
+    await user.keyboard('{ArrowRight}')
+    expect(radio('Codex').getAttribute('aria-checked')).toBe('true')
+    expect(document.activeElement).toBe(radio('Codex'))
+    expect(['Claude Code', 'Codex', 'JSON'].map((n) => radio(n).tabIndex)).toEqual([-1, 0, -1])
+
+    await user.keyboard('{ArrowLeft}{ArrowLeft}')
+    expect(radio('JSON').getAttribute('aria-checked')).toBe('true')
+    expect(document.activeElement).toBe(radio('JSON'))
+    expect(screen.getByText(en['settings.mcpHintJson'])).not.toBeNull()
+  })
+
   it('shows an error toast when toggling or copying fails instead of failing silently', async () => {
     // covers: Test-294
     const command = 'claude mcp add …'
@@ -419,7 +440,7 @@ describe('SettingsDialog agent access (MCP)', () => {
     )
     await user.click(screen.getByRole('button', { name: 'Copy Claude Code command' }))
     await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith("Couldn't copy the command", {
+      expect(toast.error).toHaveBeenCalledWith("Couldn't copy to the clipboard", {
         description: 'Document is not focused.'
       })
     )

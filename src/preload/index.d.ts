@@ -58,6 +58,7 @@ type InvokeChannel =
   | 'mcp:setEnabled'
   | 'mcp:regenerateToken'
   | 'agent:stop'
+  | 'agent:getActivity'
 
 type EventChannel =
   | 'ftp:connectionStatus'

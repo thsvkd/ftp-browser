@@ -141,6 +141,16 @@ describe('preload api', () => {
     expect(callback).toHaveBeenCalledWith({ active: true })
   })
 
+  it('should allow reading the current agent activity', async () => {
+    // covers: Test-1357
+    const api = await loadExposedApi()
+    const invoke = api.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>
+
+    await invoke('agent:getActivity')
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('agent:getActivity')
+  })
+
   it('should allow asking how saved passwords are protected', async () => {
     // covers: Test-728
     // 렌더러 테스트는 window.api를 목으로 바꾸므로 허용 목록 누락은 여기서만 잡힌다.

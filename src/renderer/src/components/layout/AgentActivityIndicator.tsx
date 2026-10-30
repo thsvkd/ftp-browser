@@ -9,21 +9,30 @@ import type { AgentActivityEvent } from '@shared/types/mcp'
 export const AGENT_ACTIVITY_LINGER_MS = 30_000
 
 /**
- * 에이전트가 MCP로 앱을 쓰는 동안 창 가장자리 글로우와 툴바 아래 pill을 띄운다. pill의 [중지]는 에이전트의
+ * 에이전트가 MCP로 앱을 쓰는 동안 창 가장자리 글로우와 툴바 아래 pill을 띄운다. 활성 중에는 [중지]가 늘 닿도록
+ * 대화상자 위에, 남아 있는 30초 동안은 대화상자 아래에 둔다(A11). pill의 [중지]는 에이전트의
  * 호출과 남은 작업만 멈추고 MCP는 그대로 둔다(A5). 대상은 원격 이름일 수 있어 텍스트로만 그린다.
  */
 export function AgentActivityIndicator(): React.JSX.Element | null {
   const t = useT()
   const [event, setEvent] = useState<AgentActivityEvent | null>(null)
 
-  useEffect(
-    () =>
-      window.api.on('agent:activity', (...args) => {
-        const next = args[0] as AgentActivityEvent
-        setEvent(next.stopped ? null : next)
-      }),
-    []
-  )
+  useEffect(() => {
+    let heard = false
+    const off = window.api.on('agent:activity', (...args) => {
+      const next = args[0] as AgentActivityEvent
+      heard = true
+      setEvent(next.stopped ? null : next)
+    })
+    // 새로 고친 창은 지금 진행 중인 활동부터 그린다(A10). 그사이 온 이벤트가 더 새롭다.
+    void window.api
+      .invoke<IpcResult<AgentActivityEvent>>('agent:getActivity')
+      .then((result) => {
+        if (!heard && result?.success && result.data?.active) setEvent(result.data)
+      })
+      .catch(() => undefined)
+    return off
+  }, [])
 
   useEffect(() => {
     if (!event || event.active) return
@@ -58,10 +67,12 @@ export function AgentActivityIndicator(): React.JSX.Element | null {
       />
       <div
         role="status"
-        className="pop absolute left-1/2 top-[60px] z-[71] flex max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--agent)_45%,var(--bd))] bg-[var(--sf)] py-1 pl-3 pr-1 text-sm text-[var(--tx)] shadow-[var(--shadow)]"
+        className={`pop absolute left-1/2 top-[60px] flex ${event.active ? 'z-[71]' : 'z-40'} max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--agent)_45%,var(--bd))] bg-[var(--sf)] py-1 pl-3 pr-1 text-sm text-[var(--tx)] shadow-[var(--shadow)]`}
       >
         <Sparkles aria-hidden className="h-4 w-4 shrink-0 text-[var(--agent)]" />
-        <span className="shrink-0 font-medium">{t('agent.working', { client })}</span>
+        <span className="min-w-0 max-w-[14rem] truncate font-medium">
+          {t('agent.working', { client })}
+        </span>
         {detail && <span className="min-w-0 truncate text-[var(--mu)]">{detail}</span>}
         <button
           onClick={() => void stop()}
