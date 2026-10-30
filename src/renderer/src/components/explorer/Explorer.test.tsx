@@ -1554,6 +1554,22 @@ describe('Explorer — rename to a name that is already taken', () => {
     expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
   })
 
+  it('keeps editing when the window loses focus', async () => {
+    // covers: Test-1336
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('docs', { dir: true })] } })
+    await renderExplorer(remoteLoc(DIR))
+    const input = startRename()
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    onTestFinished(() => hasFocus.mockRestore())
+    for (const typed of ['docs', 'c.txt']) {
+      fireEvent.change(input, { target: { value: typed } })
+      fireEvent.blur(input)
+      await flush()
+      expect(screen.getByRole('textbox', { name: en['menu.newName'] })).toBe(input)
+    }
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+  })
+
   it('shows the warning as a described, click-through note scrolled into view', async () => {
     // covers: Test-1335
     const scroll = vi.fn()
@@ -1569,8 +1585,13 @@ describe('Explorer — rename to a name that is already taken', () => {
     expect(input.getAttribute('aria-describedby')).toBe(note.id)
     expect(note.className).toContain('pointer-events-none')
     expect(note.className).toContain('[overflow-wrap:anywhere]')
+    expect(note.className).toContain('min-w-[5rem]')
     expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
     expect(scroll.mock.contexts.at(-1)).toBe(note)
+    // 경고가 이어지는 동안 입력할 때마다 스크롤하지 않는다
+    fireEvent.change(input, { target: { value: 'docs ' } })
+    fireEvent.change(input, { target: { value: ' docs' } })
+    expect(scroll).toHaveBeenCalledTimes(1)
   })
 })
 
