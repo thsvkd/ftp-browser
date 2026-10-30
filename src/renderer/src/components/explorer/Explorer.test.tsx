@@ -1604,6 +1604,53 @@ describe('Explorer — rename to a name that is already taken', () => {
     expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
   })
 
+  it('keeps the new folder editor open when its own reload is superseded by another', async () => {
+    // covers: Test-1338
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const waits: Array<() => void> = []
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise((resolve) =>
+        waits.push(() => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    expect(waits).toHaveLength(1)
+    // mkdir 알림(ftp:remoteChanged)의 무효화가 두 번째 읽기를 시작해 첫 결과를 버리게 한다
+    act(() => useListingStore.getState().invalidate('remote', server(), DIR))
+    await act(async () => waits[0]())
+    await flush()
+    await act(async () => waits[1]())
+    await flush()
+
+    expect(within(option('New folder')).getByRole('textbox')).toBeTruthy()
+  })
+
+  it('closes a new folder editor that find hides and never reopens it', async () => {
+    // covers: Test-1339
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    await renderExplorer(remoteLoc(DIR))
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'jpg' }))
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:mkdir')).toHaveLength(1)
+
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: '' }))
+    await flush()
+    expect(option('New folder')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+  })
+
   it('shows the warning as a described, click-through note scrolled into view', async () => {
     // covers: Test-1335
     const scroll = vi.fn()
