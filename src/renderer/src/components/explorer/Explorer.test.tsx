@@ -1833,6 +1833,62 @@ describe('Explorer — rename to a name that is already taken', () => {
     expect(within(option('New folder')).queryByRole('textbox')).toBeNull()
   })
 
+  it('opens the new folder editor over a rename that scrolled out of view', async () => {
+    // covers: Test-1388
+    // 브라우저처럼 scrollTop은 내용에 맞춰 자르고, 가상화 목록은 scrollTo로 스크롤한다
+    const tops = new WeakMap<object, number>()
+    Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return tops.get(this) ?? 0
+      },
+      set(this: HTMLElement, v: number) {
+        const content =
+          parseFloat(
+            (this.firstElementChild?.firstElementChild as HTMLElement | null)?.style.height ?? ''
+          ) || 0
+        tops.set(this, Math.max(0, Math.min(v, content - this.clientHeight)))
+      }
+    })
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      value(this: HTMLElement, o: { top: number }) {
+        this.scrollTop = o.top
+      }
+    })
+    onTestFinished(() => {
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollTop')
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo')
+    })
+    const names = Array.from({ length: 200 }, (_, i) => `f${String(i).padStart(3, '0')}.jpg`)
+    await remoteFiles(names, { view: 'list' })
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    startRename('f000.jpg')
+    // 휠로 편집하던 행을 넘기면 입력이 사라진다(편집 상태는 남는다)
+    act(() => {
+      listbox().scrollTop = 4000
+      fireEvent.scroll(listbox())
+    })
+    await flush()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+
+    act(() => listbox().focus())
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    act(() => {
+      listbox().scrollTop = 0
+      fireEvent.scroll(listbox())
+    })
+    await flush()
+
+    expect(within(option('New folder')).getByRole('textbox')).toBeTruthy()
+    expect(within(option('f000.jpg')).queryByRole('textbox')).toBeNull()
+  })
+
   it('drops a waiting new folder editor when focus leaves the list before it appears', async () => {
     // covers: Test-1379
     h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })

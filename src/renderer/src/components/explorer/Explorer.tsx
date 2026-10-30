@@ -649,8 +649,10 @@ function TabExplorer({
     // 만드는 사이 다른 입력 칸으로 가서 치고 있으면 이름 입력을 열지 않는다(N11)
     if (typingElsewhere(document.activeElement)) return
     // 만들기 시작한 위치의 항목만 편집한다(그사이 다른 위치로 옮겼으면 N10이 닫는다). 그사이 사용자가 다른 항목의
-    // 이름 입력을 열었으면 그것을 덮지 않는다(N11).
-    setRenaming((cur) => cur ?? { key, path })
+    // 이름 입력을 열어 치고 있으면 그것을 덮지 않는다(N11). 스크롤로 사라진 편집은 덮는다.
+    const active = document.activeElement
+    const editing = isTyping(active) && !!scrollRef.current?.contains(active)
+    setRenaming((cur) => (cur && editing ? cur : { key, path }))
   }
 
   const copyPaths = (list: string[]): void => {
