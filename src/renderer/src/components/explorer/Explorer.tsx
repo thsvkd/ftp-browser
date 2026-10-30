@@ -355,6 +355,8 @@ function TabExplorer({
     return { ...f, visible: sortEntries(f.visible, tab.sort) }
   }, [base, tab.query, matcher, showHidden, tab.sort])
   const items = filtered.visible
+  // 이름 충돌은 가려진 항목까지 본다(rename-name-taken N2)
+  const folderNames = useMemo(() => new Set(base.map((e) => e.name)), [base])
   const paths = useMemo(() => items.map((e) => e.path), [items])
   const indexOf = useMemo(() => new Map(paths.map((p, i) => [p, i])), [paths])
   const files = useMemo(() => items.filter((e) => e.type === 'file'), [items])
@@ -863,6 +865,10 @@ function TabExplorer({
     selected: selSet.has(entry.path),
     shelved: shelved.has(locKey(entry)),
     renaming: renaming === entry.path,
+    nameTaken: (name) => {
+      const next = name.trim()
+      return next !== entry.name && folderNames.has(next)
+    },
     onSelect: (e, it) => patch(clickSelect(selection, paths, it.path, e, currentPlatform())),
     onToggle: (it) => patch(toggleSelect(selection, it.path)),
     onOpen: open,

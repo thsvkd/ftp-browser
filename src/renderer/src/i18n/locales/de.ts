@@ -130,6 +130,7 @@ export const de = {
   'menu.properties': 'Eigenschaften',
   'menu.newName': 'Neuer Name',
 
+  'name.taken': 'Eine Datei oder ein Ordner mit diesem Namen ist bereits vorhanden.',
   'name.invalidLocal': 'Ein Name darf weder \\ / noch : enthalten und nicht „.“ oder „..“ lauten.',
   'name.invalidRemote': 'Ein Name darf kein / enthalten und nicht „.“ oder „..“ lauten.',
 

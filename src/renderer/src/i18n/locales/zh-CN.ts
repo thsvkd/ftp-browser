@@ -116,6 +116,7 @@ export const zhCN = {
   'menu.properties': '属性',
   'menu.newName': '新名称',
 
+  'name.taken': '已存在同名的文件或文件夹。',
   'name.invalidLocal': '名称不能包含 \\ / 或 :，也不能是“.”或“..”。',
   'name.invalidRemote': '名称不能包含 /，也不能是“.”或“..”。',
 

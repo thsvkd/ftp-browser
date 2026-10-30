@@ -1448,6 +1448,101 @@ describe('Explorer — local rename and delete (migrated)', () => {
   })
 })
 
+// ---------- 이미 있는 이름 경고(rename-name-taken N1~N5) ----------
+
+describe('Explorer — rename to a name that is already taken', () => {
+  const startRename = (): HTMLElement => {
+    fireEvent.contextMenu(option('a.txt'))
+    fireEvent.click(screen.getByRole('menuitem', { name: en['menu.rename'] }))
+    return screen.getByRole('textbox', { name: en['menu.newName'] })
+  }
+  const warning = (): HTMLElement | null => screen.queryByRole('alert')
+
+  it.each([
+    [
+      'remote',
+      async (): Promise<void> => {
+        h = setupExplorer({
+          remote: { [DIR]: [ftp('a.txt'), ftp('b.txt'), ftp('docs', { dir: true })] }
+        })
+        await renderExplorer(remoteLoc(DIR))
+      }
+    ],
+    [
+      'local',
+      async (): Promise<void> => {
+        h = setupExplorer({
+          local: {
+            [LDIR]: [local(LDIR, 'a.txt'), local(LDIR, 'b.txt'), local(LDIR, 'docs', { dir: true })]
+          }
+        })
+        await renderExplorer(localLoc(LDIR))
+      }
+    ]
+  ] as const)('warns on %s as soon as the name matches another item', async (_side, open) => {
+    // covers: Test-1330
+    await open()
+    const input = startRename()
+    expect(warning()).toBeNull()
+    for (const taken of ['b.txt', 'docs', ' docs ']) {
+      fireEvent.change(input, { target: { value: taken } })
+      expect(warning()).not.toBeNull()
+      expect(warning()?.textContent).toBe(en['name.taken'])
+      expect(input.getAttribute('aria-invalid')).toBe('true')
+    }
+    for (const free of ['c.txt', 'a.txt']) {
+      fireEvent.change(input, { target: { value: free } })
+      expect(warning()).toBeNull()
+      expect(input.getAttribute('aria-invalid')).toBe('false')
+    }
+  })
+
+  describe('on a remote folder', () => {
+    beforeEach(async () => {
+      h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('docs', { dir: true })] } })
+      await renderExplorer(remoteLoc(DIR))
+    })
+
+    it('keeps editing on Enter without sending the rename', async () => {
+      // covers: Test-1331
+      const input = startRename()
+      fireEvent.change(input, { target: { value: 'docs' } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+      await flush()
+      expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+      expect(screen.getByRole('textbox', { name: en['menu.newName'] })).toBe(input)
+      expect(warning()).not.toBeNull()
+    })
+
+    it('cancels on blur without IPC or an error toast', async () => {
+      // covers: Test-1332
+      const input = startRename()
+      fireEvent.change(input, { target: { value: 'docs' } })
+      fireEvent.blur(input)
+      await flush()
+      expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+      expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+      expect(toastError).not.toHaveBeenCalled()
+      expect(option('a.txt')).toBeTruthy()
+    })
+  })
+
+  it('counts items hidden by the hidden-files setting and by find', async () => {
+    // covers: Test-1333
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('.secret'), ftp('notes.md')] } })
+    await renderExplorer(remoteLoc(DIR))
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'a' }))
+    expect(screen.queryByRole('option', { name: /notes\.md/ })).toBeNull()
+    expect(screen.queryByRole('option', { name: /\.secret/ })).toBeNull()
+    const input = startRename()
+    for (const taken of ['.secret', 'notes.md']) {
+      fireEvent.change(input, { target: { value: taken } })
+      expect(warning()).not.toBeNull()
+      expect(warning()?.textContent).toBe(en['name.taken'])
+    }
+  })
+})
+
 // ---------- 선택 = 포커스(explorer-menu-and-focus F1~F10) ----------
 
 const activeId = (): string | null => listbox().getAttribute('aria-activedescendant')

@@ -1,20 +1,28 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useT } from '@renderer/i18n'
+import { cn } from '@renderer/lib/utils'
 
 /**
  * 타일·행 안의 이름 입력(D21). 확장자 앞까지 골라 둔다. Enter·바깥 클릭은 제출, Esc는 취소(null).
  * 키·마우스 이벤트는 목록까지 올라가지 않는다(입력해서 고르기·마퀴·끌기와 겹치지 않게).
+ * `taken`이 참인 이름은 입력하는 즉시 경고하고, Enter는 제출하지 않으며 바깥 클릭은 취소다(rename-name-taken N1·N3·N4).
  */
 export function InlineRename({
   initial,
+  taken,
   onDone
 }: {
   initial: string
+  taken: (name: string) => boolean
   onDone: (name: string | null) => void
 }): React.JSX.Element {
   const t = useT()
   const ref = useRef<HTMLInputElement>(null)
   const done = useRef(false)
+  // 편집 중에 목록이 바뀌어도 경고와 Enter·blur 판정이 같은 값을 보도록 렌더마다 다시 잰다
+  const [value, setValue] = useState(initial)
+  const dup = taken(value)
+  const warnId = useId()
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -29,23 +37,40 @@ export function InlineRename({
   }
   const stop = (e: React.SyntheticEvent): void => e.stopPropagation()
   return (
-    <input
-      ref={ref}
-      defaultValue={initial}
-      aria-label={t('menu.newName')}
-      spellCheck={false}
-      onKeyDown={(e) => {
-        e.stopPropagation()
-        if (e.key === 'Enter') finish(e.currentTarget.value)
-        if (e.key === 'Escape') finish(null)
-      }}
-      onBlur={(e) => finish(e.currentTarget.value)}
-      onClick={stop}
-      onDoubleClick={stop}
-      onMouseDown={stop}
-      onPointerDown={stop}
-      onContextMenu={stop}
-      className="h-6 w-full min-w-0 rounded-md border border-[var(--ac)] bg-[var(--sf)] px-1.5 text-[13px] text-[var(--tx)] shadow-[0_0_0_3px_var(--acw)] outline-none"
-    />
+    <span className="relative block w-full min-w-0">
+      <input
+        ref={ref}
+        defaultValue={initial}
+        aria-label={t('menu.newName')}
+        aria-invalid={dup}
+        aria-describedby={dup ? warnId : undefined}
+        spellCheck={false}
+        onChange={(e) => setValue(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          if (e.key === 'Enter' && !dup) finish(e.currentTarget.value)
+          if (e.key === 'Escape') finish(null)
+        }}
+        onBlur={(e) => finish(dup ? null : e.currentTarget.value)}
+        onClick={stop}
+        onDoubleClick={stop}
+        onMouseDown={stop}
+        onPointerDown={stop}
+        onContextMenu={stop}
+        className={cn(
+          'h-6 w-full min-w-0 rounded-md border border-[var(--ac)] bg-[var(--sf)] px-1.5 text-[13px] text-[var(--tx)] shadow-[0_0_0_3px_var(--acw)] outline-none',
+          dup && 'border-[var(--dg)] shadow-[0_0_0_3px_var(--dgw)]'
+        )}
+      />
+      {dup && (
+        <span
+          id={warnId}
+          role="alert"
+          className="absolute inset-x-0 top-full z-20 mt-1 break-keep rounded-md bg-[var(--dg)] px-2 py-1 text-[11px] font-semibold leading-4 text-white shadow-md"
+        >
+          {t('name.taken')}
+        </span>
+      )}
+    </span>
   )
 }

@@ -84,7 +84,11 @@ export function Tile(
       </div>
       <div className="min-w-0 px-1.5 pt-1.5">
         {p.renaming ? (
-          <InlineRename initial={entry.name} onDone={(n) => p.onRename(entry, n)} />
+          <InlineRename
+            initial={entry.name}
+            taken={p.nameTaken}
+            onDone={(n) => p.onRename(entry, n)}
+          />
         ) : (
           <div className="truncate text-[13px] font-semibold leading-5">{entry.name}</div>
         )}

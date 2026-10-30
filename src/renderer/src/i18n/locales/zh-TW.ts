@@ -116,6 +116,7 @@ export const zhTW = {
   'menu.properties': '內容',
   'menu.newName': '新名稱',
 
+  'name.taken': '已有同名的檔案或資料夾。',
   'name.invalidLocal': '名稱不能包含 \\ / 或 :，也不能是「.」或「..」。',
   'name.invalidRemote': '名稱不能包含 /，也不能是「.」或「..」。',
 

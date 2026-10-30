@@ -129,6 +129,7 @@ export const es = {
   'menu.properties': 'Propiedades',
   'menu.newName': 'Nuevo nombre',
 
+  'name.taken': 'Ya existe un archivo o una carpeta con este nombre.',
   'name.invalidLocal': 'Un nombre no puede contener \\ / ni :, ni ser “.” o “..”.',
   'name.invalidRemote': 'Un nombre no puede contener /, ni ser “.” o “..”.',
 
