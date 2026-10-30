@@ -1646,7 +1646,70 @@ describe('Explorer — rename to a name that is already taken', () => {
 
     expect(option('a.txt')).toBeTruthy()
     expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+
+    // 처음 위치로 돌아와도 편집은 다시 열리지 않는다
+    act(() => useTabsStore.getState().navigate(remoteLoc(DIR)))
+    await flush()
+    await flush()
+    expect(option('a.txt')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
     expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+  })
+
+  it('offers no rename for the old listing shown while a new location loads', async () => {
+    // covers: Test-1382
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('b.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const staging = connKey('staging.org', 21, '')
+    setConnection(staging, 'connected')
+    h.handlers['ftp:list'] = () => new Promise(() => undefined)
+    act(() => useTabsStore.getState().navigate({ side: 'remote', path: DIR, server: staging }))
+    await flush()
+
+    key('ArrowRight')
+    key('F10', { shiftKey: true })
+    const rename = screen.getByRole('menuitem', { name: new RegExp(en['menu.rename']) })
+    expect(rename.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(rename)
+    key('F2')
+    await flush()
+
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+  })
+
+  it('keeps a waiting new folder editor when focus stays in the pane or comes back from another app', async () => {
+    // covers: Test-1383
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const waits: Array<() => void> = []
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise((resolve) =>
+        waits.push(() => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    // 포커스가 탐색기 밖(다른 패널의 버튼 등)에 있는 채 새 폴더를 만든다
+    const outside = document.createElement('button')
+    document.body.append(outside)
+    onTestFinished(() => outside.remove())
+    act(() => outside.focus())
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    act(() => useListingStore.getState().invalidate('remote', server(), DIR))
+    await act(async () => waits[0]())
+    await flush()
+    // 다른 앱에 다녀오면 포커스가 있던 그 요소에 focusin이 다시 온다
+    fireEvent.focusIn(outside)
+    // 탐색기 안에서 옮기는 것도 떠난 것이 아니다
+    act(() => option('a.txt').focus())
+    await act(async () => waits[1]())
+    await flush()
+
+    expect(within(option('New folder')).getByRole('textbox')).toBeTruthy()
   })
 
   it('drops a waiting new folder editor when focus leaves the list before it appears', async () => {

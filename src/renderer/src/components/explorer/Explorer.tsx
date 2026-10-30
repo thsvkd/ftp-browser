@@ -495,22 +495,27 @@ function TabExplorer({
   // 찾기 칸의 열림. Ctrl+F가 연다. 찾기가 ⋯에 접혀도 막대가 칸을 그린다(explorer-ux-polish X7).
   const [searchOpen, setSearchOpen] = useState(false)
   const refocus = (): void => scrollRef.current?.focus({ preventScroll: true })
+  const paneRef = useRef<HTMLElement>(null)
   // 편집하던 항목이 보이는 목록에서 사라지면(다른 위치로 이동, 다른 클라이언트의 삭제·이름 변경, 목록 오류, 찾기·필터에
   // 가려짐) 편집을 닫는다. 창이 비활성이라 편집이 열린 채 남아 있던 사이에도 생긴다. 같은 위치의 목록을 다시 읽는
   // 중에는 기다린다: 새 폴더를 만든 뒤 자기 목록 읽기가 다른 읽기에 밀리면 옛 목록이 잠시 남는다(rename-name-taken N10).
   const settling = mode === 'live' && !!listing?.refreshing
-  const renameHere = renaming?.key === key
+  // pending은 새 위치로 가는 중에 옛 목록을 보이는 것이라 그 항목은 이 위치의 것이 아니다(N11)
+  const renameHere = renaming?.key === key && interactive
   const waitingRow = !!renaming && renameHere && settling && !indexOf.has(renaming.path)
   useEffect(() => {
     if (!renaming || (renameHere && (settling || indexOf.has(renaming.path)))) return
     setRenaming(null)
     if (document.activeElement === document.body) refocus()
   }, [renaming, renameHere, settling, indexOf])
-  // 기다리는 동안 사용자가 목록 밖(찾기 칸 등)으로 포커스를 옮기면, 늦게 열린 입력이 포커스를 빼앗지 않게 취소한다
+  // 기다리는 동안 사용자가 이 창 밖(찾기 칸 등)으로 포커스를 옮기면, 늦게 열린 입력이 포커스를 빼앗지 않게 취소한다.
+  // 다른 앱에 다녀와 같은 요소로 포커스가 돌아온 것은 옮긴 것이 아니다(N9).
   useEffect(() => {
     if (!waitingRow) return
+    const before = document.activeElement
     const onFocusIn = (e: FocusEvent): void => {
-      if (!scrollRef.current?.contains(e.target as Node)) setRenaming(null)
+      if (e.target === before || paneRef.current?.contains(e.target as Node)) return
+      setRenaming(null)
     }
     document.addEventListener('focusin', onFocusIn)
     return () => document.removeEventListener('focusin', onFocusIn)
@@ -592,9 +597,11 @@ function TabExplorer({
     if (!next || next === entry.name || !validName(next)) return
     const target = joinPath(entry.side, parentPath(entry.side, entry.path) ?? loc.path, next)
     try {
-      const r = remote
-        ? await window.api.invoke<IpcResult<void>>('ftp:rename', loc.server, entry.path, target)
-        : await window.api.invoke<IpcResult<void>>('local:rename', entry.path, target)
+      // 지금 탭의 위치가 아니라 그 항목이 나온 곳으로 보낸다(N11)
+      const r =
+        entry.side === 'remote'
+          ? await window.api.invoke<IpcResult<void>>('ftp:rename', entry.server, entry.path, target)
+          : await window.api.invoke<IpcResult<void>>('local:rename', entry.path, target)
       if (r.success) {
         unshelve([entry])
         selectOnly(target)
@@ -697,8 +704,8 @@ function TabExplorer({
         label: t('menu.rename'),
         icon: Pencil,
         shortcut: 'F2',
-        disabled: !one,
-        onSelect: () => one && setRenaming({ key, path: one.path })
+        disabled: !one || !interactive,
+        onSelect: () => one && interactive && setRenaming({ key, path: one.path })
       },
       {
         label: t('menu.copyPath'),
@@ -929,6 +936,7 @@ function TabExplorer({
 
   return (
     <section
+      ref={paneRef}
       role="region"
       aria-label={
         split
