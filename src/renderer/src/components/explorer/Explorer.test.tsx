@@ -1806,6 +1806,33 @@ describe('Explorer — rename to a name that is already taken', () => {
     expect(document.activeElement).toBe(find)
   })
 
+  it('leaves a rename the user opened meanwhile instead of replacing it with the new folder', async () => {
+    // covers: Test-1387
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    let listed = (): void => undefined
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise(
+        (resolve) =>
+          (listed = () => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    // 새 폴더의 목록이 오기 전에 a.txt의 이름을 바꾸기 시작한다
+    const input = startRename()
+    fireEvent.change(input, { target: { value: 'half-typed' } })
+    await act(async () => listed())
+    await flush()
+
+    expect(within(option('a.txt')).getByRole('textbox')).toBe(input)
+    expect((input as HTMLInputElement).value).toBe('half-typed')
+    expect(within(option('New folder')).queryByRole('textbox')).toBeNull()
+  })
+
   it('drops a waiting new folder editor when focus leaves the list before it appears', async () => {
     // covers: Test-1379
     h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
