@@ -10,13 +10,16 @@ export const AGENT_ACTIVITY_LINGER_MS = 30_000
 
 /**
  * 에이전트가 MCP로 앱을 쓰는 동안 창 가장자리 글로우와 툴바 아래 pill을 띄운다. 활성 중에는 [중지]가 늘 닿도록
- * 대화상자 위에 두고, 남아 있는 30초 동안과 중지 뒤 기다리는 동안은 [중지]를 끈 채 그 아래에 둔다(A11·A13). pill의
+ * 대화상자 위에 두고, 남아 있는 30초 동안과 중지 뒤 기다리는 동안은 [중지]를 끈 채 그 아래에 둔다(A11·A13·A14). pill의
  * [중지]는 에이전트의 호출과 남은 작업만 멈추고 MCP는 그대로 둔다(A5). 대상은 원격 이름일 수 있어 텍스트로만 그린다.
  */
 export function AgentActivityIndicator(): React.JSX.Element | null {
   const t = useT()
   const [event, setEvent] = useState<AgentActivityEvent | null>(null)
-  /** [중지]에 오기 전에 포커스가 있던 곳. pill이 사라지며 포커스를 잃으면 그리로 돌려준다(A13). */
+  /**
+   * [중지]에 오기 전에 포커스가 있던 곳. [중지]에 포커스가 있는 채 pill이 사라지면 그리로 돌려준다. 사용자가 [중지]를
+   * 떠나면 잊는다(A14).
+   */
   const returnTo = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
@@ -49,7 +52,15 @@ export function AgentActivityIndicator(): React.JSX.Element | null {
     if (el?.isConnected && document.activeElement === document.body) el.focus()
   }, [event])
 
-  if (!event) return null
+  // live region은 늘 두고 글만 바꾼다: 글을 가진 채 새로 들어온 영역은 읽지 않는 스크린 리더가 있다(A14)
+  const client = event?.client ?? t('agent.unknownClient')
+  const announce = event ? t(event.stopping ? 'agent.stopped' : 'agent.working', { client }) : ''
+  const status = (
+    <span role="status" className="sr-only">
+      {announce}
+    </span>
+  )
+  if (!event) return status
 
   const stop = async (): Promise<void> => {
     try {
@@ -62,16 +73,16 @@ export function AgentActivityIndicator(): React.JSX.Element | null {
     }
   }
 
-  const client = event.client ?? t('agent.unknownClient')
   const action = event.tool && t(`agent.action.${event.tool}` as MessageKey)
   const detail = [action, event.target].filter(Boolean).join(' · ')
 
   // 남아 있는 동안과 중지 뒤 취소할 수 없는 전송을 기다리는 동안은 멈출 것이 없다: [중지]를 끄고(포커스는 남긴다)
-  // 대화상자·팝오버 아래에 두며 클릭을 통과시킨다(A11·A13)
+  // 대화상자·팝오버 아래에 두며 클릭을 통과시킨다(A11·A13·A14)
   const passive = !event.active || !!event.stopping
 
   return (
     <>
+      {status}
       <div
         data-agent-glow
         data-active={event.active && !event.stopping}
@@ -83,9 +94,9 @@ export function AgentActivityIndicator(): React.JSX.Element | null {
         className={`pop absolute left-1/2 top-[60px] flex ${passive ? 'pointer-events-none z-40' : 'z-[71]'} max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--agent)_45%,var(--bd))] bg-[var(--sf)] py-1 pl-3 pr-1 text-sm text-[var(--tx)] shadow-[var(--shadow)]`}
       >
         <Sparkles aria-hidden className="h-4 w-4 shrink-0 text-[var(--agent)]" />
-        {/* 호출마다 바뀌는 동작·대상은 읽지 않고, 일하는 중·중지됨만 알린다 */}
-        <span role="status" className="min-w-0 max-w-[14rem] truncate font-medium">
-          {t(event.stopping ? 'agent.stopped' : 'agent.working', { client })}
+        {/* 호출마다 바뀌는 동작·대상은 읽지 않고, 일하는 중·중지됨만 알린다(위의 status) */}
+        <span aria-hidden className="min-w-0 max-w-[14rem] truncate font-medium">
+          {announce}
         </span>
         {event.stopping ? (
           <span className="min-w-0 truncate text-[var(--mu)]">{t('agent.stoppingDetail')}</span>
@@ -95,8 +106,9 @@ export function AgentActivityIndicator(): React.JSX.Element | null {
         <button
           onClick={() => !passive && void stop()}
           onFocus={(e) => {
-            if (e.relatedTarget instanceof HTMLElement) returnTo.current = e.relatedTarget
+            returnTo.current = e.relatedTarget instanceof HTMLElement ? e.relatedTarget : null
           }}
+          onBlur={() => (returnTo.current = null)}
           aria-label={t('agent.stopLabel')}
           aria-disabled={passive}
           className={`shrink-0 rounded-full border border-[var(--bd2)] px-2.5 py-0.5 text-xs ${passive ? 'opacity-50' : 'hover:bg-[var(--hv)]'}`}

@@ -36,6 +36,7 @@ function emit(event: AgentActivityEvent): void {
 
 const glow = (): Element | null => document.querySelector('[data-agent-glow]')
 const pill = (): HTMLElement => document.querySelector('[data-agent-pill]') as HTMLElement
+const shown = (): boolean => document.querySelector('[data-agent-pill]') !== null
 const stopButton = (): HTMLElement | null =>
   screen.queryByRole('button', { name: 'Stop all agents' })
 
@@ -44,7 +45,9 @@ describe('AgentActivityIndicator', () => {
     // covers: Test-1351
     vi.useFakeTimers()
     render(<AgentActivityIndicator />)
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(shown()).toBe(false)
+    // live region은 처음부터 비어 있는 채로 있다
+    expect(screen.getByRole('status').textContent).toBe('')
     expect(glow()).toBeNull()
 
     emit({ active: true, client: 'Codex', tool: 'list_directory', target: '/photos' })
@@ -57,9 +60,9 @@ describe('AgentActivityIndicator', () => {
     // 호출 사이: 남아 있다가 사라진다
     emit({ active: false, client: 'Codex', tool: 'list_directory', target: '/photos' })
     act(() => vi.advanceTimersByTime(AGENT_ACTIVITY_LINGER_MS - 1))
-    expect(screen.queryByRole('status')).not.toBeNull()
+    expect(shown()).toBe(true)
     act(() => vi.advanceTimersByTime(1))
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(shown()).toBe(false)
     expect(glow()).toBeNull()
   })
 
@@ -72,7 +75,7 @@ describe('AgentActivityIndicator', () => {
     expect(pill().textContent).toContain('Deleting')
 
     emit({ active: false, stopped: true, tool: 'delete' })
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(shown()).toBe(false)
   })
 
   it('stops the agent from the pill and reports a failed stop', async () => {
@@ -105,10 +108,7 @@ describe('AgentActivityIndicator', () => {
     )
     render(<AgentActivityIndicator />)
 
-    expect(await screen.findByRole('status')).toHaveProperty(
-      'textContent',
-      expect.stringContaining('Codex is working')
-    )
+    await vi.waitFor(() => expect(screen.getByRole('status').textContent).toBe('Codex is working'))
     expect(invokeCalls(mockInvoke, 'agent:getActivity')).toHaveLength(1)
   })
 
@@ -123,13 +123,13 @@ describe('AgentActivityIndicator', () => {
     render(<AgentActivityIndicator />)
     emit({ active: false, stopped: true })
     await act(async () => answer({ success: true, data: { active: true, tool: 'delete' } }))
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(shown()).toBe(false)
 
     cleanup()
     mockInvoke.mockResolvedValue({ success: true, data: { active: false, tool: 'delete' } })
     render(<AgentActivityIndicator />)
     await act(async () => undefined)
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(shown()).toBe(false)
   })
 
   it('stops pulsing and drops below dialogs while it lingers, and a new call keeps it up', () => {
@@ -151,7 +151,7 @@ describe('AgentActivityIndicator', () => {
 
     emit({ active: true, tool: 'download' })
     act(() => vi.advanceTimersByTime(AGENT_ACTIVITY_LINGER_MS * 2))
-    expect(screen.queryByRole('status')).not.toBeNull()
+    expect(shown()).toBe(true)
     expect(pill().className).toContain('z-[71]')
     expect(stopButton()?.getAttribute('aria-disabled')).toBe('false')
   })
@@ -181,7 +181,8 @@ describe('AgentActivityIndicator', () => {
     // covers: Test-1365
     render(<AgentActivityIndicator />)
     emit({ active: true, client: '﷽'.repeat(40), tool: 'download' })
-    const name = screen.getByText(/is working/)
+    const name = pill().querySelector('[aria-hidden]:not(svg)') as HTMLElement
+    expect(name.textContent).toContain('is working')
     expect(name.className).toContain('truncate')
     expect(name.className).toContain('max-w-[14rem]')
     expect(name.className).not.toContain('shrink-0')
@@ -202,7 +203,26 @@ describe('AgentActivityIndicator', () => {
     await act(async () => undefined)
     emit({ active: false, stopped: true })
 
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(shown()).toBe(false)
     expect(document.activeElement).toBe(outside)
+  })
+
+  it('leaves focus alone when the user already left Stop before the pill closes', () => {
+    // covers: Test-1381
+    const outside = document.createElement('button')
+    document.body.append(outside)
+    onTestFinished(() => outside.remove())
+    render(<AgentActivityIndicator />)
+    emit({ active: true, client: 'Codex', tool: 'download' })
+    outside.focus()
+    stopButton()!.focus()
+    // 포커스할 수 없는 빈 곳을 눌러 [중지]를 떠난다
+    act(() => stopButton()!.blur())
+    expect(document.activeElement).toBe(document.body)
+
+    emit({ active: false, stopped: true })
+
+    expect(shown()).toBe(false)
+    expect(document.activeElement).toBe(document.body)
   })
 })

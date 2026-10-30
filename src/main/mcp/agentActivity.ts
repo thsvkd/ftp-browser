@@ -84,7 +84,7 @@ export function createAgentActivity(
   let latest: AgentActivityEvent = { active: false }
   /**
    * 중지했지만 취소가 듣지 않은 전송(메인 연결로 도는 것). 끝날 때까지 표시를 `stopping`으로 남기고, 재시도로
-   * 대기에 돌아오면 그때 취소한다(A8·A13). 추적이 끝나면(`jobs`에서 빠지면) 함께 잊는다.
+   * 대기에 돌아오면 그때 취소한다(A8·A13·A14). 추적이 끝나면(`jobs`에서 빠지면) 함께 잊는다.
    */
   const stoppedJobs = new Set<string>()
 
@@ -122,8 +122,12 @@ export function createAgentActivity(
     }
   }
 
-  /** 호출 없이 중지가 취소하지 못한 전송만 남아 기다리는 중이다 */
-  const stopping = (): boolean => calls.size === 0 && [...jobs].some((id) => stoppedJobs.has(id))
+  /**
+   * 호출 없이 중지가 취소하지 못한 전송만 남아 기다리는 중이다. 그 뒤에 시작한 작업이 하나라도 남아 있으면 그것을
+   * 멈출 수 있어야 하므로 아니다(A14).
+   */
+  const stopping = (): boolean =>
+    calls.size === 0 && jobs.size > 0 && [...jobs].every((id) => stoppedJobs.has(id))
 
   const publish = (extra: Partial<AgentActivityEvent> = {}): void => {
     active = calls.size > 0 || jobs.size > 0

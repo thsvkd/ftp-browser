@@ -137,7 +137,7 @@ function sessionPreviewer(
           outcomes.push(CONNECTION_CHANGED)
           continue
         }
-        // 사용자가 그 에이전트 호출을 중지했으면 남은 파일을 받지 않는다(agent-activity A13)
+        // 사용자가 그 에이전트 호출을 중지했으면 남은 파일을 받지 않는다(agent-activity A14)
         if (isStopped()) {
           outcomes.push(STOPPED)
           continue

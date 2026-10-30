@@ -38,7 +38,7 @@ export async function ensureRemoteDir(
   const segments = remotePath.split('/').filter(Boolean)
   let current = ''
   for (const segment of segments) {
-    // 사용자가 그 에이전트 호출을 중지했으면 남은 단계를 만들지 않는다(agent-activity A13)
+    // 사용자가 그 에이전트 호출을 중지했으면 남은 단계를 만들지 않는다(agent-activity A14)
     if (isCancelled()) return
     current += `/${segment}`
     await client.sendIgnoringError(`MKD ${current}`)

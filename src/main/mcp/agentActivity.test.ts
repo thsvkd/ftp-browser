@@ -395,6 +395,49 @@ describe('agent activity', () => {
     expect(h.deps.target.last).toBeUndefined()
   })
 
+  it('a connect stopped while a folder listing succeeds still moves neither the GUI nor the target', async () => {
+    // covers: Test-1376
+    const id = addServer(h.db, { name: 'Other', host: 'other.lan', user: 'u' })
+    const other = h.connections.add('u@other.lan:21').setOffline()
+    let done = (): void => undefined
+    other.list.mockImplementationOnce(
+      () => new Promise((resolve) => (done = () => resolve({ path: '/', entries: [] })))
+    )
+    const pending = call(client, 'connect', { server: id })
+    await vi.waitFor(() => expect(other.list).toHaveBeenCalled())
+
+    h.deps.activity!.stop()
+    expect(textOf(await pending)).toMatch(/^STOPPED_BY_USER/)
+    done()
+    await settle()
+
+    expect(h.sessions).not.toHaveBeenCalled()
+    expect(h.deps.target.last).toBeUndefined()
+  })
+
+  it('keeps Stop usable for work started after a stop while an uncancellable transfer runs', async () => {
+    // covers: Test-1380
+    h.remote.addFile('/a.txt', 3).addFile('/b.txt', 3)
+    const a = dataOf<{ jobId: string }>(
+      await call(client, 'download', { remotePaths: ['/a.txt'], localDir: tmp })
+    ).jobId
+    h.queue.jobs.find((job) => job.id === a)!.status = 'active'
+    h.queue.mainClient.add(a)
+    h.deps.activity!.stop()
+    expect(last()?.stopping).toBe(true)
+
+    const b = dataOf<{ jobId: string }>(
+      await call(client, 'download', { remotePaths: ['/b.txt'], localDir: tmp })
+    ).jobId
+    expect(last()).toMatchObject({ active: true, tool: 'download', target: '/b.txt' })
+    expect(last()?.stopping).toBeUndefined()
+
+    h.queue.finish(b, 'completed')
+    expect(last()).toMatchObject({ active: true, stopping: true })
+    h.queue.finish(a, 'completed')
+    expect(last()).toMatchObject({ active: false, stopped: true })
+  })
+
   it('names the event after the client in the request envelope', async () => {
     // covers: Test-1362
     // ftpb처럼 initialize 없이 2026-07-28 `_meta` envelope 하나로 부른다

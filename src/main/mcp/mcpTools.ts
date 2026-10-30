@@ -25,8 +25,10 @@ export type PreviewOutcome =
 /** 도구가 쓰는 것. 요청마다 새 McpServer가 같은 deps를 공유한다. */
 export interface McpToolDeps extends ops.AgentDeps {
   version: string
-  /** 그 연결에서 앱 썸네일 파이프라인으로 미리보기를 만든다. 결과는 요청과 같은 순서다. */
-  /** `isStopped`가 참이 되면 남은 요청을 받지 않는다(A13) */
+  /**
+   * 그 연결에서 앱 썸네일 파이프라인으로 미리보기를 만든다. 결과는 요청과 같은 순서다. `isStopped`가 참이 되면
+   * 남은 요청을 받지 않는다(A14).
+   */
   previews(
     conn: ConnKey,
     requests: PreviewRequest[],
