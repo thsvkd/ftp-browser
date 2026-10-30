@@ -508,14 +508,23 @@ function TabExplorer({
     setRenaming(null)
     if (document.activeElement === document.body) refocus()
   }, [renaming, renameHere, settling, indexOf])
-  // 기다리는 동안 사용자가 이 창 밖(찾기 칸 등)으로 포커스를 옮기면, 늦게 열린 입력이 포커스를 빼앗지 않게 취소한다.
-  // 다른 앱에 다녀와 같은 요소로 포커스가 돌아온 것은 옮긴 것이 아니다(N9).
+  // 기다리는 동안 사용자가 목록 밖의 입력 칸(찾기·경로 칸 등)이나 이 탐색기 밖으로 포커스를 옮기면, 늦게 열린 입력이
+  // 포커스와 치던 글자를 빼앗지 않게 취소한다. 다른 앱에 다녀와 같은 요소로 포커스가 돌아온 것은 옮긴 것이 아니다(N9·N11).
   useEffect(() => {
     if (!waitingRow) return
     const before = document.activeElement
-    const onFocusIn = (e: FocusEvent): void => {
-      if (e.target === before || paneRef.current?.contains(e.target as Node)) return
+    const leaves = (target: EventTarget | null): boolean => {
+      if (!(target instanceof Element) || scrollRef.current?.contains(target)) return false
+      if (target.matches('input, textarea, select, [contenteditable="true"]')) return true
+      return target !== before && !paneRef.current?.contains(target)
+    }
+    // 이미 다른 입력 칸에서 치고 있으면 기다리지 않는다
+    if (leaves(before)) {
       setRenaming(null)
+      return
+    }
+    const onFocusIn = (e: FocusEvent): void => {
+      if (leaves(e.target)) setRenaming(null)
     }
     document.addEventListener('focusin', onFocusIn)
     return () => document.removeEventListener('focusin', onFocusIn)

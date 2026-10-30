@@ -1704,12 +1704,75 @@ describe('Explorer — rename to a name that is already taken', () => {
     await flush()
     // 다른 앱에 다녀오면 포커스가 있던 그 요소에 focusin이 다시 온다
     fireEvent.focusIn(outside)
-    // 탐색기 안에서 옮기는 것도 떠난 것이 아니다
-    act(() => option('a.txt').focus())
+    // 탐색기 목록 안으로 옮기는 것도 떠난 것이 아니다
+    act(() => listbox().focus())
+    expect(document.activeElement).toBe(listbox())
     await act(async () => waits[1]())
     await flush()
 
     expect(within(option('New folder')).getByRole('textbox')).toBeTruthy()
+  })
+
+  it('drops a waiting new folder editor when the user goes to the find box', async () => {
+    // covers: Test-1385
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const waits: Array<() => void> = []
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise((resolve) =>
+        waits.push(() => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    act(() => useListingStore.getState().invalidate('remote', server(), DIR))
+    await act(async () => waits[0]())
+    await flush()
+
+    key('f', { ctrlKey: true })
+    const find = screen.getByRole('textbox', { name: en['filter.find'] })
+    act(() => find.focus())
+    await act(async () => waits[1]())
+    await flush()
+
+    expect(option('New folder')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(document.activeElement).toBe(find)
+  })
+
+  it('drops a waiting new folder editor when the user was already in the find box', async () => {
+    // covers: Test-1385
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const waits: Array<() => void> = []
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise((resolve) =>
+        waits.push(() => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    // 기다림이 시작되기 전에 찾기 칸으로 간다
+    key('f', { ctrlKey: true })
+    const find = screen.getByRole('textbox', { name: en['filter.find'] })
+    act(() => find.focus())
+    act(() => useListingStore.getState().invalidate('remote', server(), DIR))
+    await act(async () => waits[0]())
+    await flush()
+    await act(async () => waits[1]())
+    await flush()
+
+    expect(option('New folder')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(document.activeElement).toBe(find)
   })
 
   it('drops a waiting new folder editor when focus leaves the list before it appears', async () => {
