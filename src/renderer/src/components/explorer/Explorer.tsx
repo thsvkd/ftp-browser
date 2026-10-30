@@ -565,6 +565,8 @@ function TabExplorer({
   const commitRename = async (entry: ExplorerEntry, name: string | null): Promise<void> => {
     setRenaming(null)
     refocus()
+    // 손대지 않은 원래 이름은 앞뒤 공백이 있어도 그대로 둔다
+    if (name === entry.name) return
     const next = name?.trim()
     if (!next || next === entry.name || !validName(next)) return
     const target = joinPath(entry.side, parentPath(entry.side, entry.path) ?? loc.path, next)
@@ -867,7 +869,7 @@ function TabExplorer({
     renaming: renaming === entry.path,
     nameTaken: (name) => {
       const next = name.trim()
-      return next !== entry.name && folderNames.has(next)
+      return name !== entry.name && next !== entry.name && folderNames.has(next)
     },
     onSelect: (e, it) => patch(clickSelect(selection, paths, it.path, e, currentPlatform())),
     onToggle: (it) => patch(toggleSelect(selection, it.path)),

@@ -23,6 +23,7 @@ export function InlineRename({
   const [value, setValue] = useState(initial)
   const dup = taken(value)
   const warnId = useId()
+  const warnRef = useRef<HTMLSpanElement>(null)
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -30,10 +31,14 @@ export function InlineRename({
     const dot = initial.lastIndexOf('.')
     el.setSelectionRange(0, dot > 0 ? dot : initial.length)
   }, [initial])
-  const finish = (value: string | null): void => {
+  // 맨 아래 항목에서도 경고 문구가 스크롤 영역 밖에 숨지 않게 한다
+  useEffect(() => {
+    if (dup) warnRef.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [dup])
+  const finish = (name: string | null): void => {
     if (done.current) return
     done.current = true
-    onDone(value)
+    onDone(name)
   }
   const stop = (e: React.SyntheticEvent): void => e.stopPropagation()
   return (
@@ -64,9 +69,10 @@ export function InlineRename({
       />
       {dup && (
         <span
+          ref={warnRef}
           id={warnId}
           role="alert"
-          className="absolute inset-x-0 top-full z-20 mt-1 break-keep rounded-md bg-[var(--dg)] px-2 py-1 text-[11px] font-semibold leading-4 text-white shadow-md"
+          className="pointer-events-none absolute inset-x-0 top-full z-20 mt-1 break-keep rounded-md [overflow-wrap:anywhere] bg-[var(--dg)] px-2 py-1 text-[11px] font-semibold leading-4 text-white shadow-md"
         >
           {t('name.taken')}
         </span>

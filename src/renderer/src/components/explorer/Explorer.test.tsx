@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import {
   act,
   cleanup,
@@ -1451,8 +1451,8 @@ describe('Explorer — local rename and delete (migrated)', () => {
 // ---------- 이미 있는 이름 경고(rename-name-taken N1~N5) ----------
 
 describe('Explorer — rename to a name that is already taken', () => {
-  const startRename = (): HTMLElement => {
-    fireEvent.contextMenu(option('a.txt'))
+  const startRename = (name = 'a.txt'): HTMLElement => {
+    fireEvent.contextMenu(option(name))
     fireEvent.click(screen.getByRole('menuitem', { name: en['menu.rename'] }))
     return screen.getByRole('textbox', { name: en['menu.newName'] })
   }
@@ -1540,6 +1540,37 @@ describe('Explorer — rename to a name that is already taken', () => {
       expect(warning()).not.toBeNull()
       expect(warning()?.textContent).toBe(en['name.taken'])
     }
+  })
+
+  it('treats the untouched original name as free even with surrounding spaces', async () => {
+    // covers: Test-1334
+    h = setupExplorer({ remote: { [DIR]: [ftp(' a.txt'), ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const input = startRename(' a.txt')
+    expect(warning()).toBeNull()
+    expect(input.getAttribute('aria-invalid')).toBe('false')
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+  })
+
+  it('shows the warning as a described, click-through note scrolled into view', async () => {
+    // covers: Test-1335
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    onTestFinished(() => {
+      delete (Element.prototype as Partial<Element>).scrollIntoView
+    })
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('docs', { dir: true })] } })
+    await renderExplorer(remoteLoc(DIR))
+    const input = startRename()
+    fireEvent.change(input, { target: { value: 'docs' } })
+    const note = warning() as HTMLElement
+    expect(input.getAttribute('aria-describedby')).toBe(note.id)
+    expect(note.className).toContain('pointer-events-none')
+    expect(note.className).toContain('[overflow-wrap:anywhere]')
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
+    expect(scroll.mock.contexts.at(-1)).toBe(note)
   })
 })
 
