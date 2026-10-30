@@ -119,6 +119,7 @@ export const ko = {
   'menu.properties': '속성',
   'menu.newName': '새 이름',
 
+  'name.taken': '같은 이름의 파일이나 폴더가 이미 있습니다.',
   'name.invalidLocal':
     '이름에는 \\ / : 문자를 사용할 수 없으며, "." 또는 ".."은 이름으로 쓸 수 없습니다.',
   'name.invalidRemote':

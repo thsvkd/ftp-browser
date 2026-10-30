@@ -126,6 +126,7 @@ export const ptBR = {
   'menu.properties': 'Propriedades',
   'menu.newName': 'Novo nome',
 
+  'name.taken': 'Já existe um arquivo ou uma pasta com este nome.',
   'name.invalidLocal': 'O nome não pode conter \\ / ou : nem ser “.” ou “..”.',
   'name.invalidRemote': 'O nome não pode conter / nem ser “.” ou “..”.',
 

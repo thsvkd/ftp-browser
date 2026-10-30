@@ -15,6 +15,8 @@ export interface ItemProps {
   selected: boolean
   shelved: boolean
   renaming: boolean
+  /** 이름 입력의 값이 같은 폴더의 다른 항목 이름과 같다(rename-name-taken N1·N2) */
+  nameTaken: (name: string) => boolean
   onSelect: (e: MouseEvent, entry: ExplorerEntry) => void
   onToggle: (entry: ExplorerEntry) => void
   onOpen: (entry: ExplorerEntry) => void

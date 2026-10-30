@@ -121,6 +121,7 @@ export const ja = {
   'menu.properties': 'プロパティ',
   'menu.newName': '新しい名前',
 
+  'name.taken': '同じ名前のファイルまたはフォルダーが既にあります。',
   'name.invalidLocal':
     '名前に \\ / : は使用できません。また、「.」や「..」は名前として使用できません。',
   'name.invalidRemote':

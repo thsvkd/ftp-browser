@@ -128,6 +128,7 @@ export const en = {
   'menu.properties': 'Properties',
   'menu.newName': 'New name',
 
+  'name.taken': 'A file or folder with this name already exists.',
   'name.invalidLocal': 'A name cannot contain \\ / or :, or be "." or "..".',
   'name.invalidRemote': 'A name cannot contain /, or be "." or "..".',
 
