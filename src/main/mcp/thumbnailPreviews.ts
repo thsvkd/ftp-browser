@@ -9,6 +9,7 @@ import { ThumbnailQueue, type ThumbnailSource } from '../thumbnail/ThumbnailQueu
 import { generateCacheKey } from '../utils/cacheKey'
 import type { PreviewOutcome, PreviewRequest } from './mcpTools'
 
+const STOPPED: PreviewOutcome = { ok: false, error: 'The user stopped this call.' }
 const CONNECTION_CHANGED: PreviewOutcome = {
   ok: false,
   error: 'The FTP connection changed before this preview was made. Request it again.'
@@ -19,7 +20,10 @@ export type PreviewSessions = {
   get(key: ConnKey): { manager: ThumbnailSource } | undefined
 } & Pick<EventEmitter, 'on'>
 
-type Previewer = ((requests: PreviewRequest[]) => Promise<PreviewOutcome[]>) & {
+type Previewer = ((
+  requests: PreviewRequest[],
+  isStopped?: () => boolean
+) => Promise<PreviewOutcome[]>) & {
   /** 그 연결의 상태가 바뀌었다 */
   reset(): void
 }
@@ -33,12 +37,16 @@ export function createThumbnailPreviewer(
   sessions: PreviewSessions,
   generator: ThumbnailGenerator,
   cache: CacheManager
-): (conn: ConnKey, requests: PreviewRequest[]) => Promise<PreviewOutcome[]> {
+): (
+  conn: ConnKey,
+  requests: PreviewRequest[],
+  isStopped?: () => boolean
+) => Promise<PreviewOutcome[]> {
   const previewers = new Map<ConnKey, Previewer>()
   sessions.on('connectionStatus', (state: FtpConnectionState) => {
     previewers.get(state.server)?.reset()
   })
-  return async (conn, requests) => {
+  return async (conn, requests, isStopped) => {
     let previewer = previewers.get(conn)
     if (!previewer) {
       const session = sessions.get(conn)
@@ -46,7 +54,7 @@ export function createThumbnailPreviewer(
       previewer = sessionPreviewer(session.manager, generator, cache)
       previewers.set(conn, previewer)
     }
-    return previewer(requests)
+    return previewer(requests, isStopped)
   }
 }
 
@@ -114,7 +122,10 @@ function sessionPreviewer(
 
   let tail: Promise<unknown> = Promise.resolve()
   let calls = 0
-  const preview = async (requests: PreviewRequest[]): Promise<PreviewOutcome[]> => {
+  const preview = async (
+    requests: PreviewRequest[],
+    isStopped: () => boolean = () => false
+  ): Promise<PreviewOutcome[]> => {
     const started = generation
     calls++
     const run = tail.then(async () => {
@@ -124,6 +135,11 @@ function sessionPreviewer(
       for (const req of requests) {
         if (generation !== started) {
           outcomes.push(CONNECTION_CHANGED)
+          continue
+        }
+        // 사용자가 그 에이전트 호출을 중지했으면 남은 파일을 받지 않는다(agent-activity A13)
+        if (isStopped()) {
+          outcomes.push(STOPPED)
           continue
         }
         const outcome = done.get(req.remotePath) ?? (await previewOne(req))

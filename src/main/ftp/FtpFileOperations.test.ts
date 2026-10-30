@@ -433,6 +433,19 @@ describe('FtpFileOperations', () => {
       ])
     })
 
+    it('sends no further level once cancelled', async () => {
+      // covers: Test-1372
+      let cancelled = false
+      mockClient.sendIgnoringError.mockImplementation(async () => {
+        cancelled = true
+        return { code: 257, message: '257 OK' }
+      })
+
+      await ops.mkdir('/a/b/c', () => cancelled)
+
+      expect(mockClient.sendIgnoringError.mock.calls.map((c) => c[0])).toEqual(['MKD /a'])
+    })
+
     it('handles a single top-level directory', async () => {
       await ops.mkdir('/newdir')
 

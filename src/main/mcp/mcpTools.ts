@@ -26,7 +26,12 @@ export type PreviewOutcome =
 export interface McpToolDeps extends ops.AgentDeps {
   version: string
   /** 그 연결에서 앱 썸네일 파이프라인으로 미리보기를 만든다. 결과는 요청과 같은 순서다. */
-  previews(conn: ConnKey, requests: PreviewRequest[]): Promise<PreviewOutcome[]>
+  /** `isStopped`가 참이 되면 남은 요청을 받지 않는다(A13) */
+  previews(
+    conn: ConnKey,
+    requests: PreviewRequest[],
+    isStopped?: () => boolean
+  ): Promise<PreviewOutcome[]>
   /** 앱에 하나. wait_for_jobs와 delete가 기다린다. */
   jobs: JobTracker
   /** delete가 작업을 기다리는 최대 시간(테스트가 줄인다). 60초 클라이언트 타임아웃 아래로 둔다. */
@@ -384,7 +389,10 @@ const TOOLS = [
       }
       // 중지된 호출은 미리보기 큐에 넣지 않는다(A7)
       if (deps.stopped?.()) return codedError('STOPPED_BY_USER', 'The user stopped this call.')
-      const outcomes = requests.length > 0 ? await deps.previews(key, requests) : []
+      const outcomes =
+        requests.length > 0
+          ? await deps.previews(key, requests, () => deps.stopped?.() === true)
+          : []
       const images: CallToolResult['content'] = []
       // 이미지 블록은 ok 항목 순서대로다
       for (const [i, preview] of previews.filter((p) => p.ok).entries()) {

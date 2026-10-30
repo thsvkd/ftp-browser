@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { toast } from 'sonner'
 import { makeApiMock, invokeCalls, type ApiMock } from '@renderer/test/rendererTestUtils'
@@ -48,10 +48,10 @@ describe('AgentActivityIndicator', () => {
     expect(glow()).toBeNull()
 
     emit({ active: true, client: 'Codex', tool: 'list_directory', target: '/photos' })
-    const pill = screen.getByRole('status')
-    expect(pill.textContent).toContain('Codex is working')
-    expect(pill.textContent).toContain('Reading folder')
-    expect(pill.textContent).toContain('/photos')
+    // 알림(live region)은 누가 일하는지만 읽고, 동작·대상은 pill에 보이기만 한다
+    expect(screen.getByRole('status').textContent).toBe('Codex is working')
+    expect(pill().textContent).toContain('Reading folder')
+    expect(pill().textContent).toContain('/photos')
     expect(glow()).not.toBeNull()
 
     // 호출 사이: 남아 있다가 사라진다
@@ -68,8 +68,8 @@ describe('AgentActivityIndicator', () => {
     render(<AgentActivityIndicator />)
 
     emit({ active: true, tool: 'delete', target: '/old' })
-    expect(screen.getByRole('status').textContent).toContain('Agent is working')
-    expect(screen.getByRole('status').textContent).toContain('Deleting')
+    expect(screen.getByRole('status').textContent).toBe('Agent is working')
+    expect(pill().textContent).toContain('Deleting')
 
     emit({ active: false, stopped: true, tool: 'delete' })
     expect(screen.queryByRole('status')).toBeNull()
@@ -139,21 +139,21 @@ describe('AgentActivityIndicator', () => {
     emit({ active: true, tool: 'list_directory' })
     expect(glow()?.getAttribute('data-active')).toBe('true')
     expect(pill().className).toContain('z-[71]')
-    expect(stopButton()).not.toBeNull()
+    expect(stopButton()?.getAttribute('aria-disabled')).toBe('false')
 
     // 남아 있는 동안은 멈출 것이 없다: 버튼 없이 클릭을 통과시킨다
     emit({ active: false, tool: 'list_directory' })
     expect(glow()?.getAttribute('data-active')).toBe('false')
     expect(pill().className).toContain('z-40')
     expect(pill().className).toContain('pointer-events-none')
-    expect(stopButton()).toBeNull()
+    expect(stopButton()?.getAttribute('aria-disabled')).toBe('true')
     act(() => vi.advanceTimersByTime(AGENT_ACTIVITY_LINGER_MS - 1))
 
     emit({ active: true, tool: 'download' })
     act(() => vi.advanceTimersByTime(AGENT_ACTIVITY_LINGER_MS * 2))
     expect(screen.queryByRole('status')).not.toBeNull()
     expect(pill().className).toContain('z-[71]')
-    expect(stopButton()).not.toBeNull()
+    expect(stopButton()?.getAttribute('aria-disabled')).toBe('false')
   })
 
   it('says the agent stopped while a transfer it could not cancel finishes', () => {
@@ -164,10 +164,13 @@ describe('AgentActivityIndicator', () => {
     emit({ active: true, stopping: true, client: 'Codex', tool: 'download', target: '/a.txt' })
 
     const status = screen.getByRole('status')
-    expect(status.textContent).toContain('Codex stopped')
-    expect(status.textContent).toContain("A transfer that can't be cancelled is finishing")
-    expect(status.textContent).not.toContain('is working')
-    expect(stopButton()).toBeNull()
+    expect(status.textContent).toBe('Codex stopped')
+    expect(pill().textContent).toContain("A transfer that can't be cancelled is finishing")
+    expect(pill().textContent).not.toContain('is working')
+    // 꺼진 [중지]는 눌러도 아무것도 하지 않는다
+    fireEvent.click(stopButton()!)
+    expect(invokeCalls(mockInvoke, 'agent:stop')).toEqual([])
+    expect(stopButton()?.getAttribute('aria-disabled')).toBe('true')
     expect(pill().className).toContain('pointer-events-none')
     expect(glow()?.getAttribute('data-active')).toBe('false')
     // 알릴 글만 live region에 있다
@@ -183,5 +186,23 @@ describe('AgentActivityIndicator', () => {
     expect(name.className).toContain('max-w-[14rem]')
     expect(name.className).not.toContain('shrink-0')
     expect(screen.getByRole('button', { name: 'Stop all agents' }).className).toContain('shrink-0')
+  })
+
+  it('gives focus back to where it was when the pill closes under a focused Stop', async () => {
+    // covers: Test-1377
+    const outside = document.createElement('button')
+    document.body.append(outside)
+    onTestFinished(() => outside.remove())
+    render(<AgentActivityIndicator />)
+    emit({ active: true, client: 'Codex', tool: 'download' })
+    outside.focus()
+    stopButton()!.focus()
+
+    fireEvent.click(stopButton()!)
+    await act(async () => undefined)
+    emit({ active: false, stopped: true })
+
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(document.activeElement).toBe(outside)
   })
 })

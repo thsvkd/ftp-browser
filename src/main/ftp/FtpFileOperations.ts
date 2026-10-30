@@ -30,10 +30,16 @@ export type DeleteProgressCallback = (removed: number, total: number, path: stri
  * A directory that genuinely cannot be created is not silently lost: it surfaces
  * later as a clear `STOR` failure in the transfer queue.
  */
-export async function ensureRemoteDir(client: Client, remotePath: string): Promise<void> {
+export async function ensureRemoteDir(
+  client: Client,
+  remotePath: string,
+  isCancelled: () => boolean = () => false
+): Promise<void> {
   const segments = remotePath.split('/').filter(Boolean)
   let current = ''
   for (const segment of segments) {
+    // 사용자가 그 에이전트 호출을 중지했으면 남은 단계를 만들지 않는다(agent-activity A13)
+    if (isCancelled()) return
     current += `/${segment}`
     await client.sendIgnoringError(`MKD ${current}`)
   }
@@ -251,8 +257,8 @@ export class FtpFileOperations {
     this.manager.emit('mutation', { kind: 'rename', remotePath: oldPath, newPath })
   }
 
-  async mkdir(remotePath: string): Promise<void> {
-    await this.manager.runOnMainClient((client) => ensureRemoteDir(client, remotePath))
+  async mkdir(remotePath: string, isCancelled?: () => boolean): Promise<void> {
+    await this.manager.runOnMainClient((client) => ensureRemoteDir(client, remotePath, isCancelled))
     this.manager.emit('mutation', { kind: 'mkdir', remotePath })
   }
 }

@@ -241,10 +241,14 @@ describe('read tools', () => {
     expect(previews[0]).toMatchObject({ width: 40, height: 30, size: 100 })
     expect(previews[4].error).toMatch(/^FTP_PERMISSION_DENIED: /)
     // 크기·수정시각은 부모 목록에서 얻어 앱 썸네일 파이프라인에 넘긴다
-    expect(h.deps.previews).toHaveBeenCalledWith('me@nas.local:21', [
-      { remotePath: '/p/a.jpg', fileSize: 100, modifiedAt: at },
-      { remotePath: '/p/b.png', fileSize: 7, modifiedAt: at }
-    ])
+    expect(h.deps.previews).toHaveBeenCalledWith(
+      'me@nas.local:21',
+      [
+        { remotePath: '/p/a.jpg', fileSize: 100, modifiedAt: at },
+        { remotePath: '/p/b.png', fileSize: 7, modifiedAt: at }
+      ],
+      expect.any(Function)
+    )
   })
 
   it('JSON-encodes remote names so injected newlines never reach the text verbatim', async () => {
@@ -594,9 +598,11 @@ describe('several connections', () => {
       dataOf(await call(client, 'delete', { paths: ['/x.txt'], server: B }))
 
       expect(listed.entries.map((e) => e.name)).toEqual(['a.jpg'])
-      expect(h.deps.previews).toHaveBeenCalledWith(B, [
-        { remotePath: '/p/a.jpg', fileSize: 20, modifiedAt: '2026-01-01T00:00:00.000Z' }
-      ])
+      expect(h.deps.previews).toHaveBeenCalledWith(
+        B,
+        [{ remotePath: '/p/a.jpg', fileSize: 20, modifiedAt: '2026-01-01T00:00:00.000Z' }],
+        expect.any(Function)
+      )
       expect(bQueue.jobs.map((j) => [j.direction, j.server, j.totalBytes])).toEqual([
         ['download', B, 20],
         ['upload', B, 2]

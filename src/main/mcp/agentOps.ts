@@ -180,14 +180,15 @@ export async function connectSaved(
   }
   // 로그인 중에 중지됐으면 연결만 남기고 폴더를 열거나 GUI를 옮기거나 대상을 바꾸지 않는다(A7)
   haltIfStopped(deps)
-  const { manager } = deps.connections.get(key)!
+  const lister = haltingLister(deps, deps.connections.get(key)!.manager)
   let opened = requested ?? getRecentPaths(deps.db, key)[0]?.path ?? '/'
   try {
-    await manager.list(opened)
+    await lister.list(opened)
   } catch (err) {
-    if (opened === '/') throw err
-    await manager.list((opened = '/'))
+    if (opened === '/' || err instanceof AgentError) throw err
+    await lister.list((opened = '/'))
   }
+  haltIfStopped(deps)
   deps.target.last = key
   deps.onSession({
     server: key,
@@ -218,7 +219,7 @@ export async function createDirectory(
   server?: number | string
 ): Promise<void> {
   const { manager, fileOps } = targetSession(deps, server)
-  await fileOps.mkdir(dir)
+  await fileOps.mkdir(dir, () => deps.stopped?.() === true)
   // ensureRemoteDir는 MKD의 음수 응답을 "이미 있음"으로 보고 삼킨다. 정말 폴더가 있는지 확인한다.
   haltIfStopped(deps)
   const [made] = await findRemote(manager, [dir], false).catch(() => [])

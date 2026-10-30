@@ -1,6 +1,6 @@
 import type { AgentActivityEvent } from '@shared/types/mcp'
 import type { OperationJob } from '@shared/types/operation'
-import type { TransferUpdate } from '@shared/types/transfer'
+import type { TransferJob, TransferUpdate } from '@shared/types/transfer'
 import type { OperationManager } from '../operation/OperationManager'
 import type { TransferHub } from '../transfer/TransferHub'
 import type { Listenable } from './jobTracker'
@@ -82,21 +82,28 @@ export function createAgentActivity(
   let last: Pick<AgentActivityEvent, 'client' | 'tool' | 'target'> = {}
   let active = false
   let latest: AgentActivityEvent = { active: false }
-  /** 중지했지만 취소할 수 없던 전송(메인 연결로 도는 것)이 끝나기를 기다린다. 끝나면 바로 사라진다(A8). */
-  let draining = false
-  /** 중지했지만 취소가 듣지 않은 전송. 재시도로 대기에 돌아오면 그때 취소한다(A8). */
+  /**
+   * 중지했지만 취소가 듣지 않은 전송(메인 연결로 도는 것). 끝날 때까지 표시를 `stopping`으로 남기고, 재시도로
+   * 대기에 돌아오면 그때 취소한다(A8·A13). 추적이 끝나면(`jobs`에서 빠지면) 함께 잊는다.
+   */
   const stoppedJobs = new Set<string>()
 
   /** 추적하는 작업 중 아직 도는 것. 끝났거나 목록에서 빠진 것은 잊는다. */
-  const runningJobs = (): { transfers: string[]; operations: string[] } => {
+  const runningJobs = (
+    all: TransferJob[] = jobs.size > 0 ? transfers.getAll() : []
+  ): { transfers: string[]; operations: string[] } => {
     const running = { transfers: [] as string[], operations: [] as string[] }
     if (jobs.size === 0) return running
-    for (const job of transfers.getAll())
+    for (const job of all)
       if (jobs.has(job.id) && isRunning(job.status)) running.transfers.push(job.id)
     for (const job of operations.getAll())
       if (jobs.has(job.id) && isRunning(job.status)) running.operations.push(job.id)
     const still = new Set([...running.transfers, ...running.operations])
-    for (const id of jobs) if (!still.has(id)) jobs.delete(id)
+    for (const id of jobs) {
+      if (still.has(id)) continue
+      jobs.delete(id)
+      stoppedJobs.delete(id)
+    }
     return running
   }
 
@@ -115,9 +122,12 @@ export function createAgentActivity(
     }
   }
 
+  /** 호출 없이 중지가 취소하지 못한 전송만 남아 기다리는 중이다 */
+  const stopping = (): boolean => calls.size === 0 && [...jobs].some((id) => stoppedJobs.has(id))
+
   const publish = (extra: Partial<AgentActivityEvent> = {}): void => {
     active = calls.size > 0 || jobs.size > 0
-    latest = { active, ...last, ...extra }
+    latest = { active, ...last, ...(stopping() ? { stopping: true } : {}), ...extra }
     try {
       emit(latest)
     } catch (err) {
@@ -127,28 +137,27 @@ export function createAgentActivity(
   }
 
   /** 취소하고도 아직 도는 추적 작업을 기억한다 */
-  const remember = (): void => {
+  const remember = (ids: Iterable<string>): void => {
     runningJobs()
-    for (const id of jobs) stoppedJobs.add(id)
+    for (const id of ids) if (jobs.has(id)) stoppedJobs.add(id)
   }
 
-  /** 작업 알림마다 다시 보고, 활성이 바뀔 때만 알린다(전송 진행률마다 보내지 않는다). */
+  /** 작업 알림마다 다시 보고, 활성이나 기다림이 바뀔 때만 알린다(전송 진행률마다 보내지 않는다). */
   const recheck = (): void => {
     if (jobs.size === 0) return
-    if (stoppedJobs.size > 0) {
-      const retried = transfers
-        .getAll()
-        .filter((job) => stoppedJobs.has(job.id) && job.status === 'pending')
-        .map((job) => job.id)
-      if (retried.length > 0) transfers.cancelMany(retried)
+    const wasStopping = latest.stopping === true
+    let all = transfers.getAll()
+    const retried = all
+      .filter((job) => stoppedJobs.has(job.id) && job.status === 'pending')
+      .map((job) => job.id)
+    if (retried.length > 0) {
+      transfers.cancelMany(retried)
+      all = transfers.getAll()
     }
-    runningJobs()
-    for (const id of stoppedJobs) if (!jobs.has(id)) stoppedJobs.delete(id)
-    if ((calls.size > 0 || jobs.size > 0) === active) return
-    if (draining && calls.size === 0 && jobs.size === 0) {
-      draining = false
-      publish({ stopped: true })
-    } else publish()
+    runningJobs(all)
+    if ((calls.size > 0 || jobs.size > 0) === active && stopping() === wasStopping) return
+    // 기다리던 전송이 끝나면 30초 대기 없이 사라진다
+    publish(wasStopping && calls.size === 0 && jobs.size === 0 ? { stopped: true } : {})
   }
   transfers.on('queue:updated', recheck)
   operations.on('operation:updated', recheck)
@@ -163,7 +172,6 @@ export function createAgentActivity(
         halted = true
         resolveStopped()
       })
-      draining = false
       last = { tool, target: summarizeTarget(input), client }
       publish()
       return {
@@ -180,7 +188,7 @@ export function createAgentActivity(
               operations: running.operations.filter((id) => mine.has(id))
             })
             for (const id of running.operations) if (mine.has(id)) jobs.delete(id)
-            remember()
+            remember(running.transfers.filter((id) => mine.has(id)))
           }
         },
         end: () => {
@@ -198,13 +206,12 @@ export function createAgentActivity(
         // 파일 작업은 다음 명령 전에 멈춘다. 취소가 듣지 않은 전송(메인 연결로 도는 것)만 끝날 때까지
         // 표시를 남기고, 취소된 전송은 runningJobs가 잊는다(A8).
         for (const id of running.operations) jobs.delete(id)
-        remember()
+        remember(running.transfers)
       } finally {
         const stops = [...calls.values()]
         calls.clear()
         stops.forEach((stopCall) => stopCall())
-        draining = jobs.size > 0
-        publish(draining ? { stopping: true } : { stopped: true })
+        publish(jobs.size > 0 ? {} : { stopped: true })
       }
     },
     current: () => latest

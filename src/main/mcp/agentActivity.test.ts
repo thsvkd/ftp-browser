@@ -335,6 +335,66 @@ describe('agent activity', () => {
     expect(last()).toMatchObject({ active: false, stopped: true })
   })
 
+  it('shows the wait again after a call made during it, and hides at once when it ends', async () => {
+    // covers: Test-1374
+    h.remote.addFile('/a.txt', 3)
+    const { jobId } = dataOf<{ jobId: string }>(
+      await call(client, 'download', { remotePaths: ['/a.txt'], localDir: tmp })
+    )
+    h.queue.jobs.find((job) => job.id === jobId)!.status = 'active'
+    h.queue.mainClient.add(jobId)
+    h.deps.activity!.stop()
+
+    await call(client, 'get_status')
+    expect(last()).toMatchObject({ active: true, stopping: true, tool: 'get_status' })
+
+    h.queue.finish(jobId, 'completed')
+    expect(last()).toMatchObject({ active: false, stopped: true })
+  })
+
+  it('forgets a stopped transfer once it ends, so a later retry by the user runs', async () => {
+    // covers: Test-1375
+    h.remote.addFile('/a.txt', 3).addFile('/b.txt', 3)
+    const { jobId } = dataOf<{ jobId: string }>(
+      await call(client, 'download', { remotePaths: ['/a.txt'], localDir: tmp })
+    )
+    const job = h.queue.jobs.find((j) => j.id === jobId)!
+    job.status = 'active'
+    h.queue.mainClient.add(jobId)
+    h.deps.activity!.stop()
+    // 실제 큐는 알림을 늦게 보낸다: 실패로 바뀐 사이에 다른 호출이 끝나 추적에서 빠진다
+    job.status = 'failed'
+    await call(client, 'get_status')
+    await call(client, 'download', { remotePaths: ['/b.txt'], localDir: tmp })
+
+    // 사용자가 GUI에서 다시 시도한다
+    h.queue.finish(jobId, 'pending')
+
+    expect(job.status).toBe('pending')
+  })
+
+  it('a connect stopped while it opens the folder moves neither the GUI nor the target', async () => {
+    // covers: Test-1376
+    const id = addServer(h.db, { name: 'Other', host: 'other.lan', user: 'u' })
+    const other = h.connections.add('u@other.lan:21').setOffline()
+    let fail = (): void => undefined
+    other.list.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => (fail = () => reject(new Error('550 gone'))))
+    )
+    const pending = call(client, 'connect', { server: id, path: '/missing' })
+    await vi.waitFor(() => expect(other.list).toHaveBeenCalled())
+
+    h.deps.activity!.stop()
+    expect(textOf(await pending)).toMatch(/^STOPPED_BY_USER/)
+    fail()
+    await settle()
+
+    // 첫 폴더가 없어도 `/`를 다시 읽지 않는다
+    expect(other.list.mock.calls).toEqual([['/missing']])
+    expect(h.sessions).not.toHaveBeenCalled()
+    expect(h.deps.target.last).toBeUndefined()
+  })
+
   it('names the event after the client in the request envelope', async () => {
     // covers: Test-1362
     // ftpb처럼 initialize 없이 2026-07-28 `_meta` envelope 하나로 부른다
