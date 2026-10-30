@@ -494,6 +494,13 @@ function TabExplorer({
   // 찾기 칸의 열림. Ctrl+F가 연다. 찾기가 ⋯에 접혀도 막대가 칸을 그린다(explorer-ux-polish X7).
   const [searchOpen, setSearchOpen] = useState(false)
   const refocus = (): void => scrollRef.current?.focus({ preventScroll: true })
+  // 편집하던 항목이 목록에서 사라지면(다른 폴더로 이동, 다른 클라이언트의 삭제·이름 변경, 목록 오류) 편집을 닫는다.
+  // 창이 비활성이라 편집이 열린 채 남아 있던 사이에도 생긴다(rename-name-taken N10).
+  useEffect(() => {
+    if (!renaming || base.some((e) => e.path === renaming)) return
+    setRenaming(null)
+    if (document.activeElement === document.body) refocus()
+  }, [renaming, base])
 
   // ---------- 선택 ----------
   const selection: SelectionState = { sel: tab.sel, anchor: tab.anchor, focus: tab.focus }

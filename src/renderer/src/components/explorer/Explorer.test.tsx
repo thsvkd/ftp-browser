@@ -1568,6 +1568,40 @@ describe('Explorer — rename to a name that is already taken', () => {
       expect(screen.getByRole('textbox', { name: en['menu.newName'] })).toBe(input)
     }
     expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+
+    // 창으로 돌아온 뒤에는 바깥 클릭이 다시 제출한다
+    hasFocus.mockRestore()
+    fireEvent.blur(input)
+    await flush()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([
+      [server(), `${DIR}/a.txt`, `${DIR}/c.txt`]
+    ])
+  })
+
+  it('closes an editor whose item leaves the folder while the window is away', async () => {
+    // covers: Test-1337
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('docs', { dir: true })] } })
+    await renderExplorer(remoteLoc(DIR))
+    const input = startRename()
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    onTestFinished(() => hasFocus.mockRestore())
+    fireEvent.change(input, { target: { value: 'c.txt' } })
+    fireEvent.blur(input)
+
+    h.remote[DIR] = [ftp('docs', { dir: true })]
+    key('F5')
+    await flush()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(document.activeElement).not.toBe(document.body)
+
+    // 같은 이름이 다시 나타나도 편집이 저절로 열리지 않는다
+    h.remote[DIR] = [ftp('a.txt'), ftp('docs', { dir: true })]
+    key('F5')
+    await flush()
+    expect(option('a.txt')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
   })
 
   it('shows the warning as a described, click-through note scrolled into view', async () => {
