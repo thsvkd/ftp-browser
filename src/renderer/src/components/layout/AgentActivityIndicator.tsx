@@ -13,7 +13,7 @@ export const AGENT_ACTIVITY_LINGER_MS = 30_000
  * 대화상자 위에 두고, 남아 있는 30초 동안과 중지 뒤 기다리는 동안은 [중지]를 끈 채 그 아래에 둔다(A11·A13·A14). pill의
  * [중지]는 에이전트의 호출과 남은 작업만 멈추고 MCP는 그대로 둔다(A5). 대상은 원격 이름일 수 있어 텍스트로만 그린다.
  */
-export function AgentActivityIndicator(): React.JSX.Element | null {
+export function AgentActivityIndicator(): React.JSX.Element {
   const t = useT()
   const [event, setEvent] = useState<AgentActivityEvent | null>(null)
   /**
@@ -106,9 +106,13 @@ export function AgentActivityIndicator(): React.JSX.Element | null {
         <button
           onClick={() => !passive && void stop()}
           onFocus={(e) => {
-            returnTo.current = e.relatedTarget instanceof HTMLElement ? e.relatedTarget : null
+            // 다른 창에서 돌아온 focus(relatedTarget 없음)는 기억해 둔 곳을 지우지 않는다
+            if (e.relatedTarget instanceof HTMLElement) returnTo.current = e.relatedTarget
           }}
-          onBlur={() => (returnTo.current = null)}
+          onBlur={(e) => {
+            // 다른 창으로 간 blur는 포커스가 그대로 [중지]에 남는다. 정말 떠났을 때만 잊는다
+            if (document.activeElement !== e.currentTarget) returnTo.current = null
+          }}
           aria-label={t('agent.stopLabel')}
           aria-disabled={passive}
           className={`shrink-0 rounded-full border border-[var(--bd2)] px-2.5 py-0.5 text-xs ${passive ? 'opacity-50' : 'hover:bg-[var(--hv)]'}`}

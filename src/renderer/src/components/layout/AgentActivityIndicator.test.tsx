@@ -225,4 +225,23 @@ describe('AgentActivityIndicator', () => {
     expect(shown()).toBe(false)
     expect(document.activeElement).toBe(document.body)
   })
+
+  it('still gives focus back after a switch to another app while Stop has focus', () => {
+    // covers: Test-1384
+    const outside = document.createElement('button')
+    document.body.append(outside)
+    onTestFinished(() => outside.remove())
+    render(<AgentActivityIndicator />)
+    emit({ active: true, client: 'Codex', tool: 'download' })
+    outside.focus()
+    stopButton()!.focus()
+    // 다른 앱으로 갔다 오면 [중지]가 포커스를 가진 채 blur·focus(relatedTarget 없음)를 받는다
+    fireEvent.blur(stopButton()!)
+    fireEvent.focus(stopButton()!)
+    expect(document.activeElement).toBe(stopButton())
+
+    emit({ active: false, stopped: true })
+
+    expect(document.activeElement).toBe(outside)
+  })
 })
