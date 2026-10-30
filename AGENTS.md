@@ -195,8 +195,9 @@ before running it; approval is left to the agent tool (Claude Code, Codex…).
 - Activity (spec `docs/handoff/agent-activity.md`): `agentActivity.ts` counts running tool calls and
   the transfers/deletes agents started, and sends `agent:activity`; `AgentActivityIndicator` shows
   a window glow and a pill whose stop (`agent:stop`) ends running calls with `STOPPED_BY_USER` and
-  cancels those jobs without turning MCP off; a stopped call checks `deps.stopped()` (`agentOps.ts`)
-  before every further LIST, server command or enqueue. Settings › Agent access copies a Claude Code command,
+  cancels those jobs without turning MCP off; a stopped call checks `deps.stopped()` (`agentOps.ts`,
+  `haltingLister`) before each further LIST, server command or enqueue. A command already sent and
+  a main-connection transfer (cannot be cancelled) still finish; the pill shows `stopping` meanwhile. Settings › Agent access copies a Claude Code command,
   a Codex `config.toml` snippet or `mcpServers` JSON (`McpService.ts` builders).
 - `ftpb` (`src/main/cli/`): a dependency-free MCP client of the same endpoint (one POST per request
   with the 2026-07-28 `_meta` envelope); always JSON; exit codes 0 ok, 1 tool error, 2 usage, 4 app

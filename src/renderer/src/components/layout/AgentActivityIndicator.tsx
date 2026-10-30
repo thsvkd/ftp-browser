@@ -10,7 +10,7 @@ export const AGENT_ACTIVITY_LINGER_MS = 30_000
 
 /**
  * 에이전트가 MCP로 앱을 쓰는 동안 창 가장자리 글로우와 툴바 아래 pill을 띄운다. 활성 중에는 [중지]가 늘 닿도록
- * 대화상자 위에, 남아 있는 30초 동안은 대화상자 아래에 둔다(A11). pill의 [중지]는 에이전트의
+ * 대화상자 위에 두고, 남아 있는 30초 동안과 중지 뒤 기다리는 동안은 버튼 없이 그 아래에 둔다(A11·A13). pill의 [중지]는 에이전트의
  * 호출과 남은 작업만 멈추고 MCP는 그대로 둔다(A5). 대상은 원격 이름일 수 있어 텍스트로만 그린다.
  */
 export function AgentActivityIndicator(): React.JSX.Element | null {
@@ -57,30 +57,43 @@ export function AgentActivityIndicator(): React.JSX.Element | null {
   const action = event.tool && t(`agent.action.${event.tool}` as MessageKey)
   const detail = [action, event.target].filter(Boolean).join(' · ')
 
+  // 남아 있는 동안과 중지 뒤 취소할 수 없는 전송을 기다리는 동안은 멈출 것이 없다: 버튼 없이 대화상자·팝오버
+  // 아래에 두고 클릭을 통과시킨다(A11·A13)
+  const passive = !event.active || !!event.stopping
+
   return (
     <>
       <div
         data-agent-glow
-        data-active={event.active}
+        data-active={event.active && !event.stopping}
         aria-hidden
         className="agent-glow pointer-events-none absolute inset-0 z-[70]"
       />
       <div
-        role="status"
-        className={`pop absolute left-1/2 top-[60px] flex ${event.active ? 'z-[71]' : 'z-40'} max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--agent)_45%,var(--bd))] bg-[var(--sf)] py-1 pl-3 pr-1 text-sm text-[var(--tx)] shadow-[var(--shadow)]`}
+        data-agent-pill
+        className={`pop absolute left-1/2 top-[60px] flex ${passive ? 'pointer-events-none z-40' : 'z-[71]'} max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--agent)_45%,var(--bd))] bg-[var(--sf)] py-1 pl-3 ${passive ? 'pr-3' : 'pr-1'} text-sm text-[var(--tx)] shadow-[var(--shadow)]`}
       >
         <Sparkles aria-hidden className="h-4 w-4 shrink-0 text-[var(--agent)]" />
-        <span className="min-w-0 max-w-[14rem] truncate font-medium">
-          {t('agent.working', { client })}
+        {/* 알릴 글만 live region에 둔다 */}
+        <span role="status" className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 max-w-[14rem] truncate font-medium">
+            {t(event.stopping ? 'agent.stopped' : 'agent.working', { client })}
+          </span>
+          {event.stopping ? (
+            <span className="min-w-0 truncate text-[var(--mu)]">{t('agent.stoppingDetail')}</span>
+          ) : (
+            detail && <span className="min-w-0 truncate text-[var(--mu)]">{detail}</span>
+          )}
         </span>
-        {detail && <span className="min-w-0 truncate text-[var(--mu)]">{detail}</span>}
-        <button
-          onClick={() => void stop()}
-          aria-label={t('agent.stopLabel')}
-          className="shrink-0 rounded-full border border-[var(--bd2)] px-2.5 py-0.5 text-xs hover:bg-[var(--hv)]"
-        >
-          {t('agent.stop')}
-        </button>
+        {!passive && (
+          <button
+            onClick={() => void stop()}
+            aria-label={t('agent.stopLabel')}
+            className="shrink-0 rounded-full border border-[var(--bd2)] px-2.5 py-0.5 text-xs hover:bg-[var(--hv)]"
+          >
+            {t('agent.stop')}
+          </button>
+        )}
       </div>
     </>
   )

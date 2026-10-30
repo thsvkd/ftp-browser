@@ -237,6 +237,8 @@ export const zhTW = {
   'agent.stop': '停止',
   'agent.stopLabel': '停止所有代理程式',
   'agent.stopFailed': '無法停止代理程式',
+  'agent.stopped': '{{client}} 已停止',
+  'agent.stoppingDetail': '正在等待無法取消的傳輸完成',
   'agent.action.get_status': '正在檢查狀態',
   'agent.action.list_servers': '正在列出已儲存的伺服器',
   'agent.action.list_directory': '正在讀取資料夾',

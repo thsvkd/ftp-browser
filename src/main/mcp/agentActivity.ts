@@ -84,6 +84,8 @@ export function createAgentActivity(
   let latest: AgentActivityEvent = { active: false }
   /** 중지했지만 취소할 수 없던 전송(메인 연결로 도는 것)이 끝나기를 기다린다. 끝나면 바로 사라진다(A8). */
   let draining = false
+  /** 중지했지만 취소가 듣지 않은 전송. 재시도로 대기에 돌아오면 그때 취소한다(A8). */
+  const stoppedJobs = new Set<string>()
 
   /** 추적하는 작업 중 아직 도는 것. 끝났거나 목록에서 빠진 것은 잊는다. */
   const runningJobs = (): { transfers: string[]; operations: string[] } => {
@@ -116,13 +118,32 @@ export function createAgentActivity(
   const publish = (extra: Partial<AgentActivityEvent> = {}): void => {
     active = calls.size > 0 || jobs.size > 0
     latest = { active, ...last, ...extra }
-    emit(latest)
+    try {
+      emit(latest)
+    } catch (err) {
+      // 알리지 못해도 호출·작업 추적은 이어 간다
+      console.warn('[agent] Failed to send the activity:', err)
+    }
+  }
+
+  /** 취소하고도 아직 도는 추적 작업을 기억한다 */
+  const remember = (): void => {
+    runningJobs()
+    for (const id of jobs) stoppedJobs.add(id)
   }
 
   /** 작업 알림마다 다시 보고, 활성이 바뀔 때만 알린다(전송 진행률마다 보내지 않는다). */
   const recheck = (): void => {
     if (jobs.size === 0) return
+    if (stoppedJobs.size > 0) {
+      const retried = transfers
+        .getAll()
+        .filter((job) => stoppedJobs.has(job.id) && job.status === 'pending')
+        .map((job) => job.id)
+      if (retried.length > 0) transfers.cancelMany(retried)
+    }
     runningJobs()
+    for (const id of stoppedJobs) if (!jobs.has(id)) stoppedJobs.delete(id)
     if ((calls.size > 0 || jobs.size > 0) === active) return
     if (draining && calls.size === 0 && jobs.size === 0) {
       draining = false
@@ -158,7 +179,8 @@ export function createAgentActivity(
               transfers: running.transfers.filter((id) => mine.has(id)),
               operations: running.operations.filter((id) => mine.has(id))
             })
-            ids.forEach((id) => jobs.delete(id))
+            for (const id of running.operations) if (mine.has(id)) jobs.delete(id)
+            remember()
           }
         },
         end: () => {
@@ -176,13 +198,13 @@ export function createAgentActivity(
         // 파일 작업은 다음 명령 전에 멈춘다. 취소가 듣지 않은 전송(메인 연결로 도는 것)만 끝날 때까지
         // 표시를 남기고, 취소된 전송은 runningJobs가 잊는다(A8).
         for (const id of running.operations) jobs.delete(id)
-        runningJobs()
+        remember()
       } finally {
         const stops = [...calls.values()]
         calls.clear()
         stops.forEach((stopCall) => stopCall())
         draining = jobs.size > 0
-        publish(draining ? {} : { stopped: true })
+        publish(draining ? { stopping: true } : { stopped: true })
       }
     },
     current: () => latest

@@ -259,6 +259,8 @@ export const ptBR = {
   'agent.stop': 'Parar',
   'agent.stopLabel': 'Parar todos os agentes',
   'agent.stopFailed': 'Não foi possível parar o agente',
+  'agent.stopped': '{{client}} parado',
+  'agent.stoppingDetail': 'Uma transferência que não pode ser cancelada está terminando',
   'agent.action.get_status': 'Verificando o status',
   'agent.action.list_servers': 'Listando servidores salvos',
   'agent.action.list_directory': 'Lendo pasta',

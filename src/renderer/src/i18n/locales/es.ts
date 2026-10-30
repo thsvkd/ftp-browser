@@ -262,6 +262,8 @@ export const es = {
   'agent.stop': 'Detener',
   'agent.stopLabel': 'Detener todos los agentes',
   'agent.stopFailed': 'No se pudo detener el agente',
+  'agent.stopped': '{{client}} detenido',
+  'agent.stoppingDetail': 'Terminando una transferencia que no se puede cancelar',
   'agent.action.get_status': 'Comprobando el estado',
   'agent.action.list_servers': 'Listando servidores guardados',
   'agent.action.list_directory': 'Leyendo carpeta',

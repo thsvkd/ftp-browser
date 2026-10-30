@@ -35,6 +35,9 @@ function emit(event: AgentActivityEvent): void {
 }
 
 const glow = (): Element | null => document.querySelector('[data-agent-glow]')
+const pill = (): HTMLElement => document.querySelector('[data-agent-pill]') as HTMLElement
+const stopButton = (): HTMLElement | null =>
+  screen.queryByRole('button', { name: 'Stop all agents' })
 
 describe('AgentActivityIndicator', () => {
   it('shows the glow and a status pill while an agent works, then fades out', () => {
@@ -135,17 +138,40 @@ describe('AgentActivityIndicator', () => {
     render(<AgentActivityIndicator />)
     emit({ active: true, tool: 'list_directory' })
     expect(glow()?.getAttribute('data-active')).toBe('true')
-    expect(screen.getByRole('status').className).toContain('z-[71]')
+    expect(pill().className).toContain('z-[71]')
+    expect(stopButton()).not.toBeNull()
 
+    // 남아 있는 동안은 멈출 것이 없다: 버튼 없이 클릭을 통과시킨다
     emit({ active: false, tool: 'list_directory' })
     expect(glow()?.getAttribute('data-active')).toBe('false')
-    expect(screen.getByRole('status').className).toContain('z-40')
+    expect(pill().className).toContain('z-40')
+    expect(pill().className).toContain('pointer-events-none')
+    expect(stopButton()).toBeNull()
     act(() => vi.advanceTimersByTime(AGENT_ACTIVITY_LINGER_MS - 1))
 
     emit({ active: true, tool: 'download' })
     act(() => vi.advanceTimersByTime(AGENT_ACTIVITY_LINGER_MS * 2))
     expect(screen.queryByRole('status')).not.toBeNull()
-    expect(screen.getByRole('status').className).toContain('z-[71]')
+    expect(pill().className).toContain('z-[71]')
+    expect(stopButton()).not.toBeNull()
+  })
+
+  it('says the agent stopped while a transfer it could not cancel finishes', () => {
+    // covers: Test-1371
+    render(<AgentActivityIndicator />)
+    emit({ active: true, client: 'Codex', tool: 'download', target: '/a.txt' })
+
+    emit({ active: true, stopping: true, client: 'Codex', tool: 'download', target: '/a.txt' })
+
+    const status = screen.getByRole('status')
+    expect(status.textContent).toContain('Codex stopped')
+    expect(status.textContent).toContain("A transfer that can't be cancelled is finishing")
+    expect(status.textContent).not.toContain('is working')
+    expect(stopButton()).toBeNull()
+    expect(pill().className).toContain('pointer-events-none')
+    expect(glow()?.getAttribute('data-active')).toBe('false')
+    // 알릴 글만 live region에 있다
+    expect(status.querySelector('button')).toBeNull()
   })
 
   it('truncates a long agent name so Stop stays in the pill', () => {

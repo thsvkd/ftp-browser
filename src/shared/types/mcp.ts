@@ -37,6 +37,8 @@ export interface AgentSessionEvent {
 export interface AgentActivityEvent {
   /** A tool call is running, or a transfer or delete an agent started is still pending or active. */
   active: boolean
+  /** Stop was pressed but a transfer it could not cancel is still running (main-connection fallback). */
+  stopping?: boolean
   /** The agent's name when it is known (`Claude Code`, `Codex`, `ftpb`…). */
   client?: string
   /** The tool of the last call that started. */

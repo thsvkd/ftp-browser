@@ -8,7 +8,7 @@ import { listServers } from '../db/servers'
 import { classifyError } from '../utils/errorClassifier'
 import type { ConnKey } from '@shared/connKey'
 import * as ops from './agentOps'
-import { clientName, type AgentActivity } from './agentActivity'
+import { clientName, type ActivityCall, type AgentActivity } from './agentActivity'
 import { savedOf, targetSession } from './agentTarget'
 import type { JobTracker } from './jobTracker'
 
@@ -360,9 +360,10 @@ const TOOLS = [
       const listings = new Map<string, Promise<FtpFileEntry[]>>()
       const previews: Array<Record<string, unknown>> = []
       const requests: PreviewRequest[] = []
+      const lister = ops.haltingLister(deps, manager)
       for (const path of paths) {
         const parent = posix.dirname(path)
-        const listing = listings.get(parent) ?? manager.list(parent).then((r) => r.entries)
+        const listing = listings.get(parent) ?? lister.list(parent).then((r) => r.entries)
         listings.set(parent, listing)
         let error: string | undefined
         const entry = await listing.then(
@@ -381,6 +382,8 @@ const TOOLS = [
         }
         previews.push({ path, ok: !error, ...(entry ? { size: entry.size } : {}), error })
       }
+      // 중지된 호출은 미리보기 큐에 넣지 않는다(A7)
+      if (deps.stopped?.()) return codedError('STOPPED_BY_USER', 'The user stopped this call.')
       const outcomes = requests.length > 0 ? await deps.previews(key, requests) : []
       const images: CallToolResult['content'] = []
       // 이미지 블록은 ok 항목 순서대로다
@@ -582,8 +585,9 @@ export function createMcpToolServer(deps: McpToolDeps): McpServer {
           server.server.getClientVersion()?.name,
           ctx.http?.req?.headers.get('user-agent')
         )
-        const call = deps.activity?.begin(def.name, input, client)
+        let call: ActivityCall | undefined
         try {
+          call = deps.activity?.begin(def.name, input, client)
           const run = def.run(
             input,
             call ? { ...deps, track: call.track, stopped: call.isStopped } : deps

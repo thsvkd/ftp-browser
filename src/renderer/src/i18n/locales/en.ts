@@ -259,6 +259,8 @@ export const en = {
   'agent.stop': 'Stop',
   'agent.stopLabel': 'Stop all agents',
   'agent.stopFailed': "Couldn't stop the agent",
+  'agent.stopped': '{{client}} stopped',
+  'agent.stoppingDetail': "A transfer that can't be cancelled is finishing",
   'agent.action.get_status': 'Checking status',
   'agent.action.list_servers': 'Listing saved servers',
   'agent.action.list_directory': 'Reading folder',

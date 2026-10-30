@@ -245,6 +245,8 @@ export const ko = {
   'agent.stop': '중지',
   'agent.stopLabel': '모든 에이전트 중지',
   'agent.stopFailed': '에이전트를 중지하지 못했습니다',
+  'agent.stopped': '{{client}} 중지됨',
+  'agent.stoppingDetail': '취소할 수 없는 전송이 끝나기를 기다리는 중',
   'agent.action.get_status': '상태 확인 중',
   'agent.action.list_servers': '저장된 서버 목록 보는 중',
   'agent.action.list_directory': '폴더 읽는 중',

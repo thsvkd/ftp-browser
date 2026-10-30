@@ -263,6 +263,8 @@ export const de = {
   'agent.stop': 'Stoppen',
   'agent.stopLabel': 'Alle Agenten stoppen',
   'agent.stopFailed': 'Agent konnte nicht gestoppt werden',
+  'agent.stopped': '{{client}} gestoppt',
+  'agent.stoppingDetail': 'Eine nicht abbrechbare Übertragung wird abgeschlossen',
   'agent.action.get_status': 'Status wird geprüft',
   'agent.action.list_servers': 'Gespeicherte Server werden aufgelistet',
   'agent.action.list_directory': 'Ordner wird gelesen',

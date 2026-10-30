@@ -19,7 +19,8 @@ export function buildClaudeCodeCommand(url: string, token: string): string {
 
 /**
  * Codex `~/.codex/config.toml`에 붙여 넣는 조각. `codex mcp add --url`은 토큰을 환경변수로만 받는다. 값은 JSON
- * 문자열로 적는다: TOML 기본 문자열과 이스케이프가 같아 따옴표·역슬래시가 들어 있어도 깨지지 않는다.
+ * 문자열로 적어 따옴표·역슬래시·제어문자를 TOML 기본 문자열로도 맞게 이스케이프한다(DEL·짝 없는 서로게이트는
+ * 다르지만 URL은 고정 루프백이고 토큰은 base64url이라 나오지 않는다).
  */
 export function buildCodexConfig(url: string, token: string): string {
   return (

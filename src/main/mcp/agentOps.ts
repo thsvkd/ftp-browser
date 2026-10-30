@@ -85,6 +85,19 @@ function haltIfStopped(deps: AgentDeps): void {
   if (deps.stopped?.()) throw new AgentError('STOPPED_BY_USER', 'The user stopped this call.')
 }
 
+/** 중지된 호출은 남은 폴더를 더 읽지 않는다(A7). 메인 연결을 GUI 탐색에 돌려준다. */
+export function haltingLister(
+  deps: AgentDeps,
+  manager: AgentSession['manager']
+): Pick<PlanDeps, 'list'> {
+  return {
+    list: async (dir) => {
+      haltIfStopped(deps)
+      return manager.list(dir)
+    }
+  }
+}
+
 // --- 저장된 서버와 연결 ---
 
 /** 비밀번호 없이 필드를 하나씩 옮긴다. 행을 펼쳐(...) 복사하면 다른 필드가 따라 나간다. */
@@ -165,6 +178,8 @@ export async function connectSaved(
       console.warn('[agent] Failed to persist server info:', err)
     }
   }
+  // 로그인 중에 중지됐으면 연결만 남기고 폴더를 열거나 GUI를 옮기거나 대상을 바꾸지 않는다(A7)
+  haltIfStopped(deps)
   const { manager } = deps.connections.get(key)!
   let opened = requested ?? getRecentPaths(deps.db, key)[0]?.path ?? '/'
   try {
@@ -205,6 +220,7 @@ export async function createDirectory(
   const { manager, fileOps } = targetSession(deps, server)
   await fileOps.mkdir(dir)
   // ensureRemoteDir는 MKD의 음수 응답을 "이미 있음"으로 보고 삼킨다. 정말 폴더가 있는지 확인한다.
+  haltIfStopped(deps)
   const [made] = await findRemote(manager, [dir], false).catch(() => [])
   if (!made) throw new Error(`The server did not create ${dir}. Check that you may write there.`)
   if (made.entry.type !== 'directory') {
@@ -220,7 +236,7 @@ export async function renameRemote(
   server?: number | string
 ): Promise<void> {
   const { manager, fileOps } = targetSession(deps, server)
-  if ((await findRemote(manager, [to], false)).length > 0) {
+  if ((await findRemote(haltingLister(deps, manager), [to], false)).length > 0) {
     throw new AgentError(
       'TARGET_EXISTS',
       `${to} already exists on the server; rename never overwrites.`
@@ -242,7 +258,7 @@ export async function startDelete(
   if (paths.includes('/'))
     throw new AgentError('INVALID_PATH', 'Refusing to delete the root folder.')
   const { key, manager, fileOps } = targetSession(deps, server)
-  const targets = await findRemote(manager, outermost(paths))
+  const targets = await findRemote(haltingLister(deps, manager), outermost(paths))
   haltIfStopped(deps)
   const { operations: ops } = deps
   const itemName = targets.length === 1 ? posix.basename(targets[0].remotePath) : undefined
@@ -288,12 +304,8 @@ export async function startDelete(
 
 // --- 전송 ---
 
-/** 중지된 호출은 남은 폴더를 더 읽지 않는다(A7). 메인 연결을 GUI 탐색에 돌려준다. */
 const planDeps = (deps: AgentDeps, session: AgentSession): PlanDeps => ({
-  list: async (dir) => {
-    haltIfStopped(deps)
-    return session.manager.list(dir)
-  },
+  ...haltingLister(deps, session.manager),
   collectFiles: async (dir) => {
     haltIfStopped(deps)
     return deps.localFs.collectFiles(dir)

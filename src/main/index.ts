@@ -163,7 +163,9 @@ app.whenReady().then(() => {
   const activity = createAgentActivity(
     (event) => {
       // macOS에서 다시 만든 창도 받는다
-      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('agent:activity', event)
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.webContents.isDestroyed()) w.webContents.send('agent:activity', event)
+      }
     },
     hub,
     operationManager

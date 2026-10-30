@@ -248,6 +248,8 @@ export const ja = {
   'agent.stop': '停止',
   'agent.stopLabel': 'すべてのエージェントを停止',
   'agent.stopFailed': 'エージェントを停止できませんでした',
+  'agent.stopped': '{{client}} を停止しました',
+  'agent.stoppingDetail': 'キャンセルできない転送の完了を待機中',
   'agent.action.get_status': '状態を確認中',
   'agent.action.list_servers': '保存済みサーバーを確認中',
   'agent.action.list_directory': 'フォルダーを読み込み中',

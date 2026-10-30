@@ -9,6 +9,7 @@ import { createMcpHandler } from '@modelcontextprotocol/server'
 import { clientName, createAgentActivity, summarizeTarget } from './agentActivity'
 import { createMcpToolServer } from './mcpTools'
 import {
+  addServer,
   call,
   connectClient,
   createHarness,
@@ -36,14 +37,14 @@ afterEach(async () => {
   await fs.rm(tmp, { recursive: true, force: true })
 })
 
-/** 풀릴 때까지 `list`를 붙잡아 둔다. */
-function holdList(): { release: () => void } {
-  let release = (): void => undefined
+/** 풀릴 때까지 `list`를 붙잡아 둔다. `release`는 붙잡힌 목록이 돌아간 뒤에 풀린다. */
+function holdList(): { release: () => Promise<void> } {
+  let release = (): Promise<void> => Promise.resolve()
   const original = h.remote.list.getMockImplementation()!
   h.remote.list.mockImplementationOnce(
     (dir: string) =>
       new Promise<FtpListResult>((resolve) => {
-        release = () => void original(dir).then(resolve)
+        release = () => original(dir).then(resolve)
       })
   )
   return { release: () => release() }
@@ -51,8 +52,13 @@ function holdList(): { release: () => void } {
 
 const last = (): AgentActivityEvent | undefined => events.at(-1)
 
-/** 중지된 호출이 백그라운드에서 마저 도는 동안 기다린다(그 결과는 에이전트에게 가지 않는다). */
-const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20))
+/**
+ * 중지된 호출이 붙잡힌 명령 뒤를 마저 도는 동안 기다린다(그 결과는 에이전트에게 가지 않는다). 가짜 서비스는
+ * 모두 마이크로태스크로 풀리므로 매크로태스크 몇 번이면 끝난다.
+ */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
+}
 
 describe('agent activity', () => {
   it('reports a call from start to end, even when the tool fails', async () => {
@@ -157,7 +163,7 @@ describe('agent activity', () => {
 
     h.deps.activity!.stop()
     expect(textOf(await pending)).toMatch(/^STOPPED_BY_USER/)
-    held.release()
+    await held.release()
     await settle()
 
     expect(h.remote.list).toHaveBeenCalledTimes(1)
@@ -218,7 +224,7 @@ describe('agent activity', () => {
 
     h.deps.activity!.stop()
     expect(textOf(await pending)).toMatch(/^STOPPED_BY_USER/)
-    held.release()
+    await held.release()
     await settle()
 
     expect(h.remote.deleteFile).not.toHaveBeenCalled()
@@ -235,7 +241,7 @@ describe('agent activity', () => {
 
     h.deps.activity!.stop()
     expect(textOf(await pending)).toMatch(/^STOPPED_BY_USER/)
-    held.release()
+    await held.release()
     await settle()
 
     expect(h.remote.rename).not.toHaveBeenCalled()
@@ -251,12 +257,82 @@ describe('agent activity', () => {
     h.queue.mainClient.add(jobId)
 
     h.deps.activity!.stop()
-    expect(last()).toMatchObject({ active: true, tool: 'download' })
+    expect(last()).toMatchObject({ active: true, stopping: true, tool: 'download' })
     expect(last()?.stopped).toBeUndefined()
 
     h.queue.finish(jobId, 'completed')
     expect(last()).toMatchObject({ active: false, stopped: true })
     expect(h.deps.activity!.current()).toEqual(last())
+  })
+
+  it('a connect stopped during login opens no folder and moves neither the GUI nor the target', async () => {
+    // covers: Test-1368
+    const id = addServer(h.db, { name: 'Other', host: 'other.lan', user: 'u' })
+    const other = h.connections.add('u@other.lan:21').setOffline()
+    let login = (): void => undefined
+    other.connect.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          login = () => {
+            Object.assign(other, { connected: true, status: 'connected' })
+            resolve({ success: true })
+          }
+        })
+    )
+    const pending = call(client, 'connect', { server: id })
+    await vi.waitFor(() => expect(other.connect).toHaveBeenCalled())
+
+    h.deps.activity!.stop()
+    expect(textOf(await pending)).toMatch(/^STOPPED_BY_USER/)
+    login()
+    await settle()
+
+    expect(other.list).not.toHaveBeenCalled()
+    expect(h.sessions).not.toHaveBeenCalled()
+    expect(h.deps.target.last).toBeUndefined()
+  })
+
+  it('a delete or preview stopped while it reads folders reads no further folder', async () => {
+    // covers: Test-1369
+    h.remote.addDir('/a').addDir('/b').addDir('/c')
+    for (const dir of ['/a', '/b', '/c']) h.remote.addFile(`${dir}/x.jpg`, 1)
+    for (const [tool, args] of [
+      ['delete', { paths: ['/a/x.jpg', '/b/x.jpg', '/c/x.jpg'] }],
+      ['get_image_previews', { paths: ['/a/x.jpg', '/b/x.jpg', '/c/x.jpg'] }]
+    ] as const) {
+      h.remote.list.mockClear()
+      const held = holdList()
+      const pending = call(client, tool, args)
+      await vi.waitFor(() => expect(h.remote.list).toHaveBeenCalled())
+
+      h.deps.activity!.stop()
+      expect(textOf(await pending)).toMatch(/^STOPPED_BY_USER/)
+      await held.release()
+      await settle()
+
+      expect(h.remote.list).toHaveBeenCalledTimes(1)
+    }
+    expect(h.remote.deleteFile).not.toHaveBeenCalled()
+    expect(h.deps.previews).not.toHaveBeenCalled()
+  })
+
+  it('cancels a stopped transfer that a retry puts back in the queue', async () => {
+    // covers: Test-1370
+    h.remote.addFile('/a.txt', 3)
+    const { jobId } = dataOf<{ jobId: string }>(
+      await call(client, 'download', { remotePaths: ['/a.txt'], localDir: tmp })
+    )
+    const job = h.queue.jobs.find((j) => j.id === jobId)!
+    job.status = 'active'
+    h.queue.mainClient.add(jobId)
+    h.deps.activity!.stop()
+    expect(last()).toMatchObject({ active: true, stopping: true })
+
+    // 일시 오류로 재시도 대기에 돌아온다
+    h.queue.finish(jobId, 'pending')
+
+    expect(job.status).toBe('cancelled')
+    expect(last()).toMatchObject({ active: false, stopped: true })
   })
 
   it('names the event after the client in the request envelope', async () => {

@@ -237,6 +237,8 @@ export const zhCN = {
   'agent.stop': '停止',
   'agent.stopLabel': '停止所有智能体',
   'agent.stopFailed': '无法停止智能体',
+  'agent.stopped': '{{client}} 已停止',
+  'agent.stoppingDetail': '正在等待无法取消的传输完成',
   'agent.action.get_status': '正在检查状态',
   'agent.action.list_servers': '正在列出已保存的服务器',
   'agent.action.list_directory': '正在读取文件夹',
