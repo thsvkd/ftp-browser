@@ -17,6 +17,7 @@ import { ROW, optId } from '@renderer/lib/explorerLayout'
 import { fromFtpEntry, fromLocalEntry } from '@renderer/lib/explorerEntry'
 import { EMPTY_FILTER } from '@renderer/lib/fileCategories'
 import { gridLayout } from '@renderer/lib/gridGeometry'
+import { DEFAULT_SORT } from '@renderer/lib/entryList'
 import { useTabEntries } from '@renderer/hooks/useTabEntries'
 import { useConfirmStore } from '@renderer/stores/useConfirmStore'
 import { useFileCategoryStore } from '@renderer/stores/useFileCategoryStore'
@@ -1689,17 +1690,14 @@ describe('Explorer — rename to a name that is already taken', () => {
     const deleteItem = (): HTMLElement =>
       screen.getByRole('menuitem', { name: new RegExp(`^${en['common.delete']}`) })
 
-    // 목록이 보일 때 연 메뉴: 탭이 옮겨 가면 삭제가 꺼진다
+    // 목록이 보일 때 연 메뉴는 탭이 옮겨 가면 닫힌다
     fireEvent.contextMenu(option('a.txt'))
     expect(deleteItem().hasAttribute('disabled')).toBe(false)
     act(() => useTabsStore.getState().navigate({ side: 'remote', path: DIR, server: staging }))
     await flush()
-    expect(deleteItem().hasAttribute('disabled')).toBe(true)
-    fireEvent.click(deleteItem())
-    await flush()
+    expect(menu()).toBeNull()
 
-    // 옛 목록에서 새로 연 메뉴도 같다
-    key('Escape')
+    // 옛 목록에서 새로 연 메뉴는 삭제가 꺼져 있다
     key('ArrowRight')
     key('F10', { shiftKey: true })
     expect(deleteItem().hasAttribute('disabled')).toBe(true)
@@ -1708,6 +1706,40 @@ describe('Explorer — rename to a name that is already taken', () => {
     await flush()
 
     expect(useConfirmStore.getState().request).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toEqual([])
+  })
+
+  it('closes a menu opened on one listing when another listing takes its place', async () => {
+    // covers: Test-1389
+    useSettingsStore.setState({ confirmBeforeDelete: false })
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('b.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const staging = connKey('staging.org', 21, '')
+    setConnection(staging, 'connected')
+    let listed = (): void => undefined
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise(
+        (resolve) =>
+          (listed = () => resolve({ success: true, data: { path, entries: [ftp('a.txt')] } }))
+      )
+    act(() => useTabsStore.getState().navigate({ side: 'remote', path: DIR, server: staging }))
+    await flush()
+
+    // 옛 목록에서 연 메뉴: 새 목록이 오면 닫히고 포커스는 목록으로 돌아온다
+    key('ArrowRight')
+    key('F10', { shiftKey: true })
+    expect(menu()).toBeTruthy()
+    await act(async () => listed())
+    await flush()
+    expect(menu()).toBeNull()
+    expect(document.activeElement).toBe(listbox())
+
+    // 새 목록에서 연 메뉴: 캐시된 처음 위치로 곧바로 돌아가도 닫힌다
+    fireEvent.contextMenu(option('a.txt'))
+    expect(menu()).toBeTruthy()
+    act(() => useTabsStore.getState().navigate(remoteLoc(DIR)))
+    await flush()
+    expect(menu()).toBeNull()
     expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toEqual([])
   })
 
@@ -1977,11 +2009,13 @@ describe('Explorer — rename to a name that is already taken', () => {
     const input = within(option('New folder')).getByRole('textbox')
     expect(document.activeElement).toBe(input)
 
-    // 열린 뒤 사용자가 넘기는 것은 막지 않는다
+    // 열린 뒤 사용자가 넘기는 것은 막지 않는다. 그 뒤 다시 그려도(선택 등) 다시 끌어오지 않는다
     act(() => {
       listbox().scrollTop = 4000
       fireEvent.scroll(listbox())
     })
+    await flush()
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { sort: { ...DEFAULT_SORT } }))
     await flush()
     expect(listbox().scrollTop).toBe(bottom)
   })

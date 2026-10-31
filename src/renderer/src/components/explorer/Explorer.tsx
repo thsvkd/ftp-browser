@@ -495,6 +495,15 @@ function TabExplorer({
   // 찾기 칸의 열림. Ctrl+F가 연다. 찾기가 ⋯에 접혀도 막대가 칸을 그린다(explorer-ux-polish X7).
   const [searchOpen, setSearchOpen] = useState(false)
   const refocus = (): void => scrollRef.current?.focus({ preventScroll: true })
+  // 보이는 목록이 바뀌면(다른 위치, 옛 목록에서 새 목록으로) 옛 항목에 연 메뉴를 닫는다. 메뉴 안의 포커스는 목록으로
+  // 돌린다(N12).
+  useLayoutEffect(() => {
+    if (!menu) return
+    const inMenu = !!document.activeElement?.closest('[role="menu"]')
+    setMenu(null)
+    if (inMenu) refocus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 목록이 바뀔 때만 닫는다
+  }, [key, interactive])
   const paneRef = useRef<HTMLElement>(null)
   // 편집하던 항목이 보이는 목록에서 사라지면(다른 위치로 이동, 다른 클라이언트의 삭제·이름 변경, 목록 오류, 찾기·필터에
   // 가려짐) 편집을 닫는다. 창이 비활성이라 편집이 열린 채 남아 있던 사이에도 생긴다. 같은 위치의 목록을 다시 읽는
@@ -585,10 +594,13 @@ function TabExplorer({
     if (!entries.length || !(await confirmDelete(entries))) return
     // 확인을 기다리는 동안 다른 폴더로 옮겨도 고른 시점의 경로를 지운다.
     const targets = entries.map((e) => ({ path: e.path, isDirectory: e.type === 'directory' }))
+    // 지금 탭의 위치가 아니라 그 항목들이 나온 곳으로 보낸다(N12). 한 번에 고른 항목은 한 목록에서 나온다.
+    const from = entries[0]
     try {
-      const r = remote
-        ? await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', loc.server, targets)
-        : await window.api.invoke<IpcResult<void>>('local:deleteBatch', targets)
+      const r =
+        from.side === 'remote'
+          ? await window.api.invoke<IpcResult<void>>('ftp:deleteBatch', from.server, targets)
+          : await window.api.invoke<IpcResult<void>>('local:deleteBatch', targets)
       if (!r.success) toast.error(t('toast.deleteFailed'), { description: r.error })
     } catch (err) {
       toast.error(t('toast.deleteFailed'), { description: errorText(err) })
