@@ -790,6 +790,26 @@ describe('activation — click selects, double-click connects', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
   }
+  /**
+   * 연결된 탭의 드롭다운에서는 더블클릭의 첫 클릭이 이미 서버를 활성화한다(입력 모드로 바뀌며 행이
+   * 사라지고, 다음 프레임에 비밀번호 칸을 포커스한다). jsdom의 user-event는 남은 누름을 사라진 행에 보내
+   * 포커스를 body로 흘리는데(실제 브라우저에서는 그 아래 요소에 닿고, 그 누름은 connect-bar-double-click
+   * C1이 삼킨다: Test-1396), 16ms 프레임이 제스처 도중에 끼면 결과가 러너 속도에 따라 갈린다. 프레임을
+   * 붙들어 두었다가 제스처가 끝난 뒤에 돌려 이 jsdom 순서가 시간에 기대지 않게 한다. 돌리기 전에 원래
+   * rAF로 되돌려, 그 뒤의 프레임은 평소대로 돈다.
+   */
+  const holdFrames = (): { release: () => void } => {
+    const frames: FrameRequestCallback[] = []
+    const spy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb) => frames.push(cb))
+    return {
+      release: () => {
+        spy.mockRestore()
+        act(() => frames.splice(0).forEach((cb) => cb(performance.now())))
+      }
+    }
+  }
 
   it('fills the address and focuses the password instead of connecting a server with no saved password', async () => {
     // covers: Test-1219
@@ -830,8 +850,10 @@ describe('activation — click selects, double-click connects', () => {
     })
 
     await user.click(await screen.findByTitle('Switch server'))
+    const frames = holdFrames()
     await user.dblClick(within(savedList()).getByText('Bob'))
     await drain()
+    frames.release()
 
     expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(0)
     await waitFor(() => expect(document.activeElement).toBe(passwordField()))
@@ -958,8 +980,10 @@ describe('activation — click selects, double-click connects', () => {
         .openTab({ side: 'remote', path: '/', server: 'anonymous@nas.local:21' })
     })
     await user.click(await screen.findByTitle('Switch server'))
+    const frames = holdFrames()
     await user.dblClick(within(savedList()).getByText('Bob'))
     await drain()
+    frames.release()
     await waitFor(() => expect(document.activeElement).toBe(passwordField()))
 
     // 툴바 안에서 옮기는 포커스는 입력 모드를 끝내지 않는다

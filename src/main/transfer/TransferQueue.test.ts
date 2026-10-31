@@ -23,6 +23,34 @@ import { markSparse } from '../utils/sparseFile'
 import type { FtpConnectionManager } from '../ftp/FtpConnectionManager'
 import type { TransferJob, TransferUpdate } from '@shared/types/transfer'
 
+/** 모듈을 읽을 때의 실제 시계. 테스트가 가짜 타이머를 켜도 바뀌지 않는다. */
+const realSetTimeout = globalThis.setTimeout
+const realNow = performance.now.bind(performance)
+
+/**
+ * 실제 파일 I/O를 거치는 조건을 기다린다. `vi.waitFor`처럼 50ms마다 확인하고 가짜 타이머면 그만큼 시계를
+ * 흘리되, 가짜 시간은 그 기본 제한(1초)까지만 흘리고 그 뒤로는 실제 시간만 10초까지 기다린다. 느린 러너의
+ * 파일 I/O는 1초를 넘는다(분할 다운로드가 `transferredBytes` 0인 채 1.9초 만에 실패한 적이 있다). 가짜 시간을
+ * 더 흘리면 대기 중에 재시도(`RETRY_DELAY_MS`)가 몰래 돌아 회귀를 숨긴다. 10초는 testTimeout(15초)보다 짧아
+ * 실패하면 마지막 단언의 메시지가 남는다.
+ */
+async function waitForIo<T>(check: () => T | Promise<T>): Promise<T> {
+  const start = realNow()
+  let advanced = 0
+  for (;;) {
+    try {
+      return await check()
+    } catch (err) {
+      if (realNow() - start >= 10_000) throw err
+    }
+    if (vi.isFakeTimers() && advanced < 1000) {
+      vi.advanceTimersByTime(50)
+      advanced += 50
+    }
+    await new Promise((resolve) => realSetTimeout(resolve, 50))
+  }
+}
+
 vi.mock('fs/promises', async (importOriginal) => ({
   ...(await importOriginal<typeof import('fs/promises')>()),
   unlink: vi.fn().mockResolvedValue(undefined)
@@ -1651,7 +1679,7 @@ describe('TransferQueue', () => {
 
       queue.enqueueBatch('upload', uploads)
       queue.enqueueBatch('download', local(items(12, 'd')))
-      await vi.waitFor(() =>
+      await waitForIo(() =>
         expect(queue.getAll().every((job) => job.status === 'completed')).toBe(true)
       )
       fs.rmSync(dir, { recursive: true, force: true })
@@ -2597,11 +2625,11 @@ describe('TransferQueue', () => {
         { localPath, remotePath: '/remote/big.bin', fileName: 'big.bin', totalBytes: SEG_MIN },
         ...items(3)
       ])
-      await vi.waitFor(() => expect(server.events).toContain(`seg ${FINAL}`))
+      await waitForIo(() => expect(server.events).toContain(`seg ${FINAL}`))
       small.get('/remote/0.jpg')!.resolve()
       small.get('/remote/1.jpg')!.resolve()
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
-      await vi.waitFor(() => expect(server.events).toContain('file /remote/2.jpg'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(server.events).toContain('file /remote/2.jpg'))
 
       const [head] = segmentClients()
       expect(head.size).toHaveBeenCalledWith('/remote/big.bin')
@@ -2621,7 +2649,7 @@ describe('TransferQueue', () => {
 
     it('should count a range that stops at its length as done, discard its client and keep the final one', async () => {
       enqueueBig()
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
 
       const clients = segmentClients()
       const head = clients[0]
@@ -2643,7 +2671,7 @@ describe('TransferQueue', () => {
       )
 
       enqueueBig()
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
 
       const failed = segmentClients().find((c) => c.downloadTo.mock.calls[0]?.[2] === 1334)!
       const writer = failed.downloadTo.mock.calls[0][0] as Writable
@@ -2657,14 +2685,14 @@ describe('TransferQueue', () => {
       queue.on('queue:updated', listener)
 
       enqueueBig()
-      await vi.waitFor(() => expect(big().transferredBytes).toBe(3 * CHUNK))
+      await waitForIo(() => expect(big().transferredBytes).toBe(3 * CHUNK))
       await vi.advanceTimersByTimeAsync(100)
 
       const update = listener.mock.calls.at(-1)![0] as TransferUpdate
       expect(update.upserts[0]).toMatchObject({ status: 'active', transferredBytes: 3 * CHUNK })
 
       for (const start of STARTS) server.holds.get(start)!.resolve()
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
       expect(fs.readFileSync(localPath).equals(source)).toBe(true)
     })
 
@@ -2677,7 +2705,7 @@ describe('TransferQueue', () => {
       })
 
       enqueueBig()
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
 
       const [client] = segmentClients()
       expect(pool.clients).toHaveLength(1)
@@ -2695,16 +2723,16 @@ describe('TransferQueue', () => {
 
     it('should not split a small download, a pool of one, or a connection whose REST is broken', async () => {
       queue.enqueue('download', localPath, '/remote/small.bin', 'small.bin', SEG_MIN - 1)
-      await vi.waitFor(() => expect(mockFileOps.download).toHaveBeenCalledTimes(1))
+      await waitForIo(() => expect(mockFileOps.download).toHaveBeenCalledTimes(1))
 
       pool.limit = 1
       enqueueBig()
-      await vi.waitFor(() => expect(mockFileOps.download).toHaveBeenCalledTimes(2))
+      await waitForIo(() => expect(mockFileOps.download).toHaveBeenCalledTimes(2))
 
       pool.limit = 3
       pool.segmentedBroken = true
       enqueueBig()
-      await vi.waitFor(() => expect(mockFileOps.download).toHaveBeenCalledTimes(3))
+      await waitForIo(() => expect(mockFileOps.download).toHaveBeenCalledTimes(3))
 
       expect(segmentClients().every((c) => c.size.mock.calls.length === 0)).toBe(true)
     })
@@ -2719,10 +2747,10 @@ describe('TransferQueue', () => {
       })
 
       enqueueBig()
-      await vi.waitFor(() => expect(big().transferredBytes).toBe(3 * CHUNK))
+      await waitForIo(() => expect(big().transferredBytes).toBe(3 * CHUNK))
       // 서버가 REST를 무시하므로 최종 구간은 제 길이보다 많이 받는다
       server.holds.get(FINAL)!.resolve()
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
 
       const [head, first, second, single] = segmentClients()
       expect(pool.segmentedBroken).toBe(true)
@@ -2743,9 +2771,9 @@ describe('TransferQueue', () => {
 
       enqueueBig()
       // 앞 구간은 모두 끝나고(REST 무시로 내용은 틀려도 길이는 맞다) 최종 구간만 남는다
-      await vi.waitFor(() => expect(big().transferredBytes).toBe(1334 + 1333 + CHUNK))
+      await waitForIo(() => expect(big().transferredBytes).toBe(1334 + 1333 + CHUNK))
       server.holds.get(FINAL)!.resolve()
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
       await vi.advanceTimersByTimeAsync(100)
 
       expect(pool.segmentedBroken).toBe(true)
@@ -2758,7 +2786,7 @@ describe('TransferQueue', () => {
       server.rejections.set(FINAL, restRejected)
 
       enqueueBig()
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
 
       expect(pool.segmentedBroken).toBe(true)
       expect(mockFileOps.download).toHaveBeenCalledTimes(1)
@@ -2771,10 +2799,10 @@ describe('TransferQueue', () => {
       holdAll()
       queue.enqueue('download', '/local/first.jpg', '/remote/first.jpg', 'first.jpg', 10)
       const id = enqueueBig()
-      await vi.waitFor(() => expect(big().transferredBytes).toBe(2 * CHUNK))
+      await waitForIo(() => expect(big().transferredBytes).toBe(2 * CHUNK))
 
       queue.cancel(id)
-      await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+      await waitForIo(() => expect(unlink).toHaveBeenCalledWith(localPath))
       small.get('/remote/first.jpg')!.resolve()
       await vi.advanceTimersByTimeAsync(5000)
 
@@ -2795,7 +2823,7 @@ describe('TransferQueue', () => {
 
       enqueueBig()
       // 실패한 구간이 받은 만큼은 진행률에서 뺀다: 4000 - 1333
-      await vi.waitFor(() => {
+      await waitForIo(() => {
         expect(big().retryCount).toBe(1)
         expect(big().transferredBytes).toBe(SEG_MIN - 1333)
       })
@@ -2803,7 +2831,7 @@ describe('TransferQueue', () => {
       expect(big().error).toMatch(/^Retry 1\/3/)
 
       await vi.advanceTimersByTimeAsync(2000)
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
 
       expect(server.events.filter((e) => e.startsWith('seg')).sort()).toEqual([
         'seg 0',
@@ -2820,9 +2848,9 @@ describe('TransferQueue', () => {
       server.failures.set(0, new FTPError({ code: 550, message: 'Permission denied' }))
 
       enqueueBig()
-      await vi.waitFor(() => expect(big().transferredBytes).toBe(3 * CHUNK))
+      await waitForIo(() => expect(big().transferredBytes).toBe(3 * CHUNK))
       server.holds.get(0)!.resolve()
-      await vi.waitFor(() => expect(big().status).toBe('failed'))
+      await waitForIo(() => expect(big().status).toBe('failed'))
 
       const [head, first, second] = segmentClients()
       expect(first.downloadTo.mock.calls[0][2]).toBe(0)
@@ -2832,7 +2860,7 @@ describe('TransferQueue', () => {
       expect(big().retryCount).toBeUndefined()
       expect(mockFileOps.download).not.toHaveBeenCalled()
       // 미리 늘려 둔 파일은 크기만 서버와 같고 0으로 찬 구멍이 있으므로 남기지 않는다
-      await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+      await waitForIo(() => expect(unlink).toHaveBeenCalledWith(localPath))
     })
 
     it('should not ask the pool to learn the limit from a fast-flow 425, a range 425 or a main-client 425', async () => {
@@ -2845,7 +2873,7 @@ describe('TransferQueue', () => {
       const upload = mockFileOps.upload as ReturnType<typeof vi.fn>
       upload.mockRejectedValueOnce(fast)
       queue.enqueue('upload', '/local/up.jpg', '/remote/up.jpg', 'up.jpg', 10)
-      await vi.waitFor(() =>
+      await waitForIo(() =>
         expect(queue.getAll().find((job) => job.fileName === 'up.jpg')!.status).toBe('completed')
       )
       expect(pool.fastBroken).toBe(true)
@@ -2854,24 +2882,24 @@ describe('TransferQueue', () => {
       // ② 시작 0인 구간의 425는 구간 재시도다
       server.rejections.set(0, refused())
       enqueueBig()
-      await vi.waitFor(() => expect(big().error).toMatch(/^Retry 1\/3: 425/))
+      await waitForIo(() => expect(big().error).toMatch(/^Retry 1\/3: 425/))
       expect(big().status).toBe('active')
       server.rejections.delete(0)
       await vi.advanceTimersByTimeAsync(2000)
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
       expect(pool.shrinkAfterLimitReply).not.toHaveBeenCalled()
 
       // ③ 메인 클라이언트 대체(acquire가 null)의 425는 지금처럼 재시도다
       pool.acquire.mockResolvedValue(null)
       ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockRejectedValueOnce(refused())
       queue.enqueue('download', '/local/main.jpg', '/remote/main.jpg', 'main.jpg', 10)
-      await vi.waitFor(() =>
+      await waitForIo(() =>
         expect(queue.getAll().find((job) => job.fileName === 'main.jpg')!.error).toMatch(
           /^Retry 1\/3: 425/
         )
       )
       await vi.advanceTimersByTimeAsync(2000)
-      await vi.waitFor(() =>
+      await waitForIo(() =>
         expect(queue.getAll().find((job) => job.fileName === 'main.jpg')!.status).toBe('completed')
       )
       expect(pool.shrinkAfterLimitReply).not.toHaveBeenCalled()
@@ -2882,11 +2910,11 @@ describe('TransferQueue', () => {
       holdAll()
       server.failures.set(0, new FTPError({ code: 550, message: 'Permission denied' }))
       enqueueBig()
-      await vi.waitFor(() => expect(big().transferredBytes).toBe(3 * CHUNK))
+      await waitForIo(() => expect(big().transferredBytes).toBe(3 * CHUNK))
       server.holds.get(0)!.resolve()
-      await vi.waitFor(() => expect(big().status).toBe('failed'))
+      await waitForIo(() => expect(big().status).toBe('failed'))
       for (const start of STARTS) server.holds.get(start)!.resolve()
-      await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+      await waitForIo(() => expect(unlink).toHaveBeenCalledWith(localPath))
       await vi.advanceTimersByTimeAsync(5000)
       expect(unlink).toHaveBeenCalledTimes(1)
 
@@ -2896,7 +2924,7 @@ describe('TransferQueue', () => {
         new FTPError({ code: 550, message: '550 Permission denied' })
       )
       queue.enqueue('upload', '/local/up.jpg', '/remote/up.jpg', 'up.jpg', 10)
-      await vi.waitFor(() =>
+      await waitForIo(() =>
         expect(queue.getAll().find((job) => job.fileName === 'up.jpg')!.status).toBe('failed')
       )
       await vi.advanceTimersByTimeAsync(5000)
@@ -2908,7 +2936,7 @@ describe('TransferQueue', () => {
       holdAll()
       server.failures.set(0, new FTPError({ code: 550, message: 'Permission denied' }))
       const id = enqueueBig()
-      await vi.waitFor(() => expect(big().transferredBytes).toBe(3 * CHUNK))
+      await waitForIo(() => expect(big().transferredBytes).toBe(3 * CHUNK))
       // 실패가 다른 구간을 닫는 그 순간(작업은 이미 failed)에 재시도를 누른다
       const second = segmentClients()[2]
       const close = second.close.getMockImplementation() as () => void
@@ -2922,7 +2950,7 @@ describe('TransferQueue', () => {
       server.holds.get(0)!.resolve()
 
       // 버려지지 않고, 구간 정리가 끝난 뒤 처음부터 다시 돈다
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
       expect(statusAtRetry).toBe('failed')
       expect(big().id).toBe(id)
     })
@@ -2935,9 +2963,11 @@ describe('TransferQueue', () => {
       }
 
       enqueueBig()
-      await vi.waitFor(() => expect(server.failures.size).toBe(0))
+      await waitForIo(() => expect(server.failures.size).toBe(0))
+      // 구간의 재시도 타이머는 남은 쓰기를 마친 뒤에야 걸린다. 느린 디스크에서 시계를 먼저 넘기지 않게 기다린다
+      await waitForIo(() => expect(big().retryCount).toBe(1))
       await vi.advanceTimersByTimeAsync(2000)
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
 
       expect(big().retryCount).toBe(1)
       expect(fs.readFileSync(localPath).equals(source)).toBe(true)
@@ -2951,7 +2981,7 @@ describe('TransferQueue', () => {
       ;(mockFileOps.download as ReturnType<typeof vi.fn>).mockRejectedValue(noSuchFile)
 
       enqueueBig()
-      await vi.waitFor(() => expect(big().status).toBe('failed'))
+      await waitForIo(() => expect(big().status).toBe('failed'))
       await vi.advanceTimersByTimeAsync(100)
 
       expect(pool.segmentedBroken).toBe(false)
@@ -2971,7 +3001,7 @@ describe('TransferQueue', () => {
         server.rejections.set(FINAL, refused)
 
         enqueueBig()
-        await vi.waitFor(() => expect(big().status).toBe('completed'))
+        await waitForIo(() => expect(big().status).toBe('completed'))
 
         expect(pool.segmentedBroken).toBe(false)
         expect(mockFileOps.download).toHaveBeenCalledTimes(1)
@@ -2990,15 +3020,15 @@ describe('TransferQueue', () => {
 
       enqueueBig()
       for (let attempt = 1; attempt <= 3; attempt++) {
-        await vi.waitFor(() => expect(big().retryCount).toBe(attempt))
+        await waitForIo(() => expect(big().retryCount).toBe(attempt))
         if (attempt === 3) {
           server.rejections.set(1334, new FTPError({ code: 502, message: 'REST not implemented' }))
         }
         await vi.advanceTimersByTimeAsync(2000)
       }
-      await vi.waitFor(() => expect(download).toHaveBeenCalledTimes(1))
+      await waitForIo(() => expect(download).toHaveBeenCalledTimes(1))
       await vi.advanceTimersByTimeAsync(2000)
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
 
       expect(atRestart).toEqual([{ retryCount: undefined, error: undefined }])
       expect(download).toHaveBeenCalledTimes(2)
@@ -3013,10 +3043,10 @@ describe('TransferQueue', () => {
       ])
 
       enqueueBig()
-      await vi.waitFor(() => expect(big().status).toBe('failed'))
+      await waitForIo(() => expect(big().status).toBe('failed'))
 
       expect(big().error).toBe('Downloaded file size does not match the server')
-      await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+      await waitForIo(() => expect(unlink).toHaveBeenCalledWith(localPath))
     })
 
     it('should retry a job that failed the size check at once, since its ranges are already closed', async () => {
@@ -3026,11 +3056,11 @@ describe('TransferQueue', () => {
         { start: 2000, end: SEG_MIN, final: true }
       ])
       const id = enqueueBig()
-      await vi.waitFor(() => expect(big().status).toBe('failed'))
+      await waitForIo(() => expect(big().status).toBe('failed'))
 
       // 분할 상태가 남아 있으면 retry가 끝나지 않을 정리를 기다리며 미뤄진다
       queue.retry([id])
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
     })
 
     it('should mark the file sparse on Windows before growing it to the server size', async () => {
@@ -3038,7 +3068,7 @@ describe('TransferQueue', () => {
       setPlatform('win32')
 
       enqueueBig()
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
 
       expect(markSparse).toHaveBeenCalledTimes(1)
       expect(sizesAtMark).toEqual([0])
@@ -3049,7 +3079,7 @@ describe('TransferQueue', () => {
       setPlatform(os)
 
       enqueueBig()
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
 
       expect(markSparse).not.toHaveBeenCalled()
       expect(fs.readFileSync(localPath).equals(source)).toBe(true)
@@ -3064,7 +3094,7 @@ describe('TransferQueue', () => {
       vi.mocked(markSparse).mockImplementation(outcome)
 
       enqueueBig()
-      await vi.waitFor(() => expect(big().status).toBe('completed'))
+      await waitForIo(() => expect(big().status).toBe('completed'))
 
       expect(server.events.sort()).toEqual(['seg 0', 'seg 1334', `seg ${FINAL}`])
       expect(big().retryCount).toBeUndefined()
@@ -3089,9 +3119,9 @@ describe('TransferQueue', () => {
         // 분할 경로: 구간을 받기 전에 'wx'로 만든 파일
         holdAll()
         const id = enqueueExclusive(localPath, '/remote/big.bin', SEG_MIN)
-        await vi.waitFor(() => expect(big().transferredBytes).toBe(3 * CHUNK))
+        await waitForIo(() => expect(big().transferredBytes).toBe(3 * CHUNK))
         queue.cancel(id)
-        await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+        await waitForIo(() => expect(unlink).toHaveBeenCalledWith(localPath))
         expect(big().status).toBe('cancelled')
 
         // 한 스트림: 파일을 만든 뒤 받는 중에 취소된다
@@ -3115,11 +3145,11 @@ describe('TransferQueue', () => {
             })
         )
         const smallId = enqueueExclusive(small, '/remote/small.bin', 10)
-        await vi.waitFor(() => expect(download).toHaveBeenCalledTimes(1))
+        await waitForIo(() => expect(download).toHaveBeenCalledTimes(1))
         queue.cancel(smallId)
-        await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(small))
+        await waitForIo(() => expect(unlink).toHaveBeenCalledWith(small))
         // 자기 파일을 지웠으니 다음에 열 때는 다시 'wx'다
-        await vi.waitFor(() => expect(download.mock.calls[0][4]).toEqual({ created: false }))
+        await waitForIo(() => expect(download.mock.calls[0][4]).toEqual({ created: false }))
       })
 
       it('should leave a file that appeared at the target alone when an exclusive download is cancelled before creating its file', async () => {
@@ -3133,7 +3163,7 @@ describe('TransferQueue', () => {
         fs.writeFileSync(localPath, 'appeared meanwhile')
         queue.cancel(id)
         await vi.advanceTimersByTimeAsync(1000)
-        await vi.waitFor(() => expect(pool.discard).toHaveBeenCalled())
+        await waitForIo(() => expect(pool.discard).toHaveBeenCalled())
 
         expect(big().status).toBe('cancelled')
         expect(unlink).not.toHaveBeenCalled()
@@ -3181,10 +3211,10 @@ describe('TransferQueue', () => {
         server.holds.set(0, hold)
         server.stalls.set(0, headStall)
         const id = enqueueBig()
-        await vi.waitFor(() => expect(big().transferredBytes).toBe(CHUNK))
+        await waitForIo(() => expect(big().transferredBytes).toBe(CHUNK))
         await vi.advanceTimersByTimeAsync(PROBE * 2)
         hold.resolve()
-        await vi.waitFor(() => expect(server.events).toHaveLength(3))
+        await waitForIo(() => expect(server.events).toHaveLength(3))
         return id
       }
 
@@ -3210,7 +3240,7 @@ describe('TransferQueue', () => {
 
         expect(server.events).toEqual(['seg 0', ...REST_STARTS.map((s) => `seg ${s}`)])
         headStall.resolve()
-        await vi.waitFor(() => expect(big().status).toBe('completed'))
+        await waitForIo(() => expect(big().status).toBe('completed'))
 
         const [head] = segmentClients()
         expect(head.downloadTo).toHaveBeenCalledTimes(1)
@@ -3227,7 +3257,7 @@ describe('TransferQueue', () => {
         setPlatform('win32')
         await splitSlowHead()
         headStall.resolve()
-        await vi.waitFor(() => expect(big().status).toBe('completed'))
+        await waitForIo(() => expect(big().status).toBe('completed'))
 
         expect(markSparse).toHaveBeenCalledTimes(1)
         expect(sizesAtMark).toEqual([0])
@@ -3238,10 +3268,10 @@ describe('TransferQueue', () => {
       it('should close the head client and unlink the file on cancel before the verdict', async () => {
         server.holds.set(0, deferred())
         const id = enqueueBig()
-        await vi.waitFor(() => expect(big().transferredBytes).toBe(CHUNK))
+        await waitForIo(() => expect(big().transferredBytes).toBe(CHUNK))
 
         queue.cancel(id)
-        await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+        await waitForIo(() => expect(unlink).toHaveBeenCalledWith(localPath))
 
         const [head] = segmentClients()
         expect(head.close).toHaveBeenCalled()
@@ -3255,7 +3285,7 @@ describe('TransferQueue', () => {
         const id = await splitSlowHead()
 
         queue.cancel(id)
-        await vi.waitFor(() => expect(unlink).toHaveBeenCalledWith(localPath))
+        await waitForIo(() => expect(unlink).toHaveBeenCalledWith(localPath))
 
         const clients = segmentClients()
         expect(clients).toHaveLength(3)
@@ -3271,9 +3301,9 @@ describe('TransferQueue', () => {
         await splitSlowHead()
         headStall.resolve()
 
-        await vi.waitFor(() => expect(big().retryCount).toBe(1))
+        await waitForIo(() => expect(big().retryCount).toBe(1))
         await vi.advanceTimersByTimeAsync(2000)
-        await vi.waitFor(() => expect(big().status).toBe('completed'))
+        await waitForIo(() => expect(big().status).toBe('completed'))
 
         expect(server.events.filter((e) => e === 'seg 0')).toHaveLength(2)
         const retried = segmentClients().find(
@@ -3288,7 +3318,7 @@ describe('TransferQueue', () => {
       it('should re-run one stream when the server ignores REST on the split ranges', async () => {
         server.ignoreRest = true
         await splitSlowHead()
-        await vi.waitFor(() => expect(big().status).toBe('completed'))
+        await waitForIo(() => expect(big().status).toBe('completed'))
 
         expect(pool.segmentedBroken).toBe(true)
         expect(mockFileOps.download).toHaveBeenCalledTimes(1)
