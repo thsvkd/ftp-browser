@@ -57,6 +57,9 @@ export function PasswordInput({
   )
 }
 
+/** How long a press on the anonymous box waits for its click (a touch tap clicks after pointerup). */
+const PRESS_CLICK_WINDOW_MS = 1000
+
 /** Host field. A pasted address (or one typed and left) is split into the other fields. */
 function HostInput({
   id,
@@ -231,20 +234,24 @@ export function ServerForm({
   }
   // 체크박스를 누르기 시작할 때의 체크. 그 누름으로 호스트 칸을 떠나며 체크가 풀려도(AN5) 사용자가 뜻한 것은 이
   // 값을 뒤집는 것이다(AN11). 누름 없이 온 클릭(키보드·보조 기술)은 쓰지 않는다.
-  const pressedFrom = useRef<boolean | null>(null)
+  const pressedFrom = useRef<{ checked: boolean } | null>(null)
   const press = (): void => {
-    pressedFrom.current = anonymous
-    // 클릭으로 이어지지 않은 누름(끌어 놓기, 우클릭, 취소)의 기록은 남기지 않는다. 클릭은 pointerup과 같은 작업에서 온다.
+    const mine = { checked: anonymous }
+    pressedFrom.current = mine
+    // 클릭으로 이어지지 않은 누름(끌어 놓기, 우클릭, 취소)의 기록은 남기지 않는다. 터치의 클릭은 pointerup 뒤 따로
+    // 오므로 여유를 두고 지운다. 그사이 새로 누른 기록은 지우지 않는다.
     const done = new AbortController()
     const clear = (): void => {
       done.abort()
-      setTimeout(() => (pressedFrom.current = null))
+      setTimeout(() => {
+        if (pressedFrom.current === mine) pressedFrom.current = null
+      }, PRESS_CLICK_WINDOW_MS)
     }
     window.addEventListener('pointerup', clear, { signal: done.signal })
     window.addEventListener('pointercancel', clear, { signal: done.signal })
   }
   const onAnonymousChange = (checked: boolean): void => {
-    const on = pressedFrom.current === null ? checked : !pressedFrom.current
+    const on = pressedFrom.current === null ? checked : !pressedFrom.current.checked
     pressedFrom.current = null
     if (on !== anonymous) toggleAnonymous(on)
     else if (!on) userRef.current?.focus()

@@ -747,4 +747,28 @@ describe('ServerManagerDialog — anonymous login', () => {
     expect(passwordField().disabled).toBe(false)
     expect(passwordField().value).toBe('pw')
   })
+
+  it('keeps the login when a tap clicks the box well after its pointerup', () => {
+    // covers: Test-1392
+    vi.useFakeTimers()
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    fireEvent.change(hostField(), { target: { value: 'carol@nas.local' } })
+    act(() => hostField().focus())
+    // 앞서 클릭 없이 끝난 누름의 지우기가, 새 누름의 기록을 지우지 않는다
+    fireEvent.pointerDown(anonymousBox())
+    fireEvent.pointerUp(document.body)
+    act(() => vi.advanceTimersByTime(700))
+    // 터치: pointerup 뒤 한참 있다가 포커스 이동(호스트 칸 blur)과 클릭이 온다
+    fireEvent.pointerDown(anonymousBox())
+    fireEvent.pointerUp(anonymousBox())
+    act(() => vi.advanceTimersByTime(400))
+    act(() => hostField().blur())
+    fireEvent.click(anonymousBox())
+
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('carol')
+  })
 })
