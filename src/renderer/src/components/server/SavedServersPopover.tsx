@@ -22,8 +22,8 @@ export function SavedServersPopover({
   onClose
 }: {
   currentId?: number
-  /** Click selects; double-click and Enter pass `connect`. */
-  onPick: (server: FtpServer, connect: boolean) => void
+  /** Click selects; double-click and Enter pass `connect`. A click passes where it was. */
+  onPick: (server: FtpServer, connect: boolean, at?: { x: number; y: number }) => void
   onEdit: (server: FtpServer) => void
   onAdd: () => void
   onClose: () => void
@@ -97,7 +97,7 @@ export function SavedServersPopover({
               role="option"
               aria-selected={on}
               onMouseMove={() => i !== idx && setActive(i)}
-              onClick={() => onPick(s, false)}
+              onClick={(e) => onPick(s, false, { x: e.clientX, y: e.clientY })}
               onDoubleClick={() => onPick(s, true)}
               className={cn(
                 'group flex h-11 cursor-default items-center gap-2.5 rounded-md px-2.5',
