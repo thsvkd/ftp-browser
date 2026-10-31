@@ -32,6 +32,7 @@
   --ac: #0e8c88;
   --acw: #ddf2f1;
   --acx: #ffffff;
+  --agent: #8b5cf6;
   --spring: 600ms;
   --sidebar-left-min: 180px;
   --sidebar-left-default: 220px;
@@ -71,6 +72,7 @@
     --ac: #34c2bc;
     --acw: #133432;
     --acx: #06201f;
+    --agent: #a78bfa;
   }
 }
 
@@ -226,6 +228,114 @@
 .rise {
   animation: shelf-rise 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
+/* 선반 섬(shelf-island I1~I4). 크기 전환은 JS(FLIP)가 맡고, 내용은 아래·가운데 기준이라 상자가
+   자라면 보내기 줄부터 드러난다. 끄는 중에는 크기를 바꾸지 않고 바깥 점선과 색만 바꾼다. */
+/* 펼친 패널 폭의 기준(100cqw)은 탐색 영역의 폭이다. 좁음도 창이 아니라 탐색 영역으로 잰다 —
+   창 최소 폭이 1024px라 뷰포트 미디어 쿼리는 양쪽 패널을 연 좁은 탐색 영역에서 울리지 않는다. */
+.shelf-dock-area {
+  container-type: inline-size;
+}
+@container (max-width: 560px) {
+  .shelf-narrow-hide {
+    display: none;
+  }
+  .shelf-narrow-wrap {
+    flex-wrap: wrap;
+  }
+  .shelf-narrow-full {
+    width: 100%;
+    max-width: none;
+  }
+}
+.shelf-island {
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: hidden;
+  border-radius: 27px;
+  border: 1px solid var(--bd);
+  background: var(--sf);
+  box-shadow:
+    0 2px 6px rgb(0 0 0 / 0.08),
+    0 24px 48px -12px rgb(0 0 0 / 0.32);
+  outline: 2px dashed transparent;
+  outline-offset: 4px;
+  transition:
+    border-radius 0.34s cubic-bezier(0.2, 0.85, 0.25, 1),
+    outline-color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s,
+    box-shadow 0.2s;
+}
+.shelf-island > * {
+  flex: none;
+}
+.shelf-island[data-mode='open'] {
+  border-radius: 24px;
+}
+.shelf-island[data-target='true'] {
+  outline-color: var(--sh);
+}
+.shelf-island[data-over='true'] {
+  border-color: var(--sh);
+  background: var(--shw);
+  outline-style: solid;
+  box-shadow:
+    0 0 0 8px color-mix(in srgb, var(--sh) 18%, transparent),
+    0 24px 48px -12px rgb(0 0 0 / 0.32);
+}
+
+/* 펼친 섬의 가로 필름(I7). 넘침과 상관없이 스크롤바 트랙(8px, 투명)을 늘 잡아 둔다 — 넘치는 순간
+   높이가 8px 튀지 않게. 가장자리 흐림은 넘친 쪽에만, 트랙은 흐리지 않는다. */
+.shelf-film {
+  --fl: 0px;
+  --fr: 0px;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  scroll-padding: 0 18px;
+  overscroll-behavior-x: contain;
+  mask-image:
+    linear-gradient(
+      to right,
+      transparent,
+      #000 var(--fl),
+      #000 calc(100% - var(--fr)),
+      transparent
+    ),
+    linear-gradient(#000 0 0);
+  mask-size:
+    100% calc(100% - 8px),
+    100% 8px;
+  mask-position: top, bottom;
+  mask-repeat: no-repeat;
+}
+.shelf-film[data-l='true'] {
+  --fl: 36px;
+}
+.shelf-film[data-r='true'] {
+  --fr: 36px;
+}
+.shelf-film > li {
+  scroll-snap-align: start;
+}
+.shelf-film::-webkit-scrollbar {
+  height: 8px;
+}
+.shelf-film::-webkit-scrollbar-track {
+  background: transparent;
+}
+.shelf-film::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--mu) 35%, transparent) padding-box;
+}
+.shelf-film:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--mu) 60%, transparent) padding-box;
+}
+
 .tile-img {
   transition: transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
@@ -365,6 +475,23 @@ main[data-region='content']:has(+ div > #rail-pane[data-collapsed='true']) {
     opacity: 0;
   }
 }
+/* 에이전트 활동 표시(agent-activity A4): 창 가장자리 글로우. 활성 중에만 맥동한다 */
+.agent-glow {
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--agent) 70%, transparent),
+    inset 0 0 28px 4px color-mix(in srgb, var(--agent) 35%, transparent);
+  opacity: 0.55;
+  transition: opacity 0.4s ease-out;
+}
+.agent-glow[data-active='true'] {
+  opacity: 1;
+  animation: agent-glow 2.4s ease-in-out infinite;
+}
+@keyframes agent-glow {
+  50% {
+    opacity: 0.6;
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .side-pane[data-animate='true'] {
@@ -386,7 +513,8 @@ main[data-region='content']:has(+ div > #rail-pane[data-collapsed='true']) {
   }
   .shimmer,
   .indet,
-  .spin {
+  .spin,
+  .agent-glow {
     animation: none !important;
   }
   .fade {

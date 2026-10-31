@@ -379,6 +379,27 @@ describe('FtpFileOperations', () => {
         'RMD /remote/dir'
       ])
     })
+
+    it('stops before the next command once the delete is cancelled', async () => {
+      // covers: Test-1355
+      mockClient.list.mockImplementation(async () => [
+        { name: 'a', isDirectory: false },
+        { name: 'b', isDirectory: false },
+        { name: 'c', isDirectory: false }
+      ])
+      const calls: string[] = []
+      mockClient.remove.mockImplementation(async (p: string) => calls.push(`DELE ${p}`))
+      mockClient.removeEmptyDir.mockImplementation(async (p: string) => calls.push(`RMD ${p}`))
+      let cancelled = false
+
+      await ops.deleteDirectory(
+        '/remote/dir',
+        () => (cancelled = true),
+        () => cancelled
+      )
+
+      expect(calls).toEqual(['DELE /remote/dir/a'])
+    })
   })
 
   describe('deleteEmptyDirectory', () => {
@@ -410,6 +431,19 @@ describe('FtpFileOperations', () => {
         'MKD /remote/parent',
         'MKD /remote/parent/newdir'
       ])
+    })
+
+    it('sends no further level once cancelled', async () => {
+      // covers: Test-1372
+      let cancelled = false
+      mockClient.sendIgnoringError.mockImplementation(async () => {
+        cancelled = true
+        return { code: 257, message: '257 OK' }
+      })
+
+      await ops.mkdir('/a/b/c', () => cancelled)
+
+      expect(mockClient.sendIgnoringError.mock.calls.map((c) => c[0])).toEqual(['MKD /a'])
     })
 
     it('handles a single top-level directory', async () => {

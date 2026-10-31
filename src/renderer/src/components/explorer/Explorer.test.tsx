@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import {
   act,
   cleanup,
@@ -1448,6 +1448,524 @@ describe('Explorer — local rename and delete (migrated)', () => {
   })
 })
 
+// ---------- 이미 있는 이름 경고(rename-name-taken N1~N5) ----------
+
+describe('Explorer — rename to a name that is already taken', () => {
+  const startRename = (name = 'a.txt'): HTMLElement => {
+    fireEvent.contextMenu(option(name))
+    fireEvent.click(screen.getByRole('menuitem', { name: en['menu.rename'] }))
+    return screen.getByRole('textbox', { name: en['menu.newName'] })
+  }
+  const warning = (): HTMLElement | null => screen.queryByRole('alert')
+
+  it.each([
+    [
+      'remote',
+      async (): Promise<void> => {
+        h = setupExplorer({
+          remote: { [DIR]: [ftp('a.txt'), ftp('b.txt'), ftp('docs', { dir: true })] }
+        })
+        await renderExplorer(remoteLoc(DIR))
+      }
+    ],
+    [
+      'local',
+      async (): Promise<void> => {
+        h = setupExplorer({
+          local: {
+            [LDIR]: [local(LDIR, 'a.txt'), local(LDIR, 'b.txt'), local(LDIR, 'docs', { dir: true })]
+          }
+        })
+        await renderExplorer(localLoc(LDIR))
+      }
+    ]
+  ] as const)('warns on %s as soon as the name matches another item', async (_side, open) => {
+    // covers: Test-1330
+    await open()
+    const input = startRename()
+    expect(warning()).toBeNull()
+    for (const taken of ['b.txt', 'docs', ' docs ']) {
+      fireEvent.change(input, { target: { value: taken } })
+      expect(warning()).not.toBeNull()
+      expect(warning()?.textContent).toBe(en['name.taken'])
+      expect(input.getAttribute('aria-invalid')).toBe('true')
+    }
+    for (const free of ['c.txt', 'a.txt']) {
+      fireEvent.change(input, { target: { value: free } })
+      expect(warning()).toBeNull()
+      expect(input.getAttribute('aria-invalid')).toBe('false')
+    }
+  })
+
+  describe('on a remote folder', () => {
+    beforeEach(async () => {
+      h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('docs', { dir: true })] } })
+      await renderExplorer(remoteLoc(DIR))
+    })
+
+    it('keeps editing on Enter without sending the rename', async () => {
+      // covers: Test-1331
+      const input = startRename()
+      fireEvent.change(input, { target: { value: 'docs' } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+      await flush()
+      expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+      expect(screen.getByRole('textbox', { name: en['menu.newName'] })).toBe(input)
+      expect(warning()).not.toBeNull()
+    })
+
+    it('cancels on blur without IPC or an error toast', async () => {
+      // covers: Test-1332
+      const input = startRename()
+      fireEvent.change(input, { target: { value: 'docs' } })
+      fireEvent.blur(input)
+      await flush()
+      expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+      expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+      expect(toastError).not.toHaveBeenCalled()
+      expect(option('a.txt')).toBeTruthy()
+    })
+  })
+
+  it('counts items hidden by the hidden-files setting and by find', async () => {
+    // covers: Test-1333
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('.secret'), ftp('notes.md')] } })
+    await renderExplorer(remoteLoc(DIR))
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'a' }))
+    expect(screen.queryByRole('option', { name: /notes\.md/ })).toBeNull()
+    expect(screen.queryByRole('option', { name: /\.secret/ })).toBeNull()
+    const input = startRename()
+    for (const taken of ['.secret', 'notes.md']) {
+      fireEvent.change(input, { target: { value: taken } })
+      expect(warning()).not.toBeNull()
+      expect(warning()?.textContent).toBe(en['name.taken'])
+    }
+  })
+
+  it('treats the untouched original name as free even with surrounding spaces', async () => {
+    // covers: Test-1334
+    h = setupExplorer({ remote: { [DIR]: [ftp(' a.txt'), ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const input = startRename(' a.txt')
+    expect(warning()).toBeNull()
+    expect(input.getAttribute('aria-invalid')).toBe('false')
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+  })
+
+  it('keeps editing when the window loses focus', async () => {
+    // covers: Test-1336
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('docs', { dir: true })] } })
+    await renderExplorer(remoteLoc(DIR))
+    const input = startRename()
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    onTestFinished(() => hasFocus.mockRestore())
+    for (const typed of ['docs', 'c.txt']) {
+      fireEvent.change(input, { target: { value: typed } })
+      fireEvent.blur(input)
+      await flush()
+      expect(screen.getByRole('textbox', { name: en['menu.newName'] })).toBe(input)
+    }
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+
+    // 창으로 돌아온 뒤에는 바깥 클릭이 다시 제출한다
+    hasFocus.mockRestore()
+    fireEvent.blur(input)
+    await flush()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([
+      [server(), `${DIR}/a.txt`, `${DIR}/c.txt`]
+    ])
+  })
+
+  it('closes an editor whose item leaves the folder while the window is away', async () => {
+    // covers: Test-1337
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('docs', { dir: true })] } })
+    await renderExplorer(remoteLoc(DIR))
+    const input = startRename()
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    onTestFinished(() => hasFocus.mockRestore())
+    fireEvent.change(input, { target: { value: 'c.txt' } })
+    fireEvent.blur(input)
+
+    h.remote[DIR] = [ftp('docs', { dir: true })]
+    key('F5')
+    await flush()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(document.activeElement).not.toBe(document.body)
+
+    // 같은 이름이 다시 나타나도 편집이 저절로 열리지 않는다
+    h.remote[DIR] = [ftp('a.txt'), ftp('docs', { dir: true })]
+    key('F5')
+    await flush()
+    expect(option('a.txt')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+  })
+
+  it('keeps the new folder editor open when its own reload is superseded by another', async () => {
+    // covers: Test-1338
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const waits: Array<() => void> = []
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise((resolve) =>
+        waits.push(() => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    expect(waits).toHaveLength(1)
+    // mkdir 알림(ftp:remoteChanged)의 무효화가 두 번째 읽기를 시작해 첫 결과를 버리게 한다
+    act(() => useListingStore.getState().invalidate('remote', server(), DIR))
+    await act(async () => waits[0]())
+    await flush()
+    await act(async () => waits[1]())
+    await flush()
+
+    expect(within(option('New folder')).getByRole('textbox')).toBeTruthy()
+  })
+
+  it('closes the editor when the tab moves to the same path on another server', async () => {
+    // covers: Test-1378
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('docs', { dir: true })] } })
+    await renderExplorer(remoteLoc(DIR))
+    const input = startRename()
+    fireEvent.change(input, { target: { value: 'c.txt' } })
+    const staging = connKey('staging.org', 21, '')
+    setConnection(staging, 'connected')
+
+    act(() => useTabsStore.getState().navigate({ side: 'remote', path: DIR, server: staging }))
+    await flush()
+    await flush()
+
+    expect(option('a.txt')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+
+    // 처음 위치로 돌아와도 편집은 다시 열리지 않는다
+    act(() => useTabsStore.getState().navigate(remoteLoc(DIR)))
+    await flush()
+    await flush()
+    expect(option('a.txt')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+  })
+
+  it('offers no rename for the old listing shown while a new location loads', async () => {
+    // covers: Test-1382
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('b.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const staging = connKey('staging.org', 21, '')
+    setConnection(staging, 'connected')
+    h.handlers['ftp:list'] = () => new Promise(() => undefined)
+    act(() => useTabsStore.getState().navigate({ side: 'remote', path: DIR, server: staging }))
+    await flush()
+
+    key('ArrowRight')
+    key('F10', { shiftKey: true })
+    const rename = screen.getByRole('menuitem', { name: new RegExp(en['menu.rename']) })
+    expect(rename.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(rename)
+    key('F2')
+    await flush()
+
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
+  })
+
+  it('keeps a waiting new folder editor when focus moves within the pane or comes back from another app', async () => {
+    // covers: Test-1383
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const waits: Array<() => void> = []
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise((resolve) =>
+        waits.push(() => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    // 포커스가 탐색기 밖(다른 패널의 버튼 등)에 있는 채 새 폴더를 만든다
+    const outside = document.createElement('button')
+    document.body.append(outside)
+    onTestFinished(() => outside.remove())
+    act(() => outside.focus())
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    act(() => useListingStore.getState().invalidate('remote', server(), DIR))
+    await act(async () => waits[0]())
+    await flush()
+    // 다른 앱에 다녀오면 포커스가 있던 그 요소에 focusin이 다시 온다
+    fireEvent.focusIn(outside)
+    // 탐색기 안의 버튼이나 목록으로 옮기는 것도 떠난 것이 아니다
+    const refresh = screen.getAllByRole('button', { name: /Refresh/ })[0]
+    act(() => refresh.focus())
+    expect(document.activeElement).toBe(refresh)
+    act(() => listbox().focus())
+    expect(document.activeElement).toBe(listbox())
+    await act(async () => waits[1]())
+    await flush()
+
+    expect(within(option('New folder')).getByRole('textbox')).toBeTruthy()
+  })
+
+  it('drops a waiting new folder editor when the user goes to the find box', async () => {
+    // covers: Test-1385
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const waits: Array<() => void> = []
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise((resolve) =>
+        waits.push(() => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    act(() => useListingStore.getState().invalidate('remote', server(), DIR))
+    await act(async () => waits[0]())
+    await flush()
+
+    key('f', { ctrlKey: true })
+    const find = screen.getByRole('textbox', { name: en['filter.find'] })
+    act(() => find.focus())
+    await act(async () => waits[1]())
+    await flush()
+
+    expect(option('New folder')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(document.activeElement).toBe(find)
+  })
+
+  it('drops a waiting new folder editor when the user was already in the find box', async () => {
+    // covers: Test-1385
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const waits: Array<() => void> = []
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise((resolve) =>
+        waits.push(() => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    // 기다림이 시작되기 전에 찾기 칸으로 간다
+    key('f', { ctrlKey: true })
+    const find = screen.getByRole('textbox', { name: en['filter.find'] })
+    act(() => find.focus())
+    act(() => useListingStore.getState().invalidate('remote', server(), DIR))
+    await act(async () => waits[0]())
+    await flush()
+    await act(async () => waits[1]())
+    await flush()
+
+    expect(option('New folder')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(document.activeElement).toBe(find)
+  })
+
+  it('opens no new folder editor when the user went to type in the find box meanwhile', async () => {
+    // covers: Test-1386
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    let listed = (): void => undefined
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise(
+        (resolve) =>
+          (listed = () => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    // 새 폴더의 목록 읽기(밀리지 않은)가 끝나기 전에 찾기 칸으로 가서 친다
+    key('f', { ctrlKey: true })
+    const find = screen.getByRole('textbox', { name: en['filter.find'] })
+    act(() => find.focus())
+    await act(async () => listed())
+    await flush()
+
+    expect(option('New folder')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(document.activeElement).toBe(find)
+  })
+
+  it('leaves a rename the user opened meanwhile instead of replacing it with the new folder', async () => {
+    // covers: Test-1387
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    let listed = (): void => undefined
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise(
+        (resolve) =>
+          (listed = () => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    // 새 폴더의 목록이 오기 전에 a.txt의 이름을 바꾸기 시작한다
+    const input = startRename()
+    fireEvent.change(input, { target: { value: 'half-typed' } })
+    await act(async () => listed())
+    await flush()
+
+    expect(within(option('a.txt')).getByRole('textbox')).toBe(input)
+    expect((input as HTMLInputElement).value).toBe('half-typed')
+    expect(within(option('New folder')).queryByRole('textbox')).toBeNull()
+  })
+
+  it('opens the new folder editor over a rename that scrolled out of view', async () => {
+    // covers: Test-1388
+    // 브라우저처럼 scrollTop은 내용에 맞춰 자르고, 가상화 목록은 scrollTo로 스크롤한다
+    const tops = new WeakMap<object, number>()
+    Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return tops.get(this) ?? 0
+      },
+      set(this: HTMLElement, v: number) {
+        const content =
+          parseFloat(
+            (this.firstElementChild?.firstElementChild as HTMLElement | null)?.style.height ?? ''
+          ) || 0
+        tops.set(this, Math.max(0, Math.min(v, content - this.clientHeight)))
+      }
+    })
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      value(this: HTMLElement, o: { top: number }) {
+        this.scrollTop = o.top
+      }
+    })
+    onTestFinished(() => {
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollTop')
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo')
+    })
+    const names = Array.from({ length: 200 }, (_, i) => `f${String(i).padStart(3, '0')}.jpg`)
+    await remoteFiles(names, { view: 'list' })
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    startRename('f000.jpg')
+    // 휠로 편집하던 행을 넘기면 입력이 사라진다(편집 상태는 남는다)
+    act(() => {
+      listbox().scrollTop = 4000
+      fireEvent.scroll(listbox())
+    })
+    await flush()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+
+    act(() => listbox().focus())
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    act(() => {
+      listbox().scrollTop = 0
+      fireEvent.scroll(listbox())
+    })
+    await flush()
+
+    expect(within(option('New folder')).getByRole('textbox')).toBeTruthy()
+    expect(within(option('f000.jpg')).queryByRole('textbox')).toBeNull()
+  })
+
+  it('drops a waiting new folder editor when focus leaves the list before it appears', async () => {
+    // covers: Test-1379
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const waits: Array<() => void> = []
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    h.handlers['ftp:list'] = (_conn, path) =>
+      new Promise((resolve) =>
+        waits.push(() => resolve({ success: true, data: { path, entries: h.remote[DIR] } }))
+      )
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    act(() => useListingStore.getState().invalidate('remote', server(), DIR))
+    await act(async () => waits[0]())
+    await flush()
+    // 두 번째 목록을 기다리는 사이 사용자가 다른 입력 칸으로 간다
+    const elsewhere = document.createElement('input')
+    document.body.append(elsewhere)
+    onTestFinished(() => elsewhere.remove())
+    act(() => elsewhere.focus())
+    await act(async () => waits[1]())
+    await flush()
+
+    expect(option('New folder')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+    expect(document.activeElement).toBe(elsewhere)
+  })
+
+  it('closes a new folder editor that find hides and never reopens it', async () => {
+    // covers: Test-1339
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.jpg')] } })
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    await renderExplorer(remoteLoc(DIR))
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: 'jpg' }))
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    expect(invokeCalls(h.invoke, 'ftp:mkdir')).toHaveLength(1)
+
+    act(() => useTabsStore.getState().patchTab(activeTab().id, { query: '' }))
+    await flush()
+    expect(option('New folder')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: en['menu.newName'] })).toBeNull()
+  })
+
+  it('shows the warning as a described, click-through note scrolled into view', async () => {
+    // covers: Test-1335
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    onTestFinished(() => {
+      delete (Element.prototype as Partial<Element>).scrollIntoView
+    })
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('docs', { dir: true })] } })
+    await renderExplorer(remoteLoc(DIR))
+    const input = startRename()
+    fireEvent.change(input, { target: { value: 'docs' } })
+    const note = warning() as HTMLElement
+    expect(input.getAttribute('aria-describedby')).toBe(note.id)
+    expect(note.className).toContain('pointer-events-none')
+    expect(note.className).toContain('[overflow-wrap:anywhere]')
+    expect(note.className).toContain('min-w-[5rem]')
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
+    expect(scroll.mock.contexts.at(-1)).toBe(note)
+    // 경고가 이어지는 동안 입력할 때마다 스크롤하지 않는다
+    fireEvent.change(input, { target: { value: 'docs ' } })
+    fireEvent.change(input, { target: { value: ' docs' } })
+    expect(scroll).toHaveBeenCalledTimes(1)
+  })
+})
+
 // ---------- 선택 = 포커스(explorer-menu-and-focus F1~F10) ----------
 
 const activeId = (): string | null => listbox().getAttribute('aria-activedescendant')
@@ -1536,6 +2054,19 @@ describe('Explorer — selection is the focus', () => {
     pressEmpty()
     expect(selectionOf()).toEqual(CLEARED)
   })
+
+  it.each(['grid', 'list'] as const)(
+    'lets the %s marquee box fill the scroller so a drag can start below the last item',
+    async (view) => {
+      // covers: Test-1329
+      await remoteFiles(['a.txt', 'b.txt'], { view })
+      const box = option('a.txt').parentElement as HTMLElement
+      const wrapper = box.parentElement as HTMLElement
+      expect(box.style.minHeight).toBe('100%')
+      expect(wrapper.parentElement?.id).toBe(`explorer-list-${activeTab().id}`)
+      expect(wrapper.classList.contains('h-full')).toBe(true)
+    }
+  )
 
   it('moves the selection with Ctrl or Cmd plus an arrow and adds a range with Ctrl+Shift', async () => {
     // covers: Test-859

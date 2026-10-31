@@ -100,6 +100,19 @@ describe('TransferHub', () => {
     expect(onB.clear).toHaveBeenCalledTimes(1)
   })
 
+  it('cancels many jobs across queues with one scan of the job lists', async () => {
+    // covers: Test-1356
+    const [, a2] = queueOf(A).enqueueBatch('download', [item('/a1'), item('/a2')])
+    const [b1, b2] = queueOf(B).enqueueBatch('download', [item('/b1'), item('/b2')])
+    const scans = [A, B].map((key) => vi.spyOn(queueOf(key), 'getAll'))
+
+    hub.cancelMany([a2, b1, 'unknown', b2])
+
+    expect(scans.map((scan) => scan.mock.calls.length)).toEqual([1, 1])
+    expect(statusOf(A)).toEqual(['pending', 'cancelled'])
+    expect(statusOf(B)).toEqual(['cancelled', 'cancelled'])
+  })
+
   it("merges both queues' updates into one stream that the job tracker follows", async () => {
     // covers: Test-976
     const updates: TransferUpdate[] = []

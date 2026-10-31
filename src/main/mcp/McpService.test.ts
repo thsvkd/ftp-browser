@@ -6,7 +6,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import Database from 'better-sqlite3'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
-import { McpService, buildClaudeCodeCommand } from './McpService'
+import { McpService, buildClaudeCodeCommand, buildCodexConfig, buildJsonConfig } from './McpService'
 import { createMcpToolServer } from './mcpTools'
 import { createHarness } from './__fixtures__/agentHarness'
 
@@ -282,6 +282,48 @@ describe('McpService settings', () => {
       'claude mcp add --scope user --transport http ftp-browser http://127.0.0.1:47821/mcp ' +
         '--header "Authorization: Bearer abc-123_XYZ"'
     )
+  })
+
+  it('builds the Codex config.toml snippet and the mcpServers JSON from the URL and token', () => {
+    // covers: Test-1340
+    const url = 'http://127.0.0.1:47821/mcp'
+    expect(buildCodexConfig(url, 'abc-123_XYZ')).toBe(
+      '[mcp_servers.ftp-browser]\n' +
+        'url = "http://127.0.0.1:47821/mcp"\n' +
+        'http_headers = { Authorization = "Bearer abc-123_XYZ" }\n'
+    )
+    expect(JSON.parse(buildJsonConfig(url, 'abc-123_XYZ'))).toEqual({
+      mcpServers: {
+        'ftp-browser': {
+          type: 'http',
+          url,
+          headers: { Authorization: 'Bearer abc-123_XYZ' }
+        }
+      }
+    })
+    expect(buildJsonConfig(url, 't')).toContain('\n  "mcpServers"')
+  })
+
+  it('escapes quotes and backslashes in the Codex TOML values', () => {
+    // covers: Test-1367
+    expect(buildCodexConfig('http://h/"x', 'a"b\\c')).toBe(
+      '[mcp_servers.ftp-browser]\n' +
+        'url = "http://h/\\"x"\n' +
+        'http_headers = { Authorization = "Bearer a\\"b\\\\c" }\n'
+    )
+  })
+
+  it('carries the Codex and JSON configs with the current token', async () => {
+    // covers: Test-1341
+    const state = await service.setEnabled(true)
+    const token = tokenIn(db)!
+    expect(state.codexConfig).toBe(buildCodexConfig(state.url, token))
+    expect(state.jsonConfig).toBe(buildJsonConfig(state.url, token))
+
+    const renewed = service.regenerateToken()
+    const newToken = tokenIn(db)!
+    expect(renewed.codexConfig).toBe(buildCodexConfig(renewed.url, newToken))
+    expect(renewed.jsonConfig).toBe(buildJsonConfig(renewed.url, newToken))
   })
 })
 

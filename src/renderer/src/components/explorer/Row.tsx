@@ -30,7 +30,11 @@ export function Row(p: ItemProps & { top: number }): React.JSX.Element {
           <EntryThumb entry={entry} glyph="h-4 w-4" showSlow={false} ext={false} />
         </span>
         {p.renaming ? (
-          <InlineRename initial={entry.name} onDone={(n) => p.onRename(entry, n)} />
+          <InlineRename
+            initial={entry.name}
+            taken={p.nameTaken}
+            onDone={(n) => p.onRename(entry, n)}
+          />
         ) : (
           <span className="truncate text-[13px]" title={entry.name}>
             {entry.name}

@@ -57,6 +57,8 @@ type InvokeChannel =
   | 'mcp:getState'
   | 'mcp:setEnabled'
   | 'mcp:regenerateToken'
+  | 'agent:stop'
+  | 'agent:getActivity'
 
 type EventChannel =
   | 'ftp:connectionStatus'
@@ -70,6 +72,7 @@ type EventChannel =
   | 'update:stateChanged'
   | 'ftp:remoteChanged'
   | 'agent:session'
+  | 'agent:activity'
 
 interface FtpBrowserAPI {
   invoke: <T>(channel: InvokeChannel, ...args: unknown[]) => Promise<T>
