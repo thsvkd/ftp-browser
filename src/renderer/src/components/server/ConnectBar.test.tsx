@@ -863,32 +863,30 @@ describe('activation — click selects, double-click connects', () => {
     // 드롭다운 행 아래에 있던 것(탐색기의 항목 등)
     const under = document.createElement('button')
     const reached = vi.fn()
-    for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click', 'dblclick'])
+    for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick'])
       under.addEventListener(type, reached)
     document.body.append(under)
     onTestFinished(() => under.remove())
 
     await user.click(await screen.findByTitle('Switch server'))
-    // 첫 클릭이 서버를 바꾸며 행이 사라진다
+    // 첫 클릭이 서버를 바꾸며 행이 사라진다. 같은 더블클릭의 두 번째 누름은 곧바로 아래 요소 자리에 온다
     fireEvent.click(within(savedList()).getByText('Bob'), { detail: 1, clientX: 100, clientY: 40 })
-    await drain()
-    await waitFor(() => expect(document.activeElement).toBe(passwordField()))
-
-    // 같은 더블클릭의 두 번째 누름은 아래 요소에 닿지 않고 포커스도 옮기지 않는다
-    const at = { clientX: 101, clientY: 41 }
+    const at = { clientX: 101, clientY: 41, button: 0 }
     fireEvent.pointerDown(under, at)
+    // mousedown의 기본 동작(포커스 옮기기)이 막힌다
     expect(fireEvent.mouseDown(under, { ...at, detail: 2 })).toBe(false)
-    fireEvent.pointerUp(under, at)
+    expect(fireEvent.pointerUp(under, at)).toBe(false)
     fireEvent.mouseUp(under, { ...at, detail: 2 })
     fireEvent.click(under, { ...at, detail: 2 })
     fireEvent.dblClick(under, { ...at, detail: 2 })
     expect(reached).not.toHaveBeenCalled()
-    expect(document.activeElement).toBe(passwordField())
+    await drain()
+    await waitFor(() => expect(document.activeElement).toBe(passwordField()))
 
-    // 그다음의 새 클릭은 그대로 닿는다
+    // 그다음의 새 클릭은 mousedown부터 닿는다
     fireEvent.pointerDown(under, at)
     expect(fireEvent.mouseDown(under, { ...at, detail: 1 })).toBe(true)
-    expect(reached).toHaveBeenCalledTimes(2)
+    expect(reached).toHaveBeenCalledTimes(1)
   })
 
   it('swallows the second press after a click on the server the tab already uses', async () => {
@@ -915,8 +913,8 @@ describe('activation — click selects, double-click connects', () => {
     })
     const under = document.createElement('button')
     const reached = vi.fn()
-    under.addEventListener('mousedown', reached)
-    under.addEventListener('dblclick', reached)
+    for (const type of ['pointerdown', 'mousedown', 'dblclick'])
+      under.addEventListener(type, reached)
     document.body.append(under)
     onTestFinished(() => under.remove())
 
@@ -928,8 +926,10 @@ describe('activation — click selects, double-click connects', () => {
     })
     expect(screen.queryByRole('listbox', { name: 'Saved servers' })).toBeNull()
 
-    fireEvent.mouseDown(under, { clientX: 100, clientY: 40, detail: 2 })
-    fireEvent.dblClick(under, { clientX: 100, clientY: 40, detail: 2 })
+    const at = { clientX: 100, clientY: 40, button: 0 }
+    fireEvent.pointerDown(under, at)
+    fireEvent.mouseDown(under, { ...at, detail: 2 })
+    fireEvent.dblClick(under, { ...at, detail: 2 })
     expect(reached).not.toHaveBeenCalled()
   })
 
