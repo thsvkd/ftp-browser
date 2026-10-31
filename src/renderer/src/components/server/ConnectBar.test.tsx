@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { act, render, screen, cleanup, waitFor, within } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest'
+import { act, render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useFtpStore } from '@renderer/stores/useFtpStore'
 import { useServerStore } from '@renderer/stores/useServerStore'
@@ -836,6 +836,101 @@ describe('activation — click selects, double-click connects', () => {
     expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(0)
     await waitFor(() => expect(document.activeElement).toBe(passwordField()))
     expect(addressInput().value).toBe('bob@bob.local:21')
+  })
+
+  it('swallows the rest of a double-click whose first click switched servers', async () => {
+    // covers: Test-1396
+    mockIpc([NAS, BOB])
+    const user = userEvent.setup()
+    renderToolbar()
+    await screen.findByRole('button', { name: /Home NAS/, expanded: false })
+    act(() => {
+      useFtpStore.setState({
+        connections: {
+          'anonymous@nas.local:21': {
+            status: 'connected',
+            host: 'nas.local',
+            port: 21,
+            user: 'anonymous',
+            error: null
+          }
+        }
+      })
+      useTabsStore
+        .getState()
+        .openTab({ side: 'remote', path: '/', server: 'anonymous@nas.local:21' })
+    })
+    // 드롭다운 행 아래에 있던 것(탐색기의 항목 등)
+    const under = document.createElement('button')
+    const reached = vi.fn()
+    for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click', 'dblclick'])
+      under.addEventListener(type, reached)
+    document.body.append(under)
+    onTestFinished(() => under.remove())
+
+    await user.click(await screen.findByTitle('Switch server'))
+    // 첫 클릭이 서버를 바꾸며 행이 사라진다
+    fireEvent.click(within(savedList()).getByText('Bob'), { detail: 1, clientX: 100, clientY: 40 })
+    await drain()
+    await waitFor(() => expect(document.activeElement).toBe(passwordField()))
+
+    // 같은 더블클릭의 두 번째 누름은 아래 요소에 닿지 않고 포커스도 옮기지 않는다
+    const at = { clientX: 101, clientY: 41 }
+    fireEvent.pointerDown(under, at)
+    expect(fireEvent.mouseDown(under, { ...at, detail: 2 })).toBe(false)
+    fireEvent.pointerUp(under, at)
+    fireEvent.mouseUp(under, { ...at, detail: 2 })
+    fireEvent.click(under, { ...at, detail: 2 })
+    fireEvent.dblClick(under, { ...at, detail: 2 })
+    expect(reached).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(passwordField())
+
+    // 그다음의 새 클릭은 그대로 닿는다
+    fireEvent.pointerDown(under, at)
+    expect(fireEvent.mouseDown(under, { ...at, detail: 1 })).toBe(true)
+    expect(reached).toHaveBeenCalledTimes(2)
+  })
+
+  it('swallows the second press after a click on the server the tab already uses', async () => {
+    // covers: Test-1396
+    mockIpc([NAS, BOB])
+    const user = userEvent.setup()
+    renderToolbar()
+    await screen.findByRole('button', { name: /Home NAS/, expanded: false })
+    act(() => {
+      useFtpStore.setState({
+        connections: {
+          'anonymous@nas.local:21': {
+            status: 'connected',
+            host: 'nas.local',
+            port: 21,
+            user: 'anonymous',
+            error: null
+          }
+        }
+      })
+      useTabsStore
+        .getState()
+        .openTab({ side: 'remote', path: '/', server: 'anonymous@nas.local:21' })
+    })
+    const under = document.createElement('button')
+    const reached = vi.fn()
+    under.addEventListener('mousedown', reached)
+    under.addEventListener('dblclick', reached)
+    document.body.append(under)
+    onTestFinished(() => under.remove())
+
+    await user.click(await screen.findByTitle('Switch server'))
+    fireEvent.click(within(savedList()).getByText('Home NAS'), {
+      detail: 1,
+      clientX: 100,
+      clientY: 40
+    })
+    expect(screen.queryByRole('listbox', { name: 'Saved servers' })).toBeNull()
+
+    fireEvent.mouseDown(under, { clientX: 100, clientY: 40, detail: 2 })
+    fireEvent.dblClick(under, { clientX: 100, clientY: 40, detail: 2 })
+    expect(reached).not.toHaveBeenCalled()
   })
 
   it('returns to the connected bar when focus leaves the toolbar in input mode', async () => {

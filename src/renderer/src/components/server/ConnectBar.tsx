@@ -15,6 +15,7 @@ import {
   type ServerDraft
 } from '@renderer/lib/serverAddress'
 import { connectSaved } from '@renderer/lib/sendItems'
+import { swallowRestOfDoubleClick } from '@renderer/lib/swallowDoubleClick'
 import type { FtpServer } from '@shared/types/ftp'
 import { PasswordInput } from './ServerForm'
 import { SavedServersPopover } from './SavedServersPopover'
@@ -101,7 +102,10 @@ export function ConnectBar(): React.JSX.Element {
   }
 
   // 연결 중 클릭은 스토어가 무시한다(select·connect가 아무것도 바꾸지 않음).
-  const pick = (server: FtpServer, andConnect: boolean): void => {
+  const pick = (server: FtpServer, andConnect: boolean, at?: { x: number; y: number }): void => {
+    // 연결된 상태의 클릭은 곧바로 목록을 닫는다(바꾸거나 그대로 닫기). 이어지는 더블클릭의 두 번째 누름이 그
+    // 아래(탐색기)에 닿지 않게 한다(connect-bar-double-click C1).
+    if (isConnected && !andConnect && at) swallowRestOfDoubleClick(at)
     // 이미 연결된 서버(활성 탭의 서버)를 다시 고르면 다시 잇지 않고 닫기만 한다.
     if (isConnected && server.id === (activeSaved?.id ?? draft.id)) {
       closePopover()
