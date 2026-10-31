@@ -1678,6 +1678,39 @@ describe('Explorer — rename to a name that is already taken', () => {
     expect(invokeCalls(h.invoke, 'ftp:rename')).toEqual([])
   })
 
+  it('offers no delete for the old listing shown while a new location loads', async () => {
+    // covers: Test-1389
+    useSettingsStore.setState({ confirmBeforeDelete: true })
+    h = setupExplorer({ remote: { [DIR]: [ftp('a.txt'), ftp('b.txt')] } })
+    await renderExplorer(remoteLoc(DIR))
+    const staging = connKey('staging.org', 21, '')
+    setConnection(staging, 'connected')
+    h.handlers['ftp:list'] = () => new Promise(() => undefined)
+    const deleteItem = (): HTMLElement =>
+      screen.getByRole('menuitem', { name: new RegExp(`^${en['common.delete']}`) })
+
+    // 목록이 보일 때 연 메뉴: 탭이 옮겨 가면 삭제가 꺼진다
+    fireEvent.contextMenu(option('a.txt'))
+    expect(deleteItem().hasAttribute('disabled')).toBe(false)
+    act(() => useTabsStore.getState().navigate({ side: 'remote', path: DIR, server: staging }))
+    await flush()
+    expect(deleteItem().hasAttribute('disabled')).toBe(true)
+    fireEvent.click(deleteItem())
+    await flush()
+
+    // 옛 목록에서 새로 연 메뉴도 같다
+    key('Escape')
+    key('ArrowRight')
+    key('F10', { shiftKey: true })
+    expect(deleteItem().hasAttribute('disabled')).toBe(true)
+    fireEvent.click(deleteItem())
+    key('Delete')
+    await flush()
+
+    expect(useConfirmStore.getState().request).toBeNull()
+    expect(invokeCalls(h.invoke, 'ftp:deleteBatch')).toEqual([])
+  })
+
   it('keeps a waiting new folder editor when focus moves within the pane or comes back from another app', async () => {
     // covers: Test-1383
     h = setupExplorer({ remote: { [DIR]: [ftp('a.txt')] } })
@@ -1887,6 +1920,70 @@ describe('Explorer — rename to a name that is already taken', () => {
 
     expect(within(option('New folder')).getByRole('textbox')).toBeTruthy()
     expect(within(option('f000.jpg')).queryByRole('textbox')).toBeNull()
+  })
+
+  it('scrolls to a new folder made while scrolled down, once', async () => {
+    // covers: Test-1390
+    // 브라우저처럼 scrollTop은 내용에 맞춰 자르고, 가상화 목록은 scrollTo로 스크롤한다
+    const tops = new WeakMap<object, number>()
+    Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return tops.get(this) ?? 0
+      },
+      set(this: HTMLElement, v: number) {
+        const content =
+          parseFloat(
+            (this.firstElementChild?.firstElementChild as HTMLElement | null)?.style.height ?? ''
+          ) || 0
+        tops.set(this, Math.max(0, Math.min(v, content - this.clientHeight)))
+      }
+    })
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      value(this: HTMLElement, o: { top: number }) {
+        this.scrollTop = o.top
+      }
+    })
+    onTestFinished(() => {
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollTop')
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo')
+    })
+    const names = Array.from({ length: 200 }, (_, i) => `f${String(i).padStart(3, '0')}.jpg`)
+    await remoteFiles(names, { view: 'list' })
+    h.handlers['ftp:mkdir'] = () => {
+      h.remote[DIR] = [...h.remote[DIR], ftp('New folder', { dir: true })]
+      return { success: true }
+    }
+    act(() => {
+      listbox().scrollTop = 4000
+      fireEvent.scroll(listbox())
+    })
+    await flush()
+    const bottom = listbox().scrollTop
+    expect(bottom).toBeGreaterThan(0)
+
+    act(() => listbox().focus())
+    key('N', { ctrlKey: true, shiftKey: true })
+    await flush()
+    await flush()
+    // 브라우저는 scrollTop이 바뀌면 scroll 이벤트를 보낸다
+    act(() => {
+      fireEvent.scroll(listbox())
+    })
+    await flush()
+
+    expect(listbox().scrollTop).toBe(0)
+    const input = within(option('New folder')).getByRole('textbox')
+    expect(document.activeElement).toBe(input)
+
+    // 열린 뒤 사용자가 넘기는 것은 막지 않는다
+    act(() => {
+      listbox().scrollTop = 4000
+      fireEvent.scroll(listbox())
+    })
+    await flush()
+    expect(listbox().scrollTop).toBe(bottom)
   })
 
   it('drops a waiting new folder editor when focus leaves the list before it appears', async () => {

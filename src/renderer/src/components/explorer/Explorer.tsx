@@ -508,6 +508,16 @@ function TabExplorer({
     setRenaming(null)
     if (document.activeElement === document.body) refocus()
   }, [renaming, renameHere, settling, indexOf])
+  // 편집을 연 항목이 보이는 영역 밖이면(아래로 스크롤한 채 만든 새 폴더는 맨 위에 생긴다) 열 때 한 번 그리로
+  // 스크롤한다. 그 뒤 사용자가 넘기는 것은 막지 않는다(N13).
+  const revealed = useRef<typeof renaming>(null)
+  useLayoutEffect(() => {
+    if (!renaming || !renameHere || revealed.current === renaming) return
+    const i = indexOf.get(renaming.path)
+    if (i === undefined) return
+    revealed.current = renaming
+    ensureVisible(i)
+  })
   /** 사용자가 목록 밖의 입력 칸에서 치고 있다. 그때 새 폴더 입력이 열리면 치던 글자를 가로챈다(N11). */
   const typingElsewhere = (target: EventTarget | null): boolean =>
     isTyping(target) && !scrollRef.current?.contains(target as Node)
@@ -733,7 +743,9 @@ function TabExplorer({
         icon: Trash2,
         shortcut: 'Del',
         danger: true,
-        onSelect: () => void askDelete(target)
+        // 옛 목록(pending)의 경로를 새 위치에서 지우지 않는다(N12)
+        disabled: !interactive,
+        onSelect: () => interactive && void askDelete(target)
       },
       'sep',
       {
