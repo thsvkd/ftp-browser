@@ -1,12 +1,17 @@
 /** @vitest-environment jsdom */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { act, render, screen, cleanup, waitFor, within } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest'
+import { act, render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useServerStore } from '@renderer/stores/useServerStore'
 import { emptyDraft, toDraft } from '@renderer/lib/serverAddress'
 import { invokeCalls, makeApiMock } from '@renderer/test/rendererTestUtils'
 import { ErrorCode } from '@shared/types/ipc'
-import type { FtpServer, FtpServerInput, PasswordProtection } from '@shared/types/ftp'
+import type {
+  FtpConnectPayload,
+  FtpServer,
+  FtpServerInput,
+  PasswordProtection
+} from '@shared/types/ftp'
 import { ServerManagerDialog } from './ServerManagerDialog'
 
 const mockInvoke = vi.fn()
@@ -404,5 +409,388 @@ describe('ServerManagerDialog — activation on double-click', () => {
     await drain()
     expect(keptOpen).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog')).toBeTruthy()
+  })
+})
+
+describe('ServerManagerDialog — anonymous login', () => {
+  /** 사용자 이름이 있는 두 번째 저장 서버(저장된 비밀번호 없음). */
+  const ME: FtpServer = { ...NAS, id: 3, name: 'Me', host: 'me.local', username: 'me' }
+  const anonymousBox = (): HTMLInputElement =>
+    screen.getByRole('checkbox', { name: 'Log in anonymously' }) as HTMLInputElement
+  const userField = (): HTMLInputElement => screen.getByLabelText('Username') as HTMLInputElement
+  const passwordField = (): HTMLInputElement =>
+    screen.getByLabelText('Password', { selector: 'input' }) as HTMLInputElement
+  const hostField = (): HTMLInputElement => screen.getByLabelText('Host') as HTMLInputElement
+
+  it('opens checked for a server without a username and for a new server, unchecked for one with a username', async () => {
+    // covers: Test-1309
+    saved = [NAS, ME]
+    useServerStore.setState({ servers: [NAS, ME] })
+    const user = userEvent.setup()
+    render(<ServerManagerDialog initial={toDraft(NAS)} onClose={vi.fn()} />)
+
+    expect(anonymousBox().checked).toBe(true)
+    expect(userField().disabled).toBe(true)
+    expect(passwordField().disabled).toBe(true)
+
+    await user.click(within(screen.getByRole('listbox')).getByText('Me'))
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().disabled).toBe(false)
+    expect(passwordField().disabled).toBe(false)
+    expect(userField().value).toBe('me')
+
+    await user.click(screen.getByRole('button', { name: 'New server' }))
+    expect(anonymousBox().checked).toBe(true)
+    expect(userField().disabled).toBe(true)
+    expect(passwordField().disabled).toBe(true)
+  })
+
+  it('clears the login and drops the saved password when checked, and saves it that way', async () => {
+    // covers: Test-1310
+    saved = [LOCKED]
+    useServerStore.setState({ servers: [LOCKED] })
+    const user = userEvent.setup()
+    render(<ServerManagerDialog initial={toDraft(LOCKED)} onClose={vi.fn()} />)
+    expect(anonymousBox().checked).toBe(false)
+    expect(screen.getByRole('button', { name: 'Remove saved password' })).toBeTruthy()
+
+    await user.click(anonymousBox())
+
+    expect(anonymousBox().checked).toBe(true)
+    expect(userField().value).toBe('')
+    expect(userField().disabled).toBe(true)
+    expect(passwordField().disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Remove saved password' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:saveServer')).toHaveLength(1))
+    const payload = invokeCalls(mockInvoke, 'ftp:saveServer')[0][0] as FtpServerInput
+    expect(payload).toMatchObject({ id: 1, username: '', password: '' })
+  })
+
+  it('restores the login typed before checking when unchecked, and focuses the username', async () => {
+    // covers: Test-1311
+    saved = [LOCKED]
+    useServerStore.setState({ servers: [LOCKED] })
+    const user = userEvent.setup()
+    render(<ServerManagerDialog initial={toDraft(LOCKED)} onClose={vi.fn()} />)
+
+    await user.type(passwordField(), 'pw')
+    await user.click(anonymousBox())
+    expect(userField().value).toBe('')
+    expect(passwordField().value).toBe('')
+
+    await user.click(anonymousBox())
+
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('me')
+    expect(passwordField().value).toBe('pw')
+    expect(passwordField().placeholder).toBe('Saved password')
+    expect(screen.getByRole('button', { name: 'Remove saved password' })).toBeTruthy()
+    expect(userField().disabled).toBe(false)
+    expect(document.activeElement).toBe(userField())
+  })
+
+  it('unchecking a new server form enables an empty username and focuses it', async () => {
+    // covers: Test-1312
+    const user = userEvent.setup()
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    expect(anonymousBox().checked).toBe(true)
+
+    await user.click(anonymousBox())
+
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().disabled).toBe(false)
+    expect(userField().value).toBe('')
+    expect(document.activeElement).toBe(userField())
+  })
+
+  it('unchecks when a pasted address names a user, and stays checked for anonymous', () => {
+    // covers: Test-1313
+    const { unmount } = render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    expect(anonymousBox().checked).toBe(true)
+
+    fireEvent.paste(hostField(), { clipboardData: { getData: () => 'bob@nas.local:2121' } })
+
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().disabled).toBe(false)
+    expect(userField().value).toBe('bob')
+    unmount()
+
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    fireEvent.paste(hostField(), { clipboardData: { getData: () => 'anonymous@nas.local:2121' } })
+
+    expect(hostField().value).toBe('nas.local')
+    expect(anonymousBox().checked).toBe(true)
+    expect(userField().disabled).toBe(true)
+  })
+
+  it('connects anonymously after checking on a server with a username', async () => {
+    // covers: Test-1314
+    saved = [LOCKED]
+    useServerStore.setState({ servers: [LOCKED] })
+    const fallback = mockInvoke.getMockImplementation()!
+    mockInvoke.mockImplementation((channel: string, ...args: unknown[]) =>
+      channel === 'ftp:list'
+        ? Promise.resolve({ success: true, data: { path: args[1], entries: [] } })
+        : fallback(channel, ...args)
+    )
+    const user = userEvent.setup()
+    render(<ServerManagerDialog initial={toDraft(LOCKED)} onClose={vi.fn()} />)
+
+    await user.click(anonymousBox())
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    const payload = invokeCalls(mockInvoke, 'ftp:connect')[0][0] as FtpConnectPayload
+    expect(payload).toMatchObject({ user: 'anonymous', password: 'anonymous@' })
+    expect(payload).not.toHaveProperty('savedPasswordOf')
+  })
+
+  it('does not bring back a saved password that saving as anonymous removed', async () => {
+    // covers: Test-1315
+    saved = [LOCKED]
+    useServerStore.setState({ servers: [LOCKED] })
+    const fallback = mockInvoke.getMockImplementation()!
+    mockInvoke.mockImplementation((channel: string, ...args: unknown[]) => {
+      if (channel !== 'ftp:saveServer') return fallback(channel, ...args)
+      // main처럼 저장 결과를 목록에 반영한다: 이제 저장 비밀번호가 없다.
+      const row = savedFrom(args[0] as FtpServerInput)
+      saved = [row]
+      return Promise.resolve({ success: true, data: row })
+    })
+    const user = userEvent.setup()
+    render(<ServerManagerDialog initial={toDraft(LOCKED)} onClose={vi.fn()} />)
+
+    await user.click(anonymousBox())
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(useServerStore.getState().servers[0].hasPassword).toBe(false))
+
+    await user.click(anonymousBox())
+
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('me')
+    expect(screen.queryByRole('button', { name: 'Remove saved password' })).toBeNull()
+    expect(passwordField().placeholder).not.toBe('Saved password')
+  })
+
+  it('resets the box when the same server or the new server form is picked again', async () => {
+    // covers: Test-1391
+    saved = [LOCKED]
+    useServerStore.setState({ servers: [LOCKED] })
+    const user = userEvent.setup()
+    render(<ServerManagerDialog initial={toDraft(LOCKED)} onClose={vi.fn()} />)
+
+    await user.click(anonymousBox())
+    await user.click(within(screen.getByRole('listbox')).getByText('Home NAS'))
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('me')
+    expect(userField().disabled).toBe(false)
+    expect(passwordField().placeholder).toBe('Saved password')
+
+    await user.click(screen.getByRole('button', { name: 'New server' }))
+    await user.click(anonymousBox())
+    await user.type(userField(), 'bob')
+    await user.click(screen.getByRole('button', { name: 'New server' }))
+    expect(anonymousBox().checked).toBe(true)
+    expect(userField().value).toBe('')
+    expect(userField().disabled).toBe(true)
+  })
+
+  it('keeps the login typed in the host field when the box is clicked right after', async () => {
+    // covers: Test-1392
+    const user = userEvent.setup()
+    const { unmount } = render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    // 적고 떠나면 체크가 풀린다
+    await user.type(hostField(), 'bob@nas.local')
+    await user.tab()
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('bob')
+    unmount()
+
+    // 적고 곧바로 체크박스를 누르면: 호스트 칸을 떠나며 풀린 체크가 그 클릭으로 다시 켜지지 않는다
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    await user.type(hostField(), 'carol@nas.local')
+    await user.click(anonymousBox())
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('carol')
+    expect(userField().disabled).toBe(false)
+    expect(document.activeElement).toBe(userField())
+  })
+
+  it('splits an address with a login before Enter connects, so the box matches the login', async () => {
+    // covers: Test-1393
+    const fallback = mockInvoke.getMockImplementation()!
+    mockInvoke.mockImplementation((channel: string, ...args: unknown[]) =>
+      channel === 'ftp:connect'
+        ? Promise.resolve({ success: false, error: 'Authentication failed.' })
+        : fallback(channel, ...args)
+    )
+    const user = userEvent.setup()
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    expect(anonymousBox().checked).toBe(true)
+
+    await user.type(hostField(), 'bob:secret@files.example{Enter}')
+
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    const payload = invokeCalls(mockInvoke, 'ftp:connect')[0][0] as FtpConnectPayload
+    expect(payload).toMatchObject({ user: 'bob', password: 'secret' })
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('bob')
+  })
+
+  it('unchecks when a pasted anonymous address carries a password', () => {
+    // covers: Test-1394
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+
+    fireEvent.paste(hostField(), {
+      clipboardData: { getData: () => 'anonymous:me@example.com@nas.local' }
+    })
+
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('anonymous')
+    expect(passwordField().value).toBe('me@example.com')
+    expect(userField().disabled).toBe(false)
+    expect(passwordField().disabled).toBe(false)
+  })
+
+  it('opens unchecked for a server without a username that has a saved password', () => {
+    // covers: Test-1395
+    const LEGACY: FtpServer = { ...NAS, hasPassword: true }
+    saved = [LEGACY]
+    useServerStore.setState({ servers: [LEGACY] })
+    render(<ServerManagerDialog initial={toDraft(LEGACY)} onClose={vi.fn()} />)
+
+    expect(anonymousBox().checked).toBe(false)
+    expect(passwordField().disabled).toBe(false)
+    expect(passwordField().placeholder).toBe('Saved password')
+    expect(screen.getByRole('button', { name: 'Remove saved password' })).toBeTruthy()
+  })
+
+  it('connects and saves with the login in the address when Enter connects from the host field', async () => {
+    // covers: Test-1393
+    saved = [NAS, { ...NAS, id: 3, name: 'Me', host: 'me.local', username: 'me' }]
+    useServerStore.setState({ servers: saved })
+    const fallback = mockInvoke.getMockImplementation()!
+    mockInvoke.mockImplementation((channel: string, ...args: unknown[]) => {
+      if (channel === 'ftp:connect')
+        return Promise.resolve({ success: false, error: 'Authentication failed.' })
+      if (channel === 'ftp:saveServer') {
+        const row = savedFrom(args[0] as FtpServerInput)
+        saved = saved.map((x) => (x.id === row.id ? row : x))
+        return Promise.resolve({ success: true, data: row })
+      }
+      return fallback(channel, ...args)
+    })
+    const user = userEvent.setup()
+    // 새 서버: 사용자 칸의 me보다 주소의 bob이 이긴다(칸을 떠날 때와 같다)
+    const { unmount } = render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    await user.click(anonymousBox())
+    await user.type(userField(), 'me')
+    await user.type(hostField(), 'bob:secret@files.example{Enter}')
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    expect(invokeCalls(mockInvoke, 'ftp:connect')[0][0]).toMatchObject({
+      user: 'bob',
+      password: 'secret'
+    })
+    expect(useServerStore.getState().address).not.toContain('secret')
+    unmount()
+
+    // 저장된 서버: 나눈 계정으로 저장하고 연결한다
+    mockInvoke.mockClear()
+    render(<ServerManagerDialog initial={toDraft(saved[1])} onClose={vi.fn()} />)
+    await user.clear(hostField())
+    await user.type(hostField(), 'bob@me.local{Enter}')
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    expect(invokeCalls(mockInvoke, 'ftp:saveServer')[0][0]).toMatchObject({ username: 'bob' })
+    expect(invokeCalls(mockInvoke, 'ftp:connect')[0][0]).toMatchObject({ user: 'bob' })
+  })
+
+  it('does not split the address on an Enter that ends an IME composition', () => {
+    // covers: Test-1393
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    fireEvent.change(hostField(), { target: { value: 'bob@nas.local' } })
+    fireEvent.keyDown(hostField(), { key: 'Enter', isComposing: true })
+    expect(hostField().value).toBe('bob@nas.local')
+    expect(anonymousBox().checked).toBe(true)
+  })
+
+  it('follows a click with no press before it after a press that never clicked', () => {
+    // covers: Test-1392
+    vi.useFakeTimers()
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    // 체크박스에서 눌렀다가 밖에서 놓는다(클릭 없음)
+    fireEvent.pointerDown(anonymousBox())
+    fireEvent.pointerUp(document.body)
+    act(() => vi.runAllTimers())
+    fireEvent.paste(hostField(), { clipboardData: { getData: () => 'bob@nas.local' } })
+    expect(anonymousBox().checked).toBe(false)
+
+    // 보조 기술의 클릭(누름 없음)은 체크박스 값을 따른다
+    fireEvent.click(anonymousBox())
+    expect(anonymousBox().checked).toBe(true)
+    expect(userField().value).toBe('')
+  })
+
+  it('opens unchecked for a draft with a password but no username', () => {
+    // covers: Test-1395
+    render(
+      <ServerManagerDialog
+        initial={{ ...emptyDraft(), host: 'files.example', password: 'pw' }}
+        onClose={vi.fn()}
+      />
+    )
+    expect(anonymousBox().checked).toBe(false)
+    expect(passwordField().disabled).toBe(false)
+    expect(passwordField().value).toBe('pw')
+  })
+
+  it('keeps the login when a tap clicks the box well after its pointerup', () => {
+    // covers: Test-1392
+    vi.useFakeTimers()
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    fireEvent.change(hostField(), { target: { value: 'carol@nas.local' } })
+    act(() => hostField().focus())
+    // 앞서 클릭 없이 끝난 누름의 지우기가, 새 누름의 기록을 지우지 않는다
+    fireEvent.pointerDown(anonymousBox())
+    fireEvent.pointerUp(document.body)
+    act(() => vi.advanceTimersByTime(700))
+    // 터치: pointerup 뒤 한참 있다가 포커스 이동(호스트 칸 blur)과 클릭이 온다
+    fireEvent.pointerDown(anonymousBox())
+    fireEvent.pointerUp(anonymousBox())
+    act(() => vi.advanceTimersByTime(400))
+    act(() => hostField().blur())
+    fireEvent.click(anonymousBox())
+
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('carol')
+  })
+
+  it('follows the box for a keyboard toggle right after a press that never clicked', () => {
+    // covers: Test-1392
+    vi.useFakeTimers()
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    fireEvent.change(hostField(), { target: { value: 'carol@nas.local' } })
+    act(() => hostField().focus())
+    // 체크박스를 누르며 호스트 칸을 떠나 체크가 풀리고, 밖에서 놓아 클릭이 없다
+    fireEvent.pointerDown(anonymousBox())
+    act(() => anonymousBox().focus())
+    fireEvent.pointerUp(document.body)
+    expect(anonymousBox().checked).toBe(false)
+    act(() => vi.advanceTimersByTime(300))
+
+    // Space: keydown 뒤 클릭
+    fireEvent.keyDown(anonymousBox(), { key: ' ' })
+    fireEvent.click(anonymousBox())
+    expect(anonymousBox().checked).toBe(true)
   })
 })

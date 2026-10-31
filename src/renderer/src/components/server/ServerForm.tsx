@@ -1,13 +1,9 @@
-import { useId, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import { Eye, EyeOff, Folder, ShieldAlert } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useT } from '@renderer/i18n'
-import {
-  draftFields,
-  isValidPort,
-  parseServerAddress,
-  type ServerDraft
-} from '@renderer/lib/serverAddress'
+import { hasUser, isValidPort, splitHost, type ServerDraft } from '@renderer/lib/serverAddress'
 import { isValidMaxTransfers, type RecentPath } from '@shared/types/ftp'
 import { STROKE, inputCls } from './styles'
 
@@ -61,6 +57,9 @@ export function PasswordInput({
   )
 }
 
+/** How long a press on the anonymous box waits for its click (a touch tap clicks after pointerup). */
+const PRESS_CLICK_WINDOW_MS = 1000
+
 /** Host field. A pasted address (or one typed and left) is split into the other fields. */
 function HostInput({
   id,
@@ -77,12 +76,9 @@ function HostInput({
 }): React.JSX.Element {
   const t = useT()
   const apply = (text: string): boolean => {
-    if (!text.trim()) return false
-    const parsed = parseServerAddress(text)
-    // 호스트 하나뿐이면 나눌 게 없다. 그대로 두어야 'NAS.local' 같은 저장된 표기가 소문자로 바뀌지 않는다.
-    if (Object.keys(parsed).length === 1) return false
-    onPatch(draftFields(parsed))
-    return true
+    const fields = splitHost(text)
+    if (fields) onPatch(fields)
+    return !!fields
   }
   return (
     <input
@@ -99,6 +95,10 @@ function HostInput({
         if (apply(e.clipboardData.getData('text'))) e.preventDefault()
       }}
       onBlur={() => apply(value)}
+      // Enter로 연결할 때 연결은 나눈 주소로 한다(handleConnect). 폼도 나눠 익명 체크가 그 계정과 맞게 한다(AN12).
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) apply(value)
+      }}
     />
   )
 }
@@ -189,7 +189,8 @@ export function ServerForm({
   disabled,
   autoFocusHost,
   passwordWarning,
-  passwordHint
+  passwordHint,
+  hasSavedPassword = false
 }: {
   draft: ServerDraft
   onPatch: (fields: Partial<ServerDraft>) => void
@@ -200,9 +201,67 @@ export function ServerForm({
   passwordWarning?: string
   /** Under the password field: what to do before this draft can be saved (E16). */
   passwordHint?: string
+  /** Whether the saved row still has a saved password, so unchecking anonymous may restore it (AN8). */
+  hasSavedPassword?: boolean
 }): React.JSX.Element {
   const id = useId()
   const t = useT()
+  // 익명 체크는 폼의 상태다. 사용자 이름이 비었거나 anonymous면 지금도 익명으로 접속하니 체크된 채 연다. 비밀번호가
+  // 있으면 그것으로 접속하므로 체크하지 않는다(AN2).
+  const [anonymous, setAnonymous] = useState(
+    () => !hasUser(draft.username) && !draft.savedPassword && !draft.password
+  )
+  // 체크하기 직전의 계정. 체크를 풀면 되돌린다(AN4).
+  const beforeAnonymous =
+    useRef<Pick<ServerDraft, 'username' | 'password' | 'savedPassword'>>(undefined)
+  const userRef = useRef<HTMLInputElement>(null)
+  const toggleAnonymous = (on: boolean): void => {
+    if (on) {
+      const { username, password, savedPassword } = draft
+      beforeAnonymous.current = { username, password, savedPassword }
+      setAnonymous(true)
+      onPatch({ username: '', password: '', savedPassword: false })
+      return
+    }
+    // 칸이 켜진 뒤에 포커스를 줘야 하므로 먼저 그린다.
+    flushSync(() => {
+      setAnonymous(false)
+      // 체크한 채 저장해 저장 비밀번호가 지워졌으면 그 표시는 되돌리지 않는다(AN8).
+      const before = beforeAnonymous.current
+      if (before) onPatch({ ...before, savedPassword: before.savedPassword && hasSavedPassword })
+    })
+    userRef.current?.focus()
+  }
+  // 체크박스를 누르기 시작할 때의 체크. 그 누름으로 호스트 칸을 떠나며 체크가 풀려도(AN5) 사용자가 뜻한 것은 이
+  // 값을 뒤집는 것이다(AN11). 누름 없이 온 클릭(키보드·보조 기술)은 쓰지 않는다.
+  const pressedFrom = useRef<{ checked: boolean } | null>(null)
+  const press = (): void => {
+    const mine = { checked: anonymous }
+    pressedFrom.current = mine
+    // 클릭으로 이어지지 않은 누름(끌어 놓기, 우클릭, 취소)의 기록은 남기지 않는다. 터치의 클릭은 pointerup 뒤 따로
+    // 오므로 여유를 두고 지운다. 그사이 새로 누른 기록은 지우지 않는다.
+    const done = new AbortController()
+    const clear = (): void => {
+      done.abort()
+      setTimeout(() => {
+        if (pressedFrom.current === mine) pressedFrom.current = null
+      }, PRESS_CLICK_WINDOW_MS)
+    }
+    window.addEventListener('pointerup', clear, { signal: done.signal })
+    window.addEventListener('pointercancel', clear, { signal: done.signal })
+  }
+  const onAnonymousChange = (checked: boolean): void => {
+    const on = pressedFrom.current === null ? checked : !pressedFrom.current.checked
+    pressedFrom.current = null
+    if (on !== anonymous) toggleAnonymous(on)
+    else if (!on) userRef.current?.focus()
+  }
+  // 주소에 계정이나 비밀번호를 적어 붙여넣으면 익명이 아니다(AN5).
+  const patchHost = (fields: Partial<ServerDraft>): void => {
+    if ((fields.username !== undefined && hasUser(fields.username)) || fields.password)
+      setAnonymous(false)
+    onPatch(fields)
+  }
   const portInvalid = draft.port.trim() !== '' && !isValidPort(Number(draft.port))
   const maxTransfersInvalid =
     draft.maxTransfers.trim() !== '' && !isValidMaxTransfers(Number(draft.maxTransfers))
@@ -242,7 +301,7 @@ export function ServerForm({
               value={draft.host}
               disabled={disabled}
               autoFocus={autoFocusHost}
-              onPatch={onPatch}
+              onPatch={patchHost}
             />
           )}
         </div>
@@ -271,14 +330,30 @@ export function ServerForm({
         </div>
       </div>
       <div className="flex flex-col gap-1.5">
+        <label
+          className="inline-flex cursor-pointer select-none items-center gap-2 self-start text-[13px] text-[var(--tx)]"
+          onPointerDown={press}
+          // 키보드로 바꾸는 클릭은 앞선 누름의 기록을 쓰지 않는다
+          onKeyDown={() => (pressedFrom.current = null)}
+        >
+          <input
+            type="checkbox"
+            checked={anonymous}
+            disabled={disabled}
+            onChange={(e) => onAnonymousChange(e.target.checked)}
+            className="h-4 w-4 accent-[var(--ac)]"
+          />
+          {t('connect.anonymous')}
+        </label>
         <div className="grid grid-cols-2 gap-[14px]">
           {row(
             t('connect.username'),
             `${id}-user`,
             <input
+              ref={userRef}
               id={`${id}-user`}
               value={draft.username}
-              disabled={disabled}
+              disabled={disabled || anonymous}
               spellCheck={false}
               autoComplete="off"
               placeholder="anonymous"
@@ -294,7 +369,7 @@ export function ServerForm({
               <PasswordInput
                 id={`${id}-pw`}
                 value={draft.password}
-                disabled={disabled}
+                disabled={disabled || anonymous}
                 placeholder={draft.savedPassword ? t('connect.savedPassword') : undefined}
                 onChange={(password) => onPatch({ password })}
                 className="w-full"

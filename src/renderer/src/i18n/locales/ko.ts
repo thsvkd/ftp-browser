@@ -32,6 +32,7 @@ export const ko = {
   'connect.port': '포트',
   'connect.username': '사용자 이름',
   'connect.password': '비밀번호',
+  'connect.anonymous': '익명으로 로그인',
   'connect.showPassword': '비밀번호 표시',
   'connect.hidePassword': '비밀번호 숨기기',
   'connect.savedPassword': '저장된 비밀번호',

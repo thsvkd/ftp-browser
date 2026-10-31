@@ -32,6 +32,7 @@ export const zhTW = {
   'connect.port': '連接埠',
   'connect.username': '使用者名稱',
   'connect.password': '密碼',
+  'connect.anonymous': '匿名登入',
   'connect.showPassword': '顯示密碼',
   'connect.hidePassword': '隱藏密碼',
   'connect.savedPassword': '已儲存的密碼',

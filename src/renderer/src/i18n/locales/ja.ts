@@ -32,6 +32,7 @@ export const ja = {
   'connect.port': 'ポート',
   'connect.username': 'ユーザー名',
   'connect.password': 'パスワード',
+  'connect.anonymous': '匿名でログイン',
   'connect.showPassword': 'パスワードを表示',
   'connect.hidePassword': 'パスワードを非表示',
   'connect.savedPassword': '保存済みのパスワード',

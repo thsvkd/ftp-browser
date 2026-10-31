@@ -14,6 +14,7 @@ import {
   sameFields,
   serverAddress,
   serverLabel,
+  splitHost,
   toDraft,
   type ServerDraft
 } from '@renderer/lib/serverAddress'
@@ -57,6 +58,8 @@ export function ServerManagerDialog({
 
   const [query, setQuery] = useState('')
   const [selId, setSelId] = useState<number | 'new'>(initial.id ?? 'new')
+  // 서버를 다시 고르면(같은 서버·새 서버라도) 폼을 새로 연다: 폼만 아는 상태(익명 체크)도 초안과 맞춘다(AN10).
+  const [formRev, setFormRev] = useState(0)
   const [draft, setDraft] = useState<ServerDraft>(initial)
   const [recent, setRecent] = useState<RecentPath[]>([])
   const [saveError, setSaveError] = useState('')
@@ -178,6 +181,7 @@ export function ServerManagerDialog({
   const select = (s: FtpServer): void => {
     if (connecting) return
     setSelId(s.id!)
+    setFormRev((n) => n + 1)
     setDraft(toDraft(s))
     setSaveError('')
     clearError()
@@ -185,6 +189,7 @@ export function ServerManagerDialog({
   const addNew = (): void => {
     if (connecting) return
     setSelId('new')
+    setFormRev((n) => n + 1)
     setDraft(emptyDraft())
     setSaveError('')
     clearError()
@@ -203,7 +208,12 @@ export function ServerManagerDialog({
   const handleConnect = async (): Promise<void> => {
     if (!draft.host.trim() || connecting) return
     setSaveError('')
-    const { server } = resolveDraft(draft)
+    // 호스트 칸에 남은 주소(Enter로 곧바로 연결)는 칸을 떠날 때처럼 나눠 쓴다: 폼에 보이는 계정으로 연결·저장하고
+    // 툴바 주소에 비밀번호를 남기지 않는다(AN12).
+    const split = splitHost(draft.host)
+    const current = split ? { ...draft, ...split } : draft
+    if (split) setDraft(current)
+    const { server } = resolveDraft(current)
     if (!isValidPort(server.port)) {
       setSaveError(t('servers.invalidPort'))
       return
@@ -212,16 +222,16 @@ export function ServerManagerDialog({
       setSaveError(t('servers.invalidMaxTransfers'))
       return
     }
-    let target = draft
-    if (selected && dirty) {
+    let target = current
+    if (selected && !sameFields(current, selected)) {
       // 연결이 main에서 (host, port)로 upsert하므로, 고친 서버는 먼저 id로 저장해야
       // 같은 서버가 두 줄이 되거나 다른 저장된 서버를 덮어쓰지 않는다.
-      const result = await save(draft)
+      const result = await save(current)
       if (!result.success) {
         setSaveError(saveErrorText(result))
         return
       }
-      target = toDraft(result.data, draft.path)
+      target = toDraft(result.data, current.path)
       setDraft(target)
     } else if (!selected && findSaved(servers, server.host, server.port)) {
       // 새 서버가 저장된 서버의 주소면 그 서버를 조용히 덮어쓰지 않는다.
@@ -401,7 +411,7 @@ export function ServerManagerDialog({
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               <ServerForm
-                key={selId}
+                key={`${selId}:${formRev}`}
                 draft={draft}
                 onPatch={patch}
                 recent={recent}
@@ -409,6 +419,7 @@ export function ServerManagerDialog({
                 autoFocusHost={selId === 'new' && initial.id === undefined}
                 passwordWarning={passwordWarning}
                 passwordHint={passwordHint}
+                hasSavedPassword={selected?.hasPassword ?? false}
               />
             </div>
             {error && (
