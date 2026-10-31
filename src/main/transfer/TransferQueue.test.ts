@@ -2964,6 +2964,8 @@ describe('TransferQueue', () => {
 
       enqueueBig()
       await waitForIo(() => expect(server.failures.size).toBe(0))
+      // 구간의 재시도 타이머는 남은 쓰기를 마친 뒤에야 걸린다. 느린 디스크에서 시계를 먼저 넘기지 않게 기다린다
+      await waitForIo(() => expect(big().retryCount).toBe(1))
       await vi.advanceTimersByTimeAsync(2000)
       await waitForIo(() => expect(big().status).toBe('completed'))
 
