@@ -3,13 +3,7 @@ import { flushSync } from 'react-dom'
 import { Eye, EyeOff, Folder, ShieldAlert } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useT } from '@renderer/i18n'
-import {
-  draftFields,
-  hasUser,
-  isValidPort,
-  parseServerAddress,
-  type ServerDraft
-} from '@renderer/lib/serverAddress'
+import { hasUser, isValidPort, splitHost, type ServerDraft } from '@renderer/lib/serverAddress'
 import { isValidMaxTransfers, type RecentPath } from '@shared/types/ftp'
 import { STROKE, inputCls } from './styles'
 
@@ -79,12 +73,9 @@ function HostInput({
 }): React.JSX.Element {
   const t = useT()
   const apply = (text: string): boolean => {
-    if (!text.trim()) return false
-    const parsed = parseServerAddress(text)
-    // 호스트 하나뿐이면 나눌 게 없다. 그대로 두어야 'NAS.local' 같은 저장된 표기가 소문자로 바뀌지 않는다.
-    if (Object.keys(parsed).length === 1) return false
-    onPatch(draftFields(parsed))
-    return true
+    const fields = splitHost(text)
+    if (fields) onPatch(fields)
+    return !!fields
   }
   return (
     <input
@@ -101,7 +92,7 @@ function HostInput({
         if (apply(e.clipboardData.getData('text'))) e.preventDefault()
       }}
       onBlur={() => apply(value)}
-      // Enter로 연결하기 전에 주소를 나눠, 익명 체크가 연결할 계정과 맞게 한다(AN12).
+      // Enter로 연결할 때 연결은 나눈 주소로 한다(handleConnect). 폼도 나눠 익명 체크가 그 계정과 맞게 한다(AN12).
       onKeyDown={(e) => {
         if (e.key === 'Enter' && !e.nativeEvent.isComposing) apply(value)
       }}
@@ -239,8 +230,19 @@ export function ServerForm({
     userRef.current?.focus()
   }
   // 체크박스를 누르기 시작할 때의 체크. 그 누름으로 호스트 칸을 떠나며 체크가 풀려도(AN5) 사용자가 뜻한 것은 이
-  // 값을 뒤집는 것이다(AN11). 키보드로 바꾸면 쓰지 않는다.
+  // 값을 뒤집는 것이다(AN11). 누름 없이 온 클릭(키보드·보조 기술)은 쓰지 않는다.
   const pressedFrom = useRef<boolean | null>(null)
+  const press = (): void => {
+    pressedFrom.current = anonymous
+    // 클릭으로 이어지지 않은 누름(끌어 놓기, 우클릭, 취소)의 기록은 남기지 않는다. 클릭은 pointerup과 같은 작업에서 온다.
+    const done = new AbortController()
+    const clear = (): void => {
+      done.abort()
+      setTimeout(() => (pressedFrom.current = null))
+    }
+    window.addEventListener('pointerup', clear, { signal: done.signal })
+    window.addEventListener('pointercancel', clear, { signal: done.signal })
+  }
   const onAnonymousChange = (checked: boolean): void => {
     const on = pressedFrom.current === null ? checked : !pressedFrom.current
     pressedFrom.current = null
@@ -323,8 +325,7 @@ export function ServerForm({
       <div className="flex flex-col gap-1.5">
         <label
           className="inline-flex cursor-pointer select-none items-center gap-2 self-start text-[13px] text-[var(--tx)]"
-          onPointerDown={() => (pressedFrom.current = anonymous)}
-          onKeyDown={() => (pressedFrom.current = null)}
+          onPointerDown={press}
         >
           <input
             type="checkbox"

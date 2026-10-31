@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest'
 import { act, render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useServerStore } from '@renderer/stores/useServerStore'
@@ -665,5 +665,86 @@ describe('ServerManagerDialog — anonymous login', () => {
     expect(passwordField().disabled).toBe(false)
     expect(passwordField().placeholder).toBe('Saved password')
     expect(screen.getByRole('button', { name: 'Remove saved password' })).toBeTruthy()
+  })
+
+  it('connects and saves with the login in the address when Enter connects from the host field', async () => {
+    // covers: Test-1393
+    saved = [NAS, { ...NAS, id: 3, name: 'Me', host: 'me.local', username: 'me' }]
+    useServerStore.setState({ servers: saved })
+    const fallback = mockInvoke.getMockImplementation()!
+    mockInvoke.mockImplementation((channel: string, ...args: unknown[]) => {
+      if (channel === 'ftp:connect')
+        return Promise.resolve({ success: false, error: 'Authentication failed.' })
+      if (channel === 'ftp:saveServer') {
+        const row = savedFrom(args[0] as FtpServerInput)
+        saved = saved.map((x) => (x.id === row.id ? row : x))
+        return Promise.resolve({ success: true, data: row })
+      }
+      return fallback(channel, ...args)
+    })
+    const user = userEvent.setup()
+    // 새 서버: 사용자 칸의 me보다 주소의 bob이 이긴다(칸을 떠날 때와 같다)
+    const { unmount } = render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    await user.click(anonymousBox())
+    await user.type(userField(), 'me')
+    await user.type(hostField(), 'bob:secret@files.example{Enter}')
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    expect(invokeCalls(mockInvoke, 'ftp:connect')[0][0]).toMatchObject({
+      user: 'bob',
+      password: 'secret'
+    })
+    expect(useServerStore.getState().address).not.toContain('secret')
+    unmount()
+
+    // 저장된 서버: 나눈 계정으로 저장하고 연결한다
+    mockInvoke.mockClear()
+    render(<ServerManagerDialog initial={toDraft(saved[1])} onClose={vi.fn()} />)
+    await user.clear(hostField())
+    await user.type(hostField(), 'bob@me.local{Enter}')
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    expect(invokeCalls(mockInvoke, 'ftp:saveServer')[0][0]).toMatchObject({ username: 'bob' })
+    expect(invokeCalls(mockInvoke, 'ftp:connect')[0][0]).toMatchObject({ user: 'bob' })
+  })
+
+  it('does not split the address on an Enter that ends an IME composition', () => {
+    // covers: Test-1393
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    fireEvent.change(hostField(), { target: { value: 'bob@nas.local' } })
+    fireEvent.keyDown(hostField(), { key: 'Enter', isComposing: true })
+    expect(hostField().value).toBe('bob@nas.local')
+    expect(anonymousBox().checked).toBe(true)
+  })
+
+  it('follows a click with no press before it after a press that never clicked', () => {
+    // covers: Test-1392
+    vi.useFakeTimers()
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    // 체크박스에서 눌렀다가 밖에서 놓는다(클릭 없음)
+    fireEvent.pointerDown(anonymousBox())
+    fireEvent.pointerUp(document.body)
+    act(() => vi.runAllTimers())
+    fireEvent.paste(hostField(), { clipboardData: { getData: () => 'bob@nas.local' } })
+    expect(anonymousBox().checked).toBe(false)
+
+    // 보조 기술의 클릭(누름 없음)은 체크박스 값을 따른다
+    fireEvent.click(anonymousBox())
+    expect(anonymousBox().checked).toBe(true)
+    expect(userField().value).toBe('')
+  })
+
+  it('opens unchecked for a draft with a password but no username', () => {
+    // covers: Test-1395
+    render(
+      <ServerManagerDialog
+        initial={{ ...emptyDraft(), host: 'files.example', password: 'pw' }}
+        onClose={vi.fn()}
+      />
+    )
+    expect(anonymousBox().checked).toBe(false)
+    expect(passwordField().disabled).toBe(false)
+    expect(passwordField().value).toBe('pw')
   })
 })

@@ -138,6 +138,17 @@ export const toDraft = (s: FtpServer, path = ''): ServerDraft => ({
   path
 })
 
+/**
+ * The draft fields of an address typed or pasted into the host field, or null when it is only a
+ * host: then there is nothing to split, and keeping it as typed keeps a saved spelling like
+ * 'NAS.local' from turning lowercase.
+ */
+export function splitHost(text: string): Partial<ServerDraft> | null {
+  if (!text.trim()) return null
+  const parsed = parseServerAddress(text)
+  return Object.keys(parsed).length === 1 ? null : draftFields(parsed)
+}
+
 /** The parts of a pasted address as draft fields. */
 export function draftFields(p: ParsedServerAddress): Partial<ServerDraft> {
   return {

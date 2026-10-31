@@ -14,6 +14,7 @@ import {
   sameFields,
   serverAddress,
   serverLabel,
+  splitHost,
   toDraft,
   type ServerDraft
 } from '@renderer/lib/serverAddress'
@@ -207,7 +208,12 @@ export function ServerManagerDialog({
   const handleConnect = async (): Promise<void> => {
     if (!draft.host.trim() || connecting) return
     setSaveError('')
-    const { server } = resolveDraft(draft)
+    // 호스트 칸에 남은 주소(Enter로 곧바로 연결)는 칸을 떠날 때처럼 나눠 쓴다: 폼에 보이는 계정으로 연결·저장하고
+    // 툴바 주소에 비밀번호를 남기지 않는다(AN12).
+    const split = splitHost(draft.host)
+    const current = split ? { ...draft, ...split } : draft
+    if (split) setDraft(current)
+    const { server } = resolveDraft(current)
     if (!isValidPort(server.port)) {
       setSaveError(t('servers.invalidPort'))
       return
@@ -216,16 +222,16 @@ export function ServerManagerDialog({
       setSaveError(t('servers.invalidMaxTransfers'))
       return
     }
-    let target = draft
-    if (selected && dirty) {
+    let target = current
+    if (selected && !sameFields(current, selected)) {
       // 연결이 main에서 (host, port)로 upsert하므로, 고친 서버는 먼저 id로 저장해야
       // 같은 서버가 두 줄이 되거나 다른 저장된 서버를 덮어쓰지 않는다.
-      const result = await save(draft)
+      const result = await save(current)
       if (!result.success) {
         setSaveError(saveErrorText(result))
         return
       }
-      target = toDraft(result.data, draft.path)
+      target = toDraft(result.data, current.path)
       setDraft(target)
     } else if (!selected && findSaved(servers, server.host, server.port)) {
       // 새 서버가 저장된 서버의 주소면 그 서버를 조용히 덮어쓰지 않는다.
