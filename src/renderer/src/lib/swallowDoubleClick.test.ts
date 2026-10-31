@@ -24,7 +24,8 @@ afterEach(() => {
 /** Chromium이 보내는 한 번의 누름: pointerdown, mousedown, pointerup, mouseup, click(+dblclick). */
 function press(detail: number, init: Partial<MouseEventInit> = {}): { focusKept: boolean } {
   const at = { ...AT, button: 0, ...init }
-  fireEvent.pointerDown(el, at)
+  // pointerdown의 기본 동작은 막지 않는다: 막으면 Chromium이 mousedown을 보내지 않아 새 누름·드래그를 잃는다
+  expect(fireEvent.pointerDown(el, at)).toBe(true)
   const focusKept = !fireEvent.mouseDown(el, { ...at, detail })
   fireEvent.pointerUp(el, at)
   fireEvent.mouseUp(el, { ...at, detail })
@@ -36,6 +37,8 @@ function press(detail: number, init: Partial<MouseEventInit> = {}): { focusKept:
 describe('swallowRestOfDoubleClick', () => {
   it('swallows the second and third press near the first click, even a slow one', () => {
     // covers: Test-1397
+    // 느리게 맞춘 더블클릭 설정(Windows 최대 900ms)과 세 번 클릭을 덮는 기다림(C2)
+    expect(SWALLOW_WAIT_MS).toBe(1500)
     swallowRestOfDoubleClick({ x: 100, y: 40 })
     vi.advanceTimersByTime(SWALLOW_WAIT_MS - 1)
 
