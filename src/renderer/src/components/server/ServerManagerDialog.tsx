@@ -57,6 +57,8 @@ export function ServerManagerDialog({
 
   const [query, setQuery] = useState('')
   const [selId, setSelId] = useState<number | 'new'>(initial.id ?? 'new')
+  // 서버를 다시 고르면(같은 서버·새 서버라도) 폼을 새로 연다: 폼만 아는 상태(익명 체크)도 초안과 맞춘다(AN10).
+  const [formRev, setFormRev] = useState(0)
   const [draft, setDraft] = useState<ServerDraft>(initial)
   const [recent, setRecent] = useState<RecentPath[]>([])
   const [saveError, setSaveError] = useState('')
@@ -178,6 +180,7 @@ export function ServerManagerDialog({
   const select = (s: FtpServer): void => {
     if (connecting) return
     setSelId(s.id!)
+    setFormRev((n) => n + 1)
     setDraft(toDraft(s))
     setSaveError('')
     clearError()
@@ -185,6 +188,7 @@ export function ServerManagerDialog({
   const addNew = (): void => {
     if (connecting) return
     setSelId('new')
+    setFormRev((n) => n + 1)
     setDraft(emptyDraft())
     setSaveError('')
     clearError()
@@ -401,7 +405,7 @@ export function ServerManagerDialog({
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               <ServerForm
-                key={selId}
+                key={`${selId}:${formRev}`}
                 draft={draft}
                 onPatch={patch}
                 recent={recent}

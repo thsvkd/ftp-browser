@@ -573,4 +573,97 @@ describe('ServerManagerDialog — anonymous login', () => {
     expect(screen.queryByRole('button', { name: 'Remove saved password' })).toBeNull()
     expect(passwordField().placeholder).not.toBe('Saved password')
   })
+
+  it('resets the box when the same server or the new server form is picked again', async () => {
+    // covers: Test-1391
+    saved = [LOCKED]
+    useServerStore.setState({ servers: [LOCKED] })
+    const user = userEvent.setup()
+    render(<ServerManagerDialog initial={toDraft(LOCKED)} onClose={vi.fn()} />)
+
+    await user.click(anonymousBox())
+    await user.click(within(screen.getByRole('listbox')).getByText('Home NAS'))
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('me')
+    expect(userField().disabled).toBe(false)
+    expect(passwordField().placeholder).toBe('Saved password')
+
+    await user.click(screen.getByRole('button', { name: 'New server' }))
+    await user.click(anonymousBox())
+    await user.type(userField(), 'bob')
+    await user.click(screen.getByRole('button', { name: 'New server' }))
+    expect(anonymousBox().checked).toBe(true)
+    expect(userField().value).toBe('')
+    expect(userField().disabled).toBe(true)
+  })
+
+  it('keeps the login typed in the host field when the box is clicked right after', async () => {
+    // covers: Test-1392
+    const user = userEvent.setup()
+    const { unmount } = render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    // 적고 떠나면 체크가 풀린다
+    await user.type(hostField(), 'bob@nas.local')
+    await user.tab()
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('bob')
+    unmount()
+
+    // 적고 곧바로 체크박스를 누르면: 호스트 칸을 떠나며 풀린 체크가 그 클릭으로 다시 켜지지 않는다
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    await user.type(hostField(), 'carol@nas.local')
+    await user.click(anonymousBox())
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('carol')
+    expect(userField().disabled).toBe(false)
+    expect(document.activeElement).toBe(userField())
+  })
+
+  it('splits an address with a login before Enter connects, so the box matches the login', async () => {
+    // covers: Test-1393
+    const fallback = mockInvoke.getMockImplementation()!
+    mockInvoke.mockImplementation((channel: string, ...args: unknown[]) =>
+      channel === 'ftp:connect'
+        ? Promise.resolve({ success: false, error: 'Authentication failed.' })
+        : fallback(channel, ...args)
+    )
+    const user = userEvent.setup()
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    expect(anonymousBox().checked).toBe(true)
+
+    await user.type(hostField(), 'bob:secret@files.example{Enter}')
+
+    await waitFor(() => expect(invokeCalls(mockInvoke, 'ftp:connect')).toHaveLength(1))
+    const payload = invokeCalls(mockInvoke, 'ftp:connect')[0][0] as FtpConnectPayload
+    expect(payload).toMatchObject({ user: 'bob', password: 'secret' })
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('bob')
+  })
+
+  it('unchecks when a pasted anonymous address carries a password', () => {
+    // covers: Test-1394
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+
+    fireEvent.paste(hostField(), {
+      clipboardData: { getData: () => 'anonymous:me@example.com@nas.local' }
+    })
+
+    expect(anonymousBox().checked).toBe(false)
+    expect(userField().value).toBe('anonymous')
+    expect(passwordField().value).toBe('me@example.com')
+    expect(userField().disabled).toBe(false)
+    expect(passwordField().disabled).toBe(false)
+  })
+
+  it('opens unchecked for a server without a username that has a saved password', () => {
+    // covers: Test-1395
+    const LEGACY: FtpServer = { ...NAS, hasPassword: true }
+    saved = [LEGACY]
+    useServerStore.setState({ servers: [LEGACY] })
+    render(<ServerManagerDialog initial={toDraft(LEGACY)} onClose={vi.fn()} />)
+
+    expect(anonymousBox().checked).toBe(false)
+    expect(passwordField().disabled).toBe(false)
+    expect(passwordField().placeholder).toBe('Saved password')
+    expect(screen.getByRole('button', { name: 'Remove saved password' })).toBeTruthy()
+  })
 })

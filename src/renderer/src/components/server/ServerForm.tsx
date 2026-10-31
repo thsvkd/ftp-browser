@@ -101,6 +101,10 @@ function HostInput({
         if (apply(e.clipboardData.getData('text'))) e.preventDefault()
       }}
       onBlur={() => apply(value)}
+      // Enter로 연결하기 전에 주소를 나눠, 익명 체크가 연결할 계정과 맞게 한다(AN12).
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) apply(value)
+      }}
     />
   )
 }
@@ -208,8 +212,11 @@ export function ServerForm({
 }): React.JSX.Element {
   const id = useId()
   const t = useT()
-  // 익명 체크는 폼의 상태다. 사용자 이름이 비었거나 anonymous면 지금도 익명으로 접속하니 체크된 채 연다(AN2).
-  const [anonymous, setAnonymous] = useState(() => !hasUser(draft.username))
+  // 익명 체크는 폼의 상태다. 사용자 이름이 비었거나 anonymous면 지금도 익명으로 접속하니 체크된 채 연다. 비밀번호가
+  // 있으면 그것으로 접속하므로 체크하지 않는다(AN2).
+  const [anonymous, setAnonymous] = useState(
+    () => !hasUser(draft.username) && !draft.savedPassword && !draft.password
+  )
   // 체크하기 직전의 계정. 체크를 풀면 되돌린다(AN4).
   const beforeAnonymous =
     useRef<Pick<ServerDraft, 'username' | 'password' | 'savedPassword'>>(undefined)
@@ -231,9 +238,19 @@ export function ServerForm({
     })
     userRef.current?.focus()
   }
-  // 주소에 계정을 적어 붙여넣으면 익명이 아니다(AN5).
+  // 체크박스를 누르기 시작할 때의 체크. 그 누름으로 호스트 칸을 떠나며 체크가 풀려도(AN5) 사용자가 뜻한 것은 이
+  // 값을 뒤집는 것이다(AN11). 키보드로 바꾸면 쓰지 않는다.
+  const pressedFrom = useRef<boolean | null>(null)
+  const onAnonymousChange = (checked: boolean): void => {
+    const on = pressedFrom.current === null ? checked : !pressedFrom.current
+    pressedFrom.current = null
+    if (on !== anonymous) toggleAnonymous(on)
+    else if (!on) userRef.current?.focus()
+  }
+  // 주소에 계정이나 비밀번호를 적어 붙여넣으면 익명이 아니다(AN5).
   const patchHost = (fields: Partial<ServerDraft>): void => {
-    if (fields.username !== undefined && hasUser(fields.username)) setAnonymous(false)
+    if ((fields.username !== undefined && hasUser(fields.username)) || fields.password)
+      setAnonymous(false)
     onPatch(fields)
   }
   const portInvalid = draft.port.trim() !== '' && !isValidPort(Number(draft.port))
@@ -304,12 +321,16 @@ export function ServerForm({
         </div>
       </div>
       <div className="flex flex-col gap-1.5">
-        <label className="inline-flex cursor-pointer select-none items-center gap-2 self-start text-[13px] text-[var(--tx)]">
+        <label
+          className="inline-flex cursor-pointer select-none items-center gap-2 self-start text-[13px] text-[var(--tx)]"
+          onPointerDown={() => (pressedFrom.current = anonymous)}
+          onKeyDown={() => (pressedFrom.current = null)}
+        >
           <input
             type="checkbox"
             checked={anonymous}
             disabled={disabled}
-            onChange={(e) => toggleAnonymous(e.target.checked)}
+            onChange={(e) => onAnonymousChange(e.target.checked)}
             className="h-4 w-4 accent-[var(--ac)]"
           />
           {t('connect.anonymous')}
