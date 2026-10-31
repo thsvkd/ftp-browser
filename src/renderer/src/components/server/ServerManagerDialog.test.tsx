@@ -771,4 +771,26 @@ describe('ServerManagerDialog — anonymous login', () => {
     expect(anonymousBox().checked).toBe(false)
     expect(userField().value).toBe('carol')
   })
+
+  it('follows the box for a keyboard toggle right after a press that never clicked', () => {
+    // covers: Test-1392
+    vi.useFakeTimers()
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    render(<ServerManagerDialog initial={emptyDraft()} onClose={vi.fn()} />)
+    fireEvent.change(hostField(), { target: { value: 'carol@nas.local' } })
+    act(() => hostField().focus())
+    // 체크박스를 누르며 호스트 칸을 떠나 체크가 풀리고, 밖에서 놓아 클릭이 없다
+    fireEvent.pointerDown(anonymousBox())
+    act(() => anonymousBox().focus())
+    fireEvent.pointerUp(document.body)
+    expect(anonymousBox().checked).toBe(false)
+    act(() => vi.advanceTimersByTime(300))
+
+    // Space: keydown 뒤 클릭
+    fireEvent.keyDown(anonymousBox(), { key: ' ' })
+    fireEvent.click(anonymousBox())
+    expect(anonymousBox().checked).toBe(true)
+  })
 })

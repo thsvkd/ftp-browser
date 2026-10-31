@@ -333,6 +333,8 @@ export function ServerForm({
         <label
           className="inline-flex cursor-pointer select-none items-center gap-2 self-start text-[13px] text-[var(--tx)]"
           onPointerDown={press}
+          // 키보드로 바꾸는 클릭은 앞선 누름의 기록을 쓰지 않는다
+          onKeyDown={() => (pressedFrom.current = null)}
         >
           <input
             type="checkbox"
